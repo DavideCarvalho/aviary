@@ -8,9 +8,9 @@ import { Callout } from 'fumadocs-ui/components/callout';
 
 **Context** is the connective tissue of the aviary. A single `AsyncLocalStorage` store carries identity (user, tenant) and correlation (traceId) across the entire request — and every other Aviary library reads from it so you wire it once.
 
-<Callout title="Aviary call sign: Swift">
-Part of the **Aviary** ecosystem — every library reads from a shared [Context](/docs/context),
-so adopting one makes the next one cheaper.
+<Callout title="Part of the Aviary ecosystem">
+Context is the connective tissue of the stack — every other Aviary library reads from
+it, so wiring it once pays off across the whole ecosystem.
 </Callout>
 
 ## Install

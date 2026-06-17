@@ -117,8 +117,15 @@ function normalizeIndexTitle(dir, src) {
 function transformRootMeta(file, src) {
   const meta = JSON.parse(readFileSync(file, 'utf8'));
   // Keep the source's page ordering etc., but make it a root tab and force the
-  // library's own name + icon (sources usually ship title "Documentation").
-  const next = { ...meta, root: true, title: src.name, icon: src.icon };
+  // library's own name + icon + description (sources ship a generic title and
+  // no description, so the sidebar tab dropdown would otherwise be bare).
+  const next = {
+    ...meta,
+    root: true,
+    title: src.name,
+    description: src.description ?? meta.description,
+    icon: src.icon,
+  };
   writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`);
 }
 

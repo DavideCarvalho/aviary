@@ -12,6 +12,7 @@ export const sources = [
   {
     slug: 'codegen',
     name: 'Codegen',
+    description: "Typed client artifacts with pluggable validators (zod/valibot/arktype).",
     icon: 'Braces',
     repo: 'DavideCarvalho/nestjs-codegen',
     ref: 'main',
@@ -22,6 +23,7 @@ export const sources = [
   {
     slug: 'durable',
     name: 'Durable',
+    description: "Durable, resumable cross-app workflows for NestJS.",
     icon: 'Workflow',
     repo: 'DavideCarvalho/nestjs-durable',
     ref: 'main',
@@ -32,6 +34,7 @@ export const sources = [
   {
     slug: 'filter',
     name: 'Filter',
+    description: "A query filter language with ORM adapters and a typed client.",
     icon: 'Filter',
     repo: 'DavideCarvalho/nestjs-filter',
     ref: 'main',
@@ -42,6 +45,7 @@ export const sources = [
   {
     slug: 'inertia',
     name: 'Inertia',
+    description: "TypeScript-first Inertia.js adapter — multi-app, Vite-native.",
     icon: 'Layers',
     repo: 'DavideCarvalho/nestjs-inertia',
     ref: 'main',
@@ -52,6 +56,7 @@ export const sources = [
   {
     slug: 'notifications',
     name: 'Notifications',
+    description: "Laravel-style notifications — one notification, many channels.",
     icon: 'Bell',
     repo: 'DavideCarvalho/nestjs-notifications',
     ref: 'main',
@@ -62,6 +67,7 @@ export const sources = [
   {
     slug: 'telescope',
     name: 'Telescope',
+    description: "Telescope-style observability console with watchers + dashboard.",
     icon: 'Telescope',
     repo: 'DavideCarvalho/nestjs-telescope',
     ref: 'main',
