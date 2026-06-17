@@ -17,7 +17,7 @@ RBAC in authz is two cooperating pieces:
 1. **The seam (in the core).** The `@Roles` decorator + `RolesGuard`, and the `RoleProvider` / `PermissionProvider` interfaces behind the `ROLE_PROVIDER` / `PERMISSION_PROVIDER` tokens. These let your code *ask* for a user's roles and permissions without knowing where they're stored.
 2. **The store (an adapter).** A persisted implementation of those providers, backed by your database, shipped as `@dudousxd/nestjs-authz-typeorm`, `-mikro-orm`, or `-prisma`.
 
-If you never install an adapter, the seam still exists — role checks simply resolve against whatever `RoleProvider` you supply (or deny when none is present). Nothing in the core touches a database.
+Crucially, the seam works **on its own**. With no adapter installed, coarse role checks still function — they read roles straight off the current user object (`user.roles` / `user.role`) via the built-in `defaultRoleResolver`. Nothing in the core touches a database; the adapter is what lets roles and permissions live in one *and* be edited at runtime.
 
 ## Coarse checks with `@Roles`
 
@@ -35,39 +35,69 @@ export class AdminController {
 }
 ```
 
-The guard reads the current user (see [Current user](/docs/authz/current-user)), asks the configured `RoleProvider` for that user's roles, and allows the request when there's an overlap. Like every authz guard, it is **inert on un-annotated routes**.
+The guard reads the current user (see [Current user](/docs/authz/current-user)) and allows the request when the user holds **any** of the listed roles. By default the user's roles come straight off the user object — `user.roles` (a `string[]`) or `user.role` (a `string` or `string[]`) — so this works with **zero RBAC tables**. An unauthenticated request is denied, and like every authz guard it is **inert on un-annotated routes**.
+
+```ts
+// both users satisfy @Roles('admin') with no provider wired:
+{ id: 1, roles: ['admin', 'editor'] }
+{ id: 2, role: 'admin' }
+```
+
+You can check the same thing programmatically on the [`Gate`](/docs/authz/gates):
+
+```ts
+await this.gate.hasRole('admin');
+await this.gate.hasAnyRole(['staff', 'admin']);
+await this.gate.forUser(someUser).hasAnyRole(['admin']); // explicit user
+```
 
 <Callout type="info">
 `@Roles` is a *coarse* gate. When a decision depends on the resource — "can edit **this** post" — reach for a [policy](/docs/authz/policies) instead. The two compose freely: use `@Roles` to fence off an admin area and policies for per-record rules inside it.
 </Callout>
 
-## The provider seam
+## Where roles come from
 
-`@Roles`, and any permission lookups your policies perform, go through two interfaces:
+Roles are resolved from up to two sources, and the gate takes the **union** of both:
 
-- **`RoleProvider`** — given the current user reference, returns the roles they hold.
-- **`PermissionProvider`** — resolves the permissions granted to the user (typically the union of the permissions attached to their roles).
+1. **The user object** (always on). The `defaultRoleResolver` reads `user.roles` (`string[]`) and `user.role` (`string | string[]`), normalizing both to a list. Non-string entries are filtered out. If your role lives under a different shape, override the resolver in the module:
 
-The core exports the interfaces and a `defaultRoleResolver` (the `RoleResolver` used to read roles off the user when you don't wire a database). You provide an implementation through DI tokens:
+   ```ts
+   AuthzModule.forRoot({
+     resolveRoles: (user) => user.membership?.roleNames ?? [],
+   });
+   ```
+
+2. **A `RoleProvider`** (optional). A persisted source registered under the `ROLE_PROVIDER` token — supplied by an RBAC adapter. Its `getRoles(user)` result is unioned with whatever the resolver returned.
+
+So a user might carry `role: 'editor'` on their token *and* have `admin` granted in the database; `@Roles('admin')` and `gate.hasRole('admin')` both succeed.
+
+## The permission seam
+
+Roles answer "*is* this user an editor?". Permissions answer "*may* this user `posts.publish`?" — a finer, action-named grant. The `PermissionProvider` seam (token `PERMISSION_PROVIDER`) lets a persisted layer answer permission abilities directly:
+
+```ts
+export interface PermissionProvider {
+  hasPermission(user: User, ability: string, resource?: unknown): boolean | Promise<boolean>;
+}
+```
+
+When a provider is registered, it is consulted **inside the normal `allows()` flow** — *before* policies. So a permission-named ability just works through the same call you already use, with no special API:
+
+```ts
+// granted by the PermissionProvider → allowed (decision reason: "permission-provider")
+if (await this.gate.allows('posts.publish')) {
+  // ...
+}
+```
+
+Both seams are optional and token-based, so the engine consults them when present and falls back cleanly when absent — the same "degrade gracefully" pattern authz uses for [the current-user accessor](/docs/authz/current-user). You rarely register these by hand; an [RBAC adapter](#adding-persistence) provides both:
 
 ```ts
 import { ROLE_PROVIDER, PERMISSION_PROVIDER } from '@dudousxd/nestjs-authz';
 
-// the RBAC adapter supplies these for you (see below); this is the shape
+// the adapter wires these for you; this is just the shape
 { provide: ROLE_PROVIDER, useClass: MyRoleProvider }
 { provide: PERMISSION_PROVIDER, useClass: MyPermissionProvider }
-```
-
-Because the providers are optional and token-based, a policy can consult roles/permissions when they're available and fall back gracefully when they're not — the same "degrade cleanly if absent" pattern authz uses for [the current-user accessor](/docs/authz/current-user).
-
-```ts
-@Policy(Post)
-export class PostPolicy {
-  publish(user: User, post: Post) {
-    // a permission-backed rule; resolves against the PermissionProvider
-    return user.can('posts.publish') && post.status === 'draft';
-  }
-}
 ```
 
 ## Adding persistence
@@ -161,19 +191,22 @@ Because authz reads the current tenant from [`@dudousxd/nestjs-context`](/docs/c
 ## How it fits together
 
 ```text
-@Roles / policy permission check
+@Roles('admin') / gate.hasRole(...) / gate.allows('posts.publish')
         │
         ▼
-ROLE_PROVIDER / PERMISSION_PROVIDER   ← core seam (zero DB)
+   resolveRoles / defaultRoleResolver   ← user object (zero DB, always on)
+        │  ∪ (union)
+        ▼
+   ROLE_PROVIDER / PERMISSION_PROVIDER   ← optional token seam
         │
         ▼
-TypeOrmAuthzStore (POJO + your DataSource)   ← opt-in adapter
+   TypeOrmAuthzStore (POJO + your DataSource)   ← opt-in adapter
         │
         ▼
-roles / permissions / role_user / role_permission tables
+   roles / permissions / role_user / role_permission tables
 ```
 
-Your policies and `@Roles` annotations never change when you add or remove persistence — they always talk to the seam. The adapter just decides whether the answer comes from memory or from your database.
+Your policies and `@Roles` annotations never change when you add or remove persistence. Without an adapter, roles come from the user object and permission abilities simply have no grants; add an adapter and the same calls start consulting your database too.
 
 <Callout type="info">
 RBAC is genuinely optional. Plenty of apps ship with [gates](/docs/authz/gates) and [policies](/docs/authz/policies) alone and never install an adapter. Add RBAC when "who can do what" becomes data your admins edit at runtime rather than logic you deploy.

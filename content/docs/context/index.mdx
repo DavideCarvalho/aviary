@@ -4,6 +4,7 @@ description: A shared AsyncLocalStorage context for NestJS that carries user, te
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
 
 `@dudousxd/nestjs-context` is a small piece of plumbing with an outsized payoff: a single, process-wide [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) (ALS) store that carries the **current user**, the **current tenant**, and a **trace id** through every layer of a NestJS request — controllers, services, guards, interceptors, ORM subscribers, and plain functions — without you threading those values through method signatures or reaching for request-scoped providers.
 
@@ -12,6 +13,62 @@ It is deliberately unglamorous. Most of the time you will not call it directly a
 <Callout type="info" title="Alpha">
   This package is published as `0.1.0-alpha.0`. The API documented here reflects the current alpha. Pin a version and expect refinements before `1.0`.
 </Callout>
+
+---
+
+## Quickstart
+
+Install, register the module, set the user once, read it anywhere. For the full setup (tenant, custom fields, non-HTTP entrypoints), see [Getting Started](/docs/context/getting-started).
+
+<Steps>
+<Step>
+
+Install:
+
+```bash
+pnpm add @dudousxd/nestjs-context
+```
+
+</Step>
+<Step>
+
+Register the module — it's global and installs the request middleware (which seeds a `traceId`) automatically:
+
+```ts title="app.module.ts"
+import { Module } from '@nestjs/common';
+import { ContextModule } from '@dudousxd/nestjs-context';
+
+@Module({ imports: [ContextModule.forRoot()] })
+export class AppModule {}
+```
+
+</Step>
+<Step>
+
+Drop the current user in from your auth guard, once you've authenticated the request:
+
+```ts
+import { Context } from '@dudousxd/nestjs-context';
+
+Context.set('userRef', { type: 'user', id: user.id });
+// Context.set('tenantId', user.tenantId); // if you're multi-tenant
+```
+
+</Step>
+<Step>
+
+Read it anywhere downstream — no `@Inject(REQUEST)`, no request-scoped providers, even outside the DI container:
+
+```ts
+import { Context } from '@dudousxd/nestjs-context';
+
+Context.userRef(); // { type: 'user', id: 42 }
+Context.tenantId(); // the active tenant, if set
+Context.traceId(); // correlates logs, spans and workflows for this request
+```
+
+</Step>
+</Steps>
 
 ---
 

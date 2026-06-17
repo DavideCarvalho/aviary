@@ -5,12 +5,75 @@ icon: ShieldCheck
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
 
 **`@dudousxd/nestjs-authz`** brings Laravel's Gate & Policy ergonomics to NestJS. You declare *abilities* — `view`, `update`, `delete`, `access-admin` — as plain TypeScript functions and methods, then check them anywhere: in a route guard, in a service, or from a controller. The decision logic lives in code you can read, test, and step through with a debugger, not in an external policy DSL or a rules table.
 
 <Callout type="info" title="Alpha">
 This library is in **alpha** (`0.0.0`). The API documented here matches the current source, but it may still change before a stable release. Pin an exact version in production.
 </Callout>
+
+## Quickstart
+
+The whole loop — install, register the module, write a policy, guard a route — in four steps. For the full walkthrough, see [Getting Started](/docs/authz/getting-started).
+
+<Steps>
+<Step>
+
+Install the core package:
+
+```bash
+pnpm add @dudousxd/nestjs-authz
+```
+
+</Step>
+<Step>
+
+Register the module globally and point it at your policies:
+
+```ts title="app.module.ts"
+import { Module } from '@nestjs/common';
+import { AuthzModule } from '@dudousxd/nestjs-authz';
+import { PostPolicy } from './post.policy';
+
+@Module({
+  imports: [AuthzModule.forRoot({ policies: [PostPolicy] })],
+})
+export class AppModule {}
+```
+
+</Step>
+<Step>
+
+Write a policy — every method is an ability:
+
+```ts title="post.policy.ts"
+import { Policy } from '@dudousxd/nestjs-authz';
+import { Post } from './post.entity';
+
+@Policy(Post)
+export class PostPolicy {
+  update(user: User, post: Post) {
+    return post.authorId === user.id;
+  }
+}
+```
+
+</Step>
+<Step>
+
+Guard the route with `@Can` — done:
+
+```ts title="posts.controller.ts"
+@Patch(':id')
+@Can('update', Post) // loads the Post by :id, runs PostPolicy.update(currentUser, post)
+update(@Param('id') id: string) {}
+```
+
+A denied check throws `ForbiddenException` (HTTP 403). The current user is read from [nestjs-context](/docs/authz/current-user) automatically — or pass one explicitly with `gate.forUser(user)`.
+
+</Step>
+</Steps>
 
 ## Authorization, not authentication
 
