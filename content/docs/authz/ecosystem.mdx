@@ -63,12 +63,25 @@ function PostActions({ post }) {
 
 `<Can ability="..." of={...}>` renders its children only when the ability is granted, keeping authorization declarative in your component tree.
 
-## Telescope — `@dudousxd/nestjs-authz-telescope`
+## Diagnostics & Telescope — `@dudousxd/nestjs-diagnostics`
 
-The [Telescope](/docs/telescope) integration adds an **authorization watcher**. Every decision — the ability, the allow/deny verdict, the reason, and the user — is recorded and surfaced in a dedicated tab. When a `403` shows up that you didn't expect, you stop guessing: the watcher shows exactly which policy method ran and why it denied.
+Authz emits every authorization decision — the ability, the allow/deny verdict, the reason, and the user — as a standard **diagnostics event** on the `aviary:authz:decision` channel, via [`@dudousxd/nestjs-diagnostics`](https://www.npmjs.com/package/@dudousxd/nestjs-diagnostics) (Node's built-in `diagnostics_channel` under the hood). It costs essentially nothing when nothing is listening, and the payload rides the standard envelope with `traceId` auto-filled from [nestjs-context](/docs/context).
 
-<Callout type="info">
-This is the single biggest quality-of-life win for debugging authorization. Authorization failures are notoriously opaque ("forbidden — but why?"); the watcher turns them into a readable trail.
+To see those decisions in [Telescope](/docs/telescope), add the **one generic** diagnostics watcher — `@dudousxd/nestjs-diagnostics-telescope`, which records every `aviary:<lib>:<event>` from any library, with no per-library watcher to wire:
+
+```ts
+import { TelescopeModule } from '@dudousxd/nestjs-telescope';
+import { nestjsDiagnosticsTelescope } from '@dudousxd/nestjs-diagnostics-telescope';
+
+TelescopeModule.forRoot({
+  extensions: [nestjsDiagnosticsTelescope()],
+});
+```
+
+Now every unexpected `403` lands in Telescope tagged `lib:authz` / `event:decision`, showing exactly which policy method ran and why it denied — authorization failures stop being opaque ("forbidden — but why?").
+
+<Callout type="warn" title="Renamed in alpha">
+The dedicated `@dudousxd/nestjs-authz-telescope` package is **retired** — its job is now done by the generic `@dudousxd/nestjs-diagnostics-telescope` watcher. The `AUTHZ_DECISION_CHANNEL` constant was likewise removed; the channel name is now derived through `@dudousxd/nestjs-diagnostics`.
 </Callout>
 
 ## Typed client — `@dudousxd/nestjs-authz-client`
