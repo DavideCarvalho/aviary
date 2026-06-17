@@ -13,6 +13,9 @@ export function baseOptions(): BaseLayoutProps {
         text: 'Field guide',
         url: '/docs',
         active: 'nested-url',
+        // Top navbar only — the docs sidebar already reaches the hub via the
+        // library dropdown, so don't duplicate it there.
+        on: 'nav',
       },
     ],
     githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
