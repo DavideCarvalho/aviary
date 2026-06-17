@@ -1,0 +1,70 @@
+import { ImageResponse } from 'next/og';
+
+export const alt = 'Aviary — A field guide to the NestJS ecosystem';
+export const size = { width: 1200, height: 630 };
+export const contentType = 'image/png';
+// Required so the image is prerendered to a static file under `output: export`.
+export const dynamic = 'force-static';
+
+// Social link preview card. Kept to satori-safe inline styles (every element
+// with multiple children declares display:flex). No custom font fetch so it
+// stays reliable under static export.
+export default function OpengraphImage() {
+  return new ImageResponse(
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        padding: '72px 80px',
+        background:
+          'radial-gradient(900px 520px at 50% -8%, rgba(224,35,78,0.34), rgba(224,35,78,0) 70%), radial-gradient(700px 420px at 14% 12%, rgba(124,58,170,0.20), rgba(124,58,170,0) 70%), #0c0a0e',
+        color: '#ECE7E1',
+        fontFamily: 'sans-serif',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 18,
+          fontSize: 26,
+          letterSpacing: 6,
+          textTransform: 'uppercase',
+          color: '#B9B2AA',
+        }}
+      >
+        <div style={{ display: 'flex', width: 16, height: 16, borderRadius: 999, background: '#E0234E' }} />
+        @dudousxd · for NestJS
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', fontSize: 92, fontWeight: 700, lineHeight: 1.02 }}>
+          Libraries that
+        </div>
+        <div style={{ display: 'flex', fontSize: 92, fontWeight: 700, lineHeight: 1.02, color: '#E0234E', fontStyle: 'italic' }}>
+          flock together.
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: 30,
+          color: '#B9B2AA',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ display: 'flex', fontSize: 40, fontWeight: 700, color: '#ECE7E1' }}>Aviary</div>
+          <div style={{ display: 'flex' }}>— a field guide to the NestJS ecosystem</div>
+        </div>
+        <div style={{ display: 'flex', fontSize: 26, color: '#8A847C' }}>8 libraries · 82+ packages</div>
+      </div>
+    </div>,
+    { ...size },
+  );
+}

@@ -1,9 +1,0 @@
-{
-  "root": true,
-  "title": "Inertia",
-  "description": "A TypeScript-first Inertia.js adapter for NestJS — multi-app, Vite-native, typed client.",
-  "icon": "Layers",
-  "pages": [
-    "index"
-  ]
-}

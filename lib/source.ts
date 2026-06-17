@@ -1,19 +1,24 @@
-import { createElement } from 'react';
+import { type ComponentType, createElement } from 'react';
 import { docs } from 'collections/server';
 import { loader } from 'fumadocs-core/source';
-import { icons } from 'lucide-react';
+import * as lucide from 'lucide-react';
 import { docsContentRoute, docsImageRoute, docsRoute } from './shared';
+
+const lucideExports = lucide as unknown as Record<string, ComponentType | undefined>;
 
 // See https://fumadocs.dev/docs/headless/source-api for more info
 export const source = loader({
   baseUrl: docsRoute,
   source: docs.toFumadocsSource(),
   // Resolve the `icon` field in meta.json / frontmatter to a lucide icon so the
-  // per-lib sidebar tabs render their bird emblem.
+  // per-lib sidebar tabs render their emblem. We resolve against the full lucide
+  // namespace (not the `icons` object) so renamed-icon aliases still work —
+  // e.g. `Filter` is an alias kept for back-compat while the canonical export is
+  // now `Funnel`, and the `icons` map only contains canonical names.
   icon(icon) {
-    if (icon && icon in icons) {
-      return createElement(icons[icon as keyof typeof icons]);
-    }
+    if (!icon) return;
+    const Icon = lucideExports[icon];
+    if (Icon) return createElement(Icon);
   },
   plugins: [],
 });

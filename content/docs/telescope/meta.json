@@ -1,9 +1,0 @@
-{
-  "root": true,
-  "title": "Telescope",
-  "description": "A Laravel Telescope-style observability console for NestJS.",
-  "icon": "Telescope",
-  "pages": [
-    "index"
-  ]
-}

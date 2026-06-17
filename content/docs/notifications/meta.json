@@ -1,9 +1,0 @@
-{
-  "root": true,
-  "title": "Notifications",
-  "description": "Laravel-style notifications for NestJS — one notification, many channels.",
-  "icon": "Bell",
-  "pages": [
-    "index"
-  ]
-}

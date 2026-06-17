@@ -7,7 +7,13 @@
 # docs synced from each library's repo at build (scripts/sync-docs.mjs).
 # Add a line here as each library is migrated (migrated: true in docs-sources.mjs).
 /.docs-tmp/
+/public/lib-assets/
+/content/docs/codegen/
+/content/docs/durable/
 /content/docs/filter/
+/content/docs/inertia/
+/content/docs/notifications/
+/content/docs/telescope/
 
 # test & build
 /coverage

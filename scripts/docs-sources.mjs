@@ -17,7 +17,7 @@ export const sources = [
     ref: 'main',
     path: 'apps/docs/content/docs',
     repoDir: 'nestjs-codegen',
-    migrated: false,
+    migrated: true,
   },
   {
     slug: 'durable',
@@ -27,7 +27,7 @@ export const sources = [
     ref: 'main',
     path: 'website/content/docs',
     repoDir: 'nestjs-durable',
-    migrated: false,
+    migrated: true,
   },
   {
     slug: 'filter',
@@ -47,7 +47,7 @@ export const sources = [
     ref: 'main',
     path: 'website/content/docs',
     repoDir: 'nestjs-inertia',
-    migrated: false,
+    migrated: true,
   },
   {
     slug: 'notifications',
@@ -57,7 +57,7 @@ export const sources = [
     ref: 'main',
     path: 'website/content/docs',
     repoDir: 'nestjs-notifications',
-    migrated: false,
+    migrated: true,
   },
   {
     slug: 'telescope',
@@ -67,6 +67,8 @@ export const sources = [
     ref: 'main',
     path: 'website/content/docs',
     repoDir: 'nestjs-telescope',
-    migrated: false,
+    // Docs reference /screenshots/*.png from the site's public dir; vendor it.
+    publicDir: 'website/public',
+    migrated: true,
   },
 ];

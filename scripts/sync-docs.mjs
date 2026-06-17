@@ -49,14 +49,18 @@ function walk(dir) {
   });
 }
 
-/** Obtain the source docs dir, either from a sibling repo or a sparse clone. */
-function fetchDocs(src, tmp) {
+/**
+ * Obtain the library repo root (a sibling checkout in local mode, or a sparse
+ * clone otherwise). The caller reads `src.path` (docs) and `src.publicDir`
+ * (assets) from underneath it.
+ */
+function fetchRepo(src, tmp) {
   if (USE_LOCAL) {
-    const local = join(ROOT, '..', src.repoDir, src.path);
-    if (!existsSync(local)) {
-      throw new Error(`local source not found: ${local}`);
+    const base = join(ROOT, '..', src.repoDir);
+    if (!existsSync(join(base, src.path))) {
+      throw new Error(`local source not found: ${join(base, src.path)}`);
     }
-    return local;
+    return base;
   }
   rmSync(tmp, { recursive: true, force: true });
   mkdirSync(tmp, { recursive: true });
@@ -66,14 +70,14 @@ function fetchDocs(src, tmp) {
     ['clone', '--depth', '1', '--filter=blob:none', '--sparse', '--branch', src.ref, url, tmp],
     { stdio: ['ignore', 'ignore', 'inherit'] },
   );
-  execFileSync('git', ['-C', tmp, 'sparse-checkout', 'set', src.path], {
+  const checkout = [src.path, src.publicDir].filter(Boolean);
+  execFileSync('git', ['-C', tmp, 'sparse-checkout', 'set', ...checkout], {
     stdio: ['ignore', 'ignore', 'inherit'],
   });
-  const dir = join(tmp, src.path);
-  if (!existsSync(dir)) {
+  if (!existsSync(join(tmp, src.path))) {
     throw new Error(`docs path "${src.path}" missing in ${src.repo}@${src.ref}`);
   }
-  return dir;
+  return tmp;
 }
 
 /** Rewrite root-absolute /docs links so they nest under the library slug. */
@@ -83,6 +87,30 @@ function rewriteLinks(content, slug) {
   return content
     .replaceAll('](/docs', `](/docs/${slug}`)
     .replaceAll('href="/docs', `href="/docs/${slug}`);
+}
+
+/** Point root-absolute asset refs at the vendored per-library public dir. */
+function rewriteAssets(content, slug) {
+  return content.replaceAll('src="/', `src="/lib-assets/${slug}/`);
+}
+
+/**
+ * If the library's landing page uses a generic title ("Documentation", etc.),
+ * rename it to the library name so the hub reads cleanly. Specific titles are
+ * left untouched.
+ */
+const GENERIC_TITLE = /^(documentation|docs|introduction|intro|overview|home|readme|getting started)$/i;
+function normalizeIndexTitle(dir, src) {
+  const file = join(dir, 'index.mdx');
+  if (!existsSync(file)) return false;
+  const text = readFileSync(file, 'utf8');
+  const fm = text.match(/^---\n[\s\S]*?\n---/);
+  if (!fm) return false;
+  const title = fm[0].match(/^title:\s*(.+?)\s*$/m);
+  if (!title || !GENERIC_TITLE.test(title[1].replace(/['"]/g, '').trim())) return false;
+  const patched = fm[0].replace(/^title:\s*.+$/m, `title: ${src.name}`);
+  writeFileSync(file, text.replace(fm[0], patched));
+  return true;
 }
 
 /** Promote the top-level meta.json to a sidebar root tab with name + icon. */
@@ -101,10 +129,25 @@ for (const src of selected) {
   const dest = join(ROOT, 'content', 'docs', src.slug);
   const tmp = join(ROOT, '.docs-tmp', src.slug);
 
-  const from = fetchDocs(src, tmp);
+  const repo = fetchRepo(src, tmp);
   rmSync(dest, { recursive: true, force: true });
   mkdirSync(dest, { recursive: true });
-  cpSync(from, dest, { recursive: true });
+  cpSync(join(repo, src.path), dest, { recursive: true });
+
+  // Vendor the library's public assets (screenshots, etc.) under a namespaced
+  // folder so libraries can't collide on paths like /screenshots.
+  let assets = 0;
+  if (src.publicDir) {
+    const assetsFrom = join(repo, src.publicDir);
+    if (existsSync(assetsFrom)) {
+      const assetsDest = join(ROOT, 'public', 'lib-assets', src.slug);
+      rmSync(assetsDest, { recursive: true, force: true });
+      mkdirSync(assetsDest, { recursive: true });
+      cpSync(assetsFrom, assetsDest, { recursive: true });
+      assets = walk(assetsDest).length;
+    }
+  }
+
   if (!USE_LOCAL) rmSync(tmp, { recursive: true, force: true });
 
   let files = 0;
@@ -112,20 +155,22 @@ for (const src of selected) {
   for (const file of walk(dest)) {
     if (file.endsWith('.mdx') || file.endsWith('.md')) {
       const before = readFileSync(file, 'utf8');
-      const after = rewriteLinks(before, src.slug);
+      let after = rewriteLinks(before, src.slug);
+      if (src.publicDir) after = rewriteAssets(after, src.slug);
       links += (before.match(/\]\(\/docs|href="\/docs/g) || []).length;
       if (after !== before) writeFileSync(file, after);
       files += 1;
     }
   }
 
+  normalizeIndexTitle(dest, src);
   const rootMeta = join(dest, 'meta.json');
   if (existsSync(rootMeta)) transformRootMeta(rootMeta, src);
 
   totalFiles += files;
   totalLinks += links;
   console.log(
-    `✓ ${src.slug.padEnd(14)} ${files} docs, ${links} links rewritten  (${USE_LOCAL ? 'local' : src.repo + '@' + src.ref})`,
+    `✓ ${src.slug.padEnd(14)} ${files} docs, ${links} links${assets ? `, ${assets} assets` : ''}  (${USE_LOCAL ? 'local' : src.repo + '@' + src.ref})`,
   );
 }
 
