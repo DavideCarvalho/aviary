@@ -53,11 +53,27 @@ export async function generateMetadata(props: PageProps<'/docs/[[...slug]]'>): P
   const page = source.getPage(params.slug);
   if (!page) notFound();
 
+  const title = `${page.data.title} · Aviary`;
+  const image = getPageImage(page).url;
+
   return {
     title: page.data.title,
     description: page.data.description,
+    // Per-page Open Graph (WhatsApp / Discord / Facebook / LinkedIn / Telegram /
+    // Slack) — already worked; kept explicit alongside the Twitter card below so
+    // every platform shows this page's own title, description and preview image
+    // instead of the generic site-wide one from the root layout.
     openGraph: {
-      images: getPageImage(page).url,
+      type: 'article',
+      title,
+      description: page.data.description,
+      images: image,
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description: page.data.description,
+      images: [image],
     },
   };
 }
