@@ -4,6 +4,11 @@
 # generated content
 .source
 
+# docs synced from each library's repo at build (scripts/sync-docs.mjs).
+# Add a line here as each library is migrated (migrated: true in docs-sources.mjs).
+/.docs-tmp/
+/content/docs/filter/
+
 # test & build
 /coverage
 /.next/
