@@ -54,20 +54,23 @@ export async function generateMetadata(props: PageProps<'/docs/[[...slug]]'>): P
   if (!page) notFound();
 
   const title = `${page.data.title} · Aviary`;
-  const image = getPageImage(page).url;
+  // `?v=` busts the social proxies' image cache (Discord/Facebook cache the
+  // image by URL); bump it whenever the OG card design changes. width/height
+  // make scrapers render the full 1200×630 landscape card instead of cropping
+  // to a square thumbnail (which cut off the specimen on the right).
+  const image = { url: `${getPageImage(page).url}?v=2`, width: 1200, height: 630, alt: title };
 
   return {
     title: page.data.title,
     description: page.data.description,
     // Per-page Open Graph (WhatsApp / Discord / Facebook / LinkedIn / Telegram /
-    // Slack) — already worked; kept explicit alongside the Twitter card below so
-    // every platform shows this page's own title, description and preview image
-    // instead of the generic site-wide one from the root layout.
+    // Slack) and Twitter card, so every platform shows this page's own title,
+    // description and preview image instead of the site-wide one.
     openGraph: {
       type: 'article',
       title,
       description: page.data.description,
-      images: image,
+      images: [image],
     },
     twitter: {
       card: 'summary_large_image',
