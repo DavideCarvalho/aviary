@@ -8,7 +8,16 @@ name: Deploy Aviary to GitHub Pages
 on:
   push:
     branches: [main]
+  # Manual "Run workflow" button.
   workflow_dispatch:
+  # Periodic re-sync: rebuilds and redeploys so docs edited in the library repos
+  # (which don't live in this repo) show up without anyone touching Aviary.
+  schedule:
+    - cron: '17 */3 * * *' # every 3 hours
+  # Instant trigger: a library repo can POST a repository_dispatch event of this
+  # type to rebuild immediately on a docs change (see README → "Keeping docs in sync").
+  repository_dispatch:
+    types: [lib-docs-updated]
 
 permissions:
   contents: read

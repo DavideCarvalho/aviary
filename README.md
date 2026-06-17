@@ -44,6 +44,37 @@ search index must be prefixed. This is wired up automatically:
 If you later add a **custom domain** (e.g. `aviary.dev`), the base path becomes `/` — nothing
 to change, `configure-pages` reports an empty base path automatically.
 
+### Keeping docs in sync
+
+The 6 synced libraries keep their docs in their own repos, so editing them there does **not**
+rebuild Aviary on its own. Three triggers handle that:
+
+- **Scheduled** — the deploy workflow runs on a cron (every 3 hours) and re-syncs + redeploys,
+  so library doc edits show up automatically within the interval.
+- **Manual** — run the workflow from the Actions tab ("Run workflow"), or `gh workflow run deploy.yml`.
+- **Instant (optional)** — a library repo can rebuild Aviary the moment its docs change by
+  POSTing a `repository_dispatch` event. Add this workflow to the library repo and a
+  `AVIARY_DISPATCH_TOKEN` secret (a PAT with `repo` scope on the Aviary repo):
+
+  ```yaml
+  # .github/workflows/notify-aviary.yml (in the library repo)
+  name: Notify Aviary
+  on:
+    push:
+      branches: [main]
+      paths: ['website/content/docs/**', 'apps/docs/content/docs/**']
+  jobs:
+    dispatch:
+      runs-on: ubuntu-latest
+      steps:
+        - run: |
+            curl -sf -X POST \
+              -H "Authorization: Bearer ${{ secrets.AVIARY_DISPATCH_TOKEN }}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/DavideCarvalho/aviary/dispatches \
+              -d '{"event_type":"lib-docs-updated"}'
+  ```
+
 ### Keeping it as a monorepo subfolder instead
 
 If `aviary/` stays inside a bigger repo, move `deploy.yml` to the repo's top-level
