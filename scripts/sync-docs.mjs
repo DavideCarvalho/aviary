@@ -116,16 +116,18 @@ function normalizeIndexTitle(dir, src) {
 /** Promote the top-level meta.json to a sidebar root tab with name + icon. */
 function transformRootMeta(file, src) {
   const meta = JSON.parse(readFileSync(file, 'utf8'));
-  // Keep the source's page ordering etc., but make it a root tab and force the
-  // library's own name + icon + description (sources ship a generic title and
-  // no description, so the sidebar tab dropdown would otherwise be bare).
+  // Keep the source's page ordering etc., and force the library's own name +
+  // icon + description. We deliberately DON'T mark it `root` — root folders
+  // turn into an isolated tab/dropdown, which makes the sidebar differ between
+  // the hub (/docs) and a library page. As a plain folder, every page shows the
+  // same sidebar (all libraries listed, the current one expanded).
   const next = {
     ...meta,
-    root: true,
     title: src.name,
     description: src.description ?? meta.description,
     icon: src.icon,
   };
+  delete next.root;
   writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`);
 }
 

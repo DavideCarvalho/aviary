@@ -1,5 +1,4 @@
 {
-  "root": true,
   "title": "Authz",
   "description": "Laravel-style Gates & Policies for NestJS — a zero-dependency authorization core.",
   "icon": "ShieldCheck",
