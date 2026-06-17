@@ -1,0 +1,210 @@
+---
+title: Getting Started
+description: Install @dudousxd/nestjs-authz, register the module, write your first policy, guard a route, and check abilities programmatically.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
+
+This guide takes you from an empty NestJS app to a fully guarded route in five steps. We'll use a small blog domain — `User` and `Post` — and end with both **declarative** enforcement (`@Can` on a route) and a **programmatic** check (`Gate` in a service).
+
+## Prerequisites
+
+- **NestJS 10+** (v10 and v11 both work)
+- **TypeScript 5+** with `experimentalDecorators` and `emitDecoratorMetadata` enabled
+- An authentication layer that attaches the current user to the request — Passport, a JWT guard, sessions, anything. authz authorizes; it does not authenticate.
+
+---
+
+<Steps>
+
+<Step>
+
+## Install
+
+```bash
+pnpm add @dudousxd/nestjs-authz
+```
+
+The peer dependencies are the standard NestJS trio — you almost certainly have them already:
+
+```bash
+pnpm add @nestjs/common @nestjs/core reflect-metadata
+```
+
+[`@dudousxd/nestjs-context`](/docs/context) is an **optional** peer. When it's present, the gate reads the current user for free; when it's absent, you pass the user explicitly with `gate.forUser(...)`. You don't need it to get started.
+
+</Step>
+
+<Step>
+
+## Define your domain
+
+Nothing special here — these are your ordinary entities. authz never models the user or the resource; it just passes them to your rules.
+
+```ts
+// src/user.entity.ts
+export class User {
+  id!: number;
+  isAdmin!: boolean;
+  verified!: boolean;
+}
+
+// src/post.entity.ts
+export class Post {
+  id!: number;
+  authorId!: number;
+  published!: boolean;
+}
+```
+
+</Step>
+
+<Step>
+
+## Write your first policy
+
+A **policy** is a class that groups every ability for one resource. Decorate it with `@Policy(Resource)`; each method is an ability that receives `(user, resource)` and returns a boolean (or a `Promise<boolean>`).
+
+```ts
+// src/post.policy.ts
+import { Policy } from '@dudousxd/nestjs-authz';
+import { User } from './user.entity.js';
+import { Post } from './post.entity.js';
+
+@Policy(Post)
+export class PostPolicy {
+  // Optional bypass hook — runs before every ability on this policy.
+  before(user: User) {
+    if (user.isAdmin) return true; // grant everything; `undefined` falls through
+  }
+
+  view(user: User, post: Post) {
+    return post.published || post.authorId === user.id;
+  }
+
+  update(user: User, post: Post) {
+    return post.authorId === user.id;
+  }
+
+  create(user: User) {
+    return user.verified; // class-level ability — no instance needed
+  }
+}
+```
+
+<Callout type="info">
+`@Policy` also makes the class an `@Injectable()` provider for you, so it participates in DI and can be auto-discovered. You don't add `@Injectable()` yourself. See [Policies](/docs/authz/policies) for the full breakdown.
+</Callout>
+
+</Step>
+
+<Step>
+
+## Register the module
+
+Import `AuthzModule.forRoot()` once, at the root of your app. Either list your policies explicitly or rely on `@Policy` auto-discovery (both work — see [Policies](/docs/authz/policies#registration)).
+
+```ts
+// src/app.module.ts
+import { Module } from '@nestjs/common';
+import { AuthzModule } from '@dudousxd/nestjs-authz';
+import { PostPolicy } from './post.policy.js';
+import { PostsController } from './posts.controller.js';
+
+@Module({
+  imports: [
+    AuthzModule.forRoot({
+      policies: [PostPolicy],       // or rely on @Policy auto-discovery
+      superAdmin: (u) => u.isAdmin, // global before-hook (see the caveat below)
+    }),
+  ],
+  controllers: [PostsController],
+})
+export class AppModule {}
+```
+
+`forRoot` registers a global module that wires up the `Gate`, the `CanGuard` and `RolesGuard` (both as `APP_GUARD`), the `PolicyRegistry`, and a default resource resolver — so the next step works out of the box.
+
+<Callout type="warn">
+`superAdmin: (u) => u.isAdmin` reads `u.isAdmin` — but on the context path the gate hands these hooks a raw `UserRef` (`{ type, id }`), **not** your hydrated `User`. Until you configure `resolveUser`, that check won't see `isAdmin`. This is the single most common authz gotcha — read [Current user](/docs/authz/current-user) before relying on entity fields.
+</Callout>
+
+</Step>
+
+<Step>
+
+## Guard a route, and check programmatically
+
+**Declarative** — annotate the route with `@Can`. The `CanGuard` (already registered) resolves the `Post` and runs `PostPolicy.update(currentUser, post)`. A denial throws `ForbiddenException` (HTTP 403) automatically.
+
+```ts
+// src/posts.controller.ts
+import { Controller, Patch, Post as HttpPost, Param } from '@nestjs/common';
+import { Can } from '@dudousxd/nestjs-authz';
+import { Post } from './post.entity.js';
+
+@Controller('posts')
+export class PostsController {
+  @Patch(':id')
+  @Can('update', Post) // resolves Post by :id, runs PostPolicy.update(currentUser, post)
+  update(@Param('id') id: string) {
+    /* ... only runs if authorized ... */
+  }
+
+  @HttpPost()
+  @Can('create', Post, { classLevel: true }) // runs PostPolicy.create(currentUser) — no instance loaded
+  create() {
+    /* ... */
+  }
+}
+```
+
+**Programmatic** — inject the `Gate` and check abilities inside a service:
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { Gate } from '@dudousxd/nestjs-authz';
+import { Post } from './post.entity.js';
+
+@Injectable()
+export class PostsService {
+  constructor(private readonly gate: Gate) {}
+
+  async publish(post: Post) {
+    await this.gate.authorize('update', post); // throws ForbiddenException on deny
+    // ... safe to mutate ...
+  }
+
+  async canDelete(post: Post) {
+    return this.gate.allows('delete', post); // returns boolean, never throws
+  }
+}
+```
+
+Both forms read the current user from [nestjs-context](/docs/context) automatically. When you don't have a context (or want to check a *different* user), bind one explicitly:
+
+```ts
+await this.gate.forUser(someUser).authorize('update', post);
+```
+
+</Step>
+
+</Steps>
+
+---
+
+## What you've built
+
+- A `PostPolicy` whose methods *are* your authorization rules.
+- A globally registered `AuthzModule` that auto-protects `@Can`-annotated routes.
+- Two enforcement styles: `@Can` at the edge, `Gate` in services.
+
+## Next steps
+
+<Cards>
+  <Card title="Policies" href="/docs/authz/policies" description="The before hook, class-level abilities, and registration in depth." />
+  <Card title="Gates" href="/docs/authz/gates" description="Model-less, ad-hoc abilities for app-wide checks." />
+  <Card title="Enforcement" href="/docs/authz/enforcement" description="@Can options, @Roles, and the optional can-endpoint." />
+  <Card title="Current user" href="/docs/authz/current-user" description="The UserRef caveat and how to hydrate your entity." />
+</Cards>

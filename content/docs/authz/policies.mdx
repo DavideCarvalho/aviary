@@ -1,0 +1,218 @@
+---
+title: Policies
+description: Resource policy classes — ability methods, the before bypass hook, class-level abilities, registration, and the PolicyRegistry.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A **policy** is a class that groups every authorization rule for a single resource type. It's the heart of `@dudousxd/nestjs-authz` — the place most of your authorization logic should live. If you've used Laravel's policies, this is the same idea: one class per model, one method per ability.
+
+## Anatomy of a policy
+
+Decorate a class with `@Policy(Resource)`. Each public method becomes an **ability** — dispatched by name. When you check `gate.authorize('update', post)`, authz finds the policy registered for `post`'s class and calls its `update(user, post)` method.
+
+```ts
+import { Policy } from '@dudousxd/nestjs-authz';
+import { User } from './user.entity.js';
+import { Post } from './post.entity.js';
+
+@Policy(Post)
+export class PostPolicy {
+  view(user: User, post: Post) {
+    return post.published || post.authorId === user.id;
+  }
+
+  update(user: User, post: Post) {
+    return post.authorId === user.id;
+  }
+
+  delete(user: User, post: Post) {
+    return post.authorId === user.id;
+  }
+}
+```
+
+The signature of an ability method is `(user, resource) => boolean | Promise<boolean>`. Async is fully supported — return a promise and authz awaits it:
+
+```ts
+@Policy(Post)
+export class PostPolicy {
+  constructor(private readonly comments: CommentsService) {}
+
+  async delete(user: User, post: Post) {
+    if (post.authorId !== user.id) return false;
+    const count = await this.comments.countFor(post.id);
+    return count === 0; // can only delete posts with no comments
+  }
+}
+```
+
+<Callout type="info">
+Because `@Policy` registers the class as an `@Injectable()` provider (see [Registration](#registration)), a policy can have constructor-injected dependencies like any other Nest provider. Inject services, repositories, config — whatever your rules need.
+</Callout>
+
+## The `before` hook
+
+A policy may define a `before(user, ability)` method that runs **before** any ability on that policy. It's a bypass / short-circuit, with three-way semantics:
+
+| `before` returns | Effect |
+|------------------|--------|
+| `true` | **Allow** — short-circuit; the ability method is never called. |
+| `false` | **Deny** — short-circuit; the ability method is never called. |
+| `undefined` / `void` | **Fall through** — run the ability method normally. |
+
+```ts
+@Policy(Post)
+export class PostPolicy {
+  before(user: User, ability: string) {
+    if (user.isAdmin) return true;        // admins bypass every Post ability
+    // return undefined → fall through to the specific ability
+  }
+
+  update(user: User, post: Post) {
+    return post.authorId === user.id;
+  }
+}
+```
+
+The hook receives the ability name as its second argument, so you can scope the bypass:
+
+```ts
+before(user: User, ability: string) {
+  if (ability === 'view' && user.isModerator) return true; // moderators can view anything
+  // everything else falls through
+}
+```
+
+<Callout type="warn">
+`before` is only consulted for abilities the policy **actually defines**. If you call `gate.authorize('publish', post)` but `PostPolicy` has no `publish` method, the `before` hook does *not* get a chance to grant it — the gate reports the ability as unresolved. This prevents `before` from silently answering abilities the policy never declared.
+</Callout>
+
+### `before` vs the global `superAdmin` hook
+
+There are two bypass layers, and they fire in a fixed order on every check:
+
+1. **`superAdmin`** — the global before-hook configured in `AuthzModule.forRoot({ superAdmin })`. Runs first, across *all* policies and gates.
+2. **`before`** — the per-policy hook. Runs only for that policy's abilities.
+
+Both use the same three-way `true` / `false` / `undefined` semantics. Use `superAdmin` for app-wide rules ("platform admins can do anything"); use `before` for per-resource rules ("the author can do anything to their own posts").
+
+## Class-level abilities
+
+Some abilities have no instance to check against — the canonical example is `create`. You can't load "the post being created" because it doesn't exist yet. These are **class-level abilities**: methods that take only the user.
+
+```ts
+@Policy(Post)
+export class PostPolicy {
+  create(user: User) {
+    return user.verified; // no `post` parameter
+  }
+
+  viewAny(user: User) {
+    return user.isActive; // "can this user list posts at all?"
+  }
+}
+```
+
+To check a class-level ability programmatically, call it with no resource:
+
+```ts
+await this.gate.authorize('create'); // dispatches PostPolicy.create(user)
+```
+
+<Callout type="info">
+When you call a class-level ability with **no resource**, authz scans all registered policies for a method with that name. If exactly one policy defines `create`, it's used. If **two or more** do (e.g. both `PostPolicy` and `CommentPolicy` have `create`), authz throws an `AmbiguousAbilityException` rather than guessing. Disambiguate by passing the resource class explicitly — see below.
+</Callout>
+
+To target a specific policy unambiguously, pass the **resource class** (not an instance):
+
+```ts
+await this.gate.allows('create', Post); // class passed → resolves PostPolicy directly
+```
+
+For declarative enforcement, use `@Can('create', Post, { classLevel: true })`, which skips resource loading entirely. See [Enforcement](/docs/authz/enforcement#class-level-abilities).
+
+## Registration
+
+authz needs to know which policy belongs to which resource. There are two ways to register policies, and they coexist.
+
+### Explicit — `policies: []`
+
+List your policy classes in the module options. This is the most explicit and the easiest to audit:
+
+```ts
+AuthzModule.forRoot({
+  policies: [PostPolicy, CommentPolicy, ProjectPolicy],
+});
+```
+
+Explicit policies are honored from both `forRoot` and `forRootAsync` (a `useFactory`/`useClass` that returns `policies: [...]` registers them too). They're resolved through the DI container so their constructor dependencies are injected.
+
+### Auto-discovery — `@Policy`
+
+Because `@Policy` makes the class an injectable provider, authz can also discover it automatically. Any `@Policy`-decorated class that Nest knows about as a provider is registered at boot — no need to list it. This keeps the module config short as your policy count grows:
+
+```ts
+// Register the policy as a provider somewhere (e.g. its feature module)…
+@Module({ providers: [PostPolicy] })
+export class PostsModule {}
+
+// …and AuthzModule.forRoot() picks it up automatically — no `policies: []` needed.
+AuthzModule.forRoot({ superAdmin: (u) => u.isAdmin });
+```
+
+<Callout type="info">
+The two paths are de-duplicated: a policy registered both explicitly **and** via auto-discovery is registered exactly once. Mix and match freely.
+</Callout>
+
+## `getPolicyResource`
+
+The `@Policy` decorator stores the resource class as metadata. `getPolicyResource(policyClassOrInstance)` reads it back — useful for tooling, tests, or introspection:
+
+```ts
+import { getPolicyResource } from '@dudousxd/nestjs-authz';
+
+getPolicyResource(PostPolicy);           // → Post
+getPolicyResource(new PostPolicy());     // → Post (works on instances too)
+getPolicyResource(SomeUndecorated);      // → undefined
+```
+
+It reads through the prototype chain, so a subclass of a `@Policy`-decorated class still resolves the inherited resource.
+
+## `PolicyRegistry`
+
+`PolicyRegistry` is the in-memory map of `resource class → policy instance` that the gate consults. It's an injectable provider, exported by `AuthzModule`, and you rarely touch it directly — but it's handy for introspection and testing.
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { PolicyRegistry } from '@dudousxd/nestjs-authz';
+import { Post } from './post.entity.js';
+
+@Injectable()
+export class AuthzInspector {
+  constructor(private readonly registry: PolicyRegistry) {}
+
+  report() {
+    this.registry.has(Post);          // true — is a policy registered for Post?
+    this.registry.forResource(Post);  // the PostPolicy instance, or undefined
+    this.registry.resources();        // every registered resource class
+    this.registry.all();              // every registered policy instance
+    this.registry.classAbilities();   // [{ resource: Post, abilities: ['view', 'update', ...] }, ...]
+  }
+}
+```
+
+<Callout type="warn">
+Registering a policy whose class was **not** decorated with `@Policy(Resource)` throws `PolicyNotDecoratedException`. If you see this, you most likely added a class to `policies: []` (or as a provider that got auto-discovered) without the decorator.
+</Callout>
+
+`classAbilities()` is what integrations like [nestjs-authz-inertia](/docs/authz/ecosystem) use to pre-resolve a user's class-level abilities and ship them to the frontend without a round-trip — it walks each policy's prototype chain and lists the ability method names (excluding `constructor` and `before`).
+
+## Next steps
+
+<Cards>
+  <Card title="Gates" href="/docs/authz/gates" description="When a policy class is overkill — ad-hoc, model-less abilities." />
+  <Card title="Enforcement" href="/docs/authz/enforcement" description="Wire policies to routes with @Can and the CanGuard." />
+  <Card title="Resource resolution" href="/docs/authz/resource-resolution" description="How @Can loads the instance it passes to your ability method." />
+  <Card title="Current user" href="/docs/authz/current-user" description="What `user` actually is inside an ability method." />
+</Cards>

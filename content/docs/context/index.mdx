@@ -1,42 +1,66 @@
 ---
-title: Context
-description: Shared AsyncLocalStorage context for NestJS — user, tenant and traceId across the request.
-icon: Boxes
+title: Introduction
+description: A shared AsyncLocalStorage context for NestJS that carries user, tenant and traceId across the whole request — and across the ecosystem.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-**Context** is the connective tissue of the aviary. A single `AsyncLocalStorage` store carries identity (user, tenant) and correlation (traceId) across the entire request — and every other Aviary library reads from it so you wire it once.
+`@dudousxd/nestjs-context` is a small piece of plumbing with an outsized payoff: a single, process-wide [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) (ALS) store that carries the **current user**, the **current tenant**, and a **trace id** through every layer of a NestJS request — controllers, services, guards, interceptors, ORM subscribers, and plain functions — without you threading those values through method signatures or reaching for request-scoped providers.
 
-<Callout title="Part of the Aviary ecosystem">
-Context is the connective tissue of the stack — every other Aviary library reads from
-it, so wiring it once pays off across the whole ecosystem.
+It is deliberately unglamorous. Most of the time you will not call it directly at all. You wire it once, your auth guard drops a `userRef` into it, and from then on the rest of the ecosystem reads from it for free.
+
+<Callout type="info" title="Alpha">
+  This package is published as `0.1.0-alpha.0`. The API documented here reflects the current alpha. Pin a version and expect refinements before `1.0`.
 </Callout>
 
-## Install
+---
 
-```bash
-pnpm add @dudousxd/nestjs-context
-```
+## What problem it solves
 
-## Two ways to fly
+In a typical NestJS app, "who is the current user?" and "which tenant are we serving?" are answered by injecting `@Inject(REQUEST)` and switching the relevant providers to **request scope**. That works, but it is contagious: once a provider is request-scoped, everything that depends on it becomes request-scoped too, the DI container re-instantiates that subtree on every request, and code that lives *outside* the container — an ORM subscriber, a queue worker, a logging transport — simply cannot reach the request at all.
 
-### Plug-n-play
+`nestjs-context` sidesteps all of that. The store lives in a module-level singleton backed by ALS, so:
 
-Add the module, and `ctx.user` / `ctx.tenant` / `ctx.traceId` are available anywhere downstream — no prop drilling, no manual passing.
-
-### Fully configurable
-
-Define your own context shape, seeding strategy and propagation rules. Testing helpers let you run code inside a fabricated context deterministically.
+- **Any code can read it** — injectable or not. ORM subscribers, plain helper functions, and queue handlers all call the same `Context.traceId()` / `Context.tenantId()` / `Context.userRef()`.
+- **Nothing becomes request-scoped.** Your providers stay singletons. The per-request data rides in ALS, not in the container.
+- **No prop-drilling.** You stop passing `currentUser` down through five service calls just so the bottom one can stamp an audit row.
 
 <Callout type="info">
-This page is a scaffold. Flesh out concepts, a real quickstart and an API reference
-under `content/docs/context/`.
+  Think of it as the **`reflect-metadata` of the ecosystem**: nearly everything depends on it, almost nobody calls it by hand. If you have used Laravel 11's [`Context`](https://laravel.com/docs/11.x/context) facade or Adonis's `HttpContext`, this is the same idea, expressed for NestJS.
 </Callout>
 
-## Packages in this family
+---
+
+## Its role: plumbing the ecosystem consumes
+
+The store carries three things that the rest of the libraries care about, and exposes them through tiny accessors:
+
+| What | Accessor | Who reads it |
+|------|----------|--------------|
+| The acting principal (`{ type, id }`) | `Context.userRef()` | audit — stamps the *causer* of every change |
+| The active tenant | `Context.tenantId()` | filter — scopes queries to the tenant automatically |
+| A correlation id for the request | `Context.traceId()` | telescope / durable — correlate logs, spans and workflows |
+
+Notice the pattern: **the context library never decides anything.** It does not authenticate, it does not pick a tenant, it does not log. Some other layer resolves those values and *sets* them; this library is the shared place they live so everyone else can *read* them. Consumer libraries inject the context through an optional token and degrade cleanly when it is absent — so adding `nestjs-context` lights them up, and removing it does not break them.
+
+---
+
+## It is worth installing on its own
+
+Even with no other ecosystem library in your project, `nestjs-context` earns its keep. The standalone pitch is one sentence:
+
+> **The current user and tenant, anywhere, without `@Inject(REQUEST)` and without a single request-scoped provider.**
+
+A service buried four calls deep can ask `Context.userRef()` for the acting principal. A logging interceptor can stamp `Context.traceId()` on every line. A MikroORM or TypeORM subscriber — which the DI container cannot inject the request into — can still read the current tenant. That alone is reason enough to wire it in.
+
+---
+
+## Where to go next
 
 <Cards>
-  <Card title="@dudousxd/nestjs-context" href="https://www.npmjs.com/package/@dudousxd/nestjs-context" />
-  <Card title="@dudousxd/nestjs-context-testing" href="https://www.npmjs.com/package/@dudousxd/nestjs-context-testing" />
+  <Card title="Getting Started" href="/docs/context/getting-started" description="Install, register ContextModule.forRoot(), read the traceId, and populate the user/tenant from your auth guard." />
+  <Card title="The Store" href="/docs/context/the-store" description="The ContextStore shape, why it carries a UserRef and not the full user, and how to add your own typed fields." />
+  <Card title="Customization" href="/docs/context/customization" description="The five levels of customization — from a custom field to swapping the accessor your libraries consume." />
+  <Card title="Cross-Process" href="/docs/context/cross-process" description="Carry the context across queue and durable boundaries with serialize() / deserialize()." />
+  <Card title="Testing" href="/docs/context/testing" description="Run unit tests inside a fake store with runWithContext and enterContext." />
 </Cards>

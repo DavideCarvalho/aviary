@@ -1,0 +1,168 @@
+---
+title: Getting Started
+description: Install nestjs-context, register the global module, read the traceId anywhere, and populate the user and tenant from your auth guard.
+---
+
+import { Steps, Step } from 'fumadocs-ui/components/steps';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Getting `nestjs-context` running is three steps: install the package, register `ContextModule.forRoot()` once, and start reading the context anywhere in your app. From there, your auth layer drops the current user and tenant into the store so the rest of your code — and the rest of the ecosystem — can read them.
+
+---
+
+## Prerequisites
+
+- **Node.js 20+** (the store is built on `node:async_hooks`)
+- **NestJS 10+** (both v10 and v11 are supported)
+- **TypeScript 5+** with `experimentalDecorators` and `emitDecoratorMetadata` enabled
+
+---
+
+## Step 1 — Install
+
+```bash
+pnpm add @dudousxd/nestjs-context
+```
+
+The package declares the following as **peer dependencies** — you almost certainly have them already in a NestJS project, but install them if not:
+
+```bash
+pnpm add @nestjs/common @nestjs/core reflect-metadata
+```
+
+---
+
+## Step 2 — Register the module
+
+`ContextModule.forRoot()` returns a **global** dynamic module. Import it once at the root of your app and every other module can read the context without re-importing anything.
+
+```ts
+// src/app.module.ts
+import { Module } from '@nestjs/common';
+import { ContextModule } from '@dudousxd/nestjs-context';
+
+@Module({
+  imports: [
+    ContextModule.forRoot(),
+    // ...the rest of your modules
+  ],
+})
+export class AppModule {}
+```
+
+By default `forRoot()` also **registers an HTTP middleware automatically** (`autoMiddleware` defaults to `true`). That middleware runs at the very start of the request pipeline and establishes a fresh context for every request: it reads (or generates) a trace id, captures the `x-request-id` header if present, and enters the store so everything downstream can see it.
+
+<Callout type="info">
+  `forRoot()` is global, so you import it **once**. Feature modules do not need to import it again. If you have a non-HTTP entrypoint (GraphQL subscriptions, gRPC, a queue worker), see [Customization → non-HTTP entrypoints](/docs/context/customization#level-3--non-http-entrypoints).
+</Callout>
+
+---
+
+## Step 3 — Read the context anywhere
+
+The `Context` object is a plain singleton — import it and call its accessors. No injection required, which is the whole point: it works in services, interceptors, guards, ORM subscribers, and plain functions alike.
+
+```ts
+import { Context } from '@dudousxd/nestjs-context';
+
+Context.traceId();  // string | undefined — the request correlation id
+Context.tenantId(); // string | undefined — the active tenant
+Context.userRef();  // { type, id } | undefined — the acting principal
+Context.get();      // the whole ContextStore | undefined
+```
+
+Every accessor returns `undefined` when called **outside** any context (for example during app bootstrap, before any request) — they never throw. A logging interceptor that stamps the trace id on each line looks like this:
+
+```ts
+// src/logging.interceptor.ts
+import {
+  CallHandler,
+  ExecutionContext,
+  Injectable,
+  Logger,
+  NestInterceptor,
+} from '@nestjs/common';
+import { tap } from 'rxjs';
+import { Context } from '@dudousxd/nestjs-context';
+
+@Injectable()
+export class LoggingInterceptor implements NestInterceptor {
+  private readonly logger = new Logger('HTTP');
+
+  intercept(_ctx: ExecutionContext, next: CallHandler) {
+    const traceId = Context.traceId();
+    return next.handle().pipe(
+      tap(() => this.logger.log(`handled request traceId=${traceId}`)),
+    );
+  }
+}
+```
+
+---
+
+## Step 4 — Populate the user and tenant
+
+The middleware establishes the context and the trace id, but it deliberately does **not** know who the user is — authentication is not this library's job. Your auth guard resolves the principal and writes it into the active store with `Context.set()`:
+
+```ts
+// src/auth.guard.ts
+import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import { Context } from '@dudousxd/nestjs-context';
+
+@Injectable()
+export class AuthGuard implements CanActivate {
+  async canActivate(ctx: ExecutionContext): Promise<boolean> {
+    const req = ctx.switchToHttp().getRequest();
+
+    // ...your real token verification / session lookup...
+    const user = await this.resolveUser(req);
+    if (!user) return false;
+
+    // Drop the principal into the already-active context.
+    Context.set('userRef', { type: 'user', id: user.id });
+    Context.set('tenantId', user.tenantId);
+
+    return true;
+  }
+}
+```
+
+`Context.set(key, value)` mutates the store that the middleware already entered. It is a no-op if there is no active context, and it is fully typed against `ContextStore`, so `Context.set('userRef', ...)` only accepts a `UserRef`.
+
+<Callout type="info">
+  Why does the guard set the user instead of the middleware? Because authentication runs *after* the request context exists. The middleware enters the store at the very top of the pipeline; the guard fills in the principal once it has been verified. This split is intentional — see [The Store](/docs/context/the-store) for why the store carries a `userRef` rather than the full user object.
+</Callout>
+
+From this point on, anything downstream — services, ORM subscribers, the audit and filter libraries — can read `Context.userRef()` and `Context.tenantId()` with zero wiring.
+
+---
+
+## Why `enterWith`, not `run`
+
+This is the one design choice worth understanding, because it explains why a *middleware* can establish a context that survives into your *async handlers*.
+
+ALS gives you two ways to set a store:
+
+- **`Context.run(store, fn)`** runs `fn` with `store` active, and tears the store down the moment `fn` returns. It is callback-scoped: everything that should see the context must happen *inside* `fn`.
+- **`Context.enterWith(store)`** sets `store` as active for the **current** async execution and all its descendants, with no callback to wrap. The store persists after the call returns.
+
+A NestJS middleware calls `next()` and then **returns**. If it used `run()`, the context would be torn down the instant the middleware function exited — long before your async controller method, guards, or interceptors ever ran. So the middleware uses `enterWith`: it enters the store and returns, and because the rest of the pipeline executes within the same async context tree, the controller, guards, and interceptors all see it.
+
+```ts
+// Conceptually, this is what the built-in middleware does:
+Context.enterWith({ traceId, requestId });
+next(); // returns — but the context is still active for everything downstream
+```
+
+<Callout type="warn">
+  Use `Context.run()` when you own a clean callback boundary and want the context to disappear when the work finishes — for example, wrapping a single queue job. Use `Context.enterWith()` when there is no wrapping callback, as in middleware. The built-in HTTP middleware uses `enterWith` for exactly this reason. See [Cross-Process](/docs/context/cross-process) for `run`-based patterns.
+</Callout>
+
+---
+
+## Next steps
+
+- [The Store](/docs/context/the-store) — the `ContextStore` shape and how to add your own typed fields
+- [Customization](/docs/context/customization) — the five levels of customization, from custom fields to swapping the accessor
+- [Cross-Process](/docs/context/cross-process) — carry the context across queue and durable boundaries
+- [Testing](/docs/context/testing) — run unit tests inside a fake store

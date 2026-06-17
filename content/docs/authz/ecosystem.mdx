@@ -1,0 +1,91 @@
+---
+title: Ecosystem & integrations
+description: The glue packages that make authz disappear into your stack — context, Inertia, codegen, React, Telescope, and the filter integration.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The core of authz is a small, focused authorization engine. Its real leverage comes from the **glue** — a set of companion packages that wire authorization into the rest of your stack so you write a rule once and it shows up everywhere: in your guards, in your typed client, in your React components, and in your observability tools.
+
+The guiding principle across the ecosystem: **the integration lives on the side that already has the import.** You never install a bridge package just to connect two libraries you already use; the consumer reads optionally, the producer carries the data when present, and in most apps you wire nothing at all.
+
+## Current user — `@dudousxd/nestjs-context`
+
+The most important integration ships in the box. When [`@dudousxd/nestjs-context`](/docs/context) is present, the gate reads the current user (and tenant) for free — `gate.authorize('update', post)` needs no explicit user, and permission checks become tenant-scoped via `Context.tenantId()`. authz consumes the context **structurally** through the `CONTEXT_ACCESSOR` token, so it never imports nestjs-context directly.
+
+See [Current user](/docs/authz/current-user) for the full story, including the `UserRef` hydration caveat.
+
+<Callout type="info">
+This pairing is what lets your authentication layer and authorization layer stay completely decoupled: your auth guard populates `Context.userRef()`, and authz reads it. Neither knows about the other.
+</Callout>
+
+## Inertia — `@dudousxd/nestjs-authz-inertia`
+
+If you render with [Inertia](/docs/inertia), the authz Inertia integration injects an `auth.can` map into your shared props — in the spirit of Laravel's `HandleInertiaRequests`. Your frontend receives precomputed permissions and can branch on them without a round-trip:
+
+```tsx
+// In a React/Vue page, props.auth.can was populated server-side
+{auth.can('update', post) && <EditButton post={post} />}
+```
+
+The server evaluates the abilities for the current user during the Inertia response, so the client never has to ask "am I allowed?" again for the data it already has.
+
+## Codegen — `@dudousxd/nestjs-authz-codegen`
+
+The [codegen](/docs/codegen) integration emits a **typed** `can()` into your generated client (`api.ts`). Because the ability names come from your policies, asking for an ability that doesn't exist becomes a **compile-time error** rather than a silent `false`:
+
+```ts
+api.can('update', post); // ✅ ok
+api.can('upadte', post); // ✗ TypeScript error — 'upadte' is not a known ability
+```
+
+This closes the usual gap where frontend authorization strings drift out of sync with the backend rules they mirror.
+
+## React — `@dudousxd/nestjs-authz-react`
+
+For React apps that aren't using Inertia, `@dudousxd/nestjs-authz-react` provides a hook and a gating component:
+
+```tsx
+import { useCan, Can } from '@dudousxd/nestjs-authz-react';
+
+function PostActions({ post }) {
+  const canEdit = useCan('update', post);
+  return (
+    <>
+      {canEdit && <EditButton post={post} />}
+      <Can ability="delete" of={post}>
+        <DeleteButton post={post} />
+      </Can>
+    </>
+  );
+}
+```
+
+`<Can ability="..." of={...}>` renders its children only when the ability is granted, keeping authorization declarative in your component tree.
+
+## Telescope — `@dudousxd/nestjs-authz-telescope`
+
+The [Telescope](/docs/telescope) integration adds an **authorization watcher**. Every decision — the ability, the allow/deny verdict, the reason, and the user — is recorded and surfaced in a dedicated tab. When a `403` shows up that you didn't expect, you stop guessing: the watcher shows exactly which policy method ran and why it denied.
+
+<Callout type="info">
+This is the single biggest quality-of-life win for debugging authorization. Authorization failures are notoriously opaque ("forbidden — but why?"); the watcher turns them into a readable trail.
+</Callout>
+
+## Typed client — `@dudousxd/nestjs-authz-client`
+
+The client package provides the runtime that the [codegen](#codegen--dudousxdnestjs-authz-codegen) output builds on — the small surface your frontend calls to evaluate abilities against the backend (for cases where the answer can't be precomputed and shipped with the page).
+
+## Filter — query scoping
+
+The [filter](/docs/filter) integration (on the roadmap) lets a policy's `viewAny`-style ability apply a **query scope**, so a listing endpoint returns only the records the current user is allowed to see — authorization pushed all the way down into the database query rather than filtered in memory after the fact.
+
+## Putting it together
+
+A single ability you write in a `PostPolicy.update` method can, with the glue in place:
+
+- guard the route via [`@Can`](/docs/authz/enforcement),
+- decide whether the **Edit** button renders (Inertia props or the React `<Can>`),
+- be type-checked in your generated client (codegen),
+- and leave an auditable trail when it denies (Telescope).
+
+One rule, enforced consistently from the database to the button. That consistency — not the engine itself — is the point of authz.

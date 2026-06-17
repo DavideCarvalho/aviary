@@ -3,7 +3,5 @@
   "title": "Context",
   "description": "Shared AsyncLocalStorage context for NestJS — user, tenant and traceId across the request.",
   "icon": "Boxes",
-  "pages": [
-    "index"
-  ]
+  "pages": ["index", "getting-started", "the-store", "customization", "cross-process", "testing"]
 }

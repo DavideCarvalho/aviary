@@ -1,0 +1,141 @@
+---
+title: Current user
+description: How the gate resolves the current user — the context accessor, the UserRef hydration caveat, resolveUser, forUser, and anonymous handling.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Every authorization decision needs a subject: the **current user**. `@dudousxd/nestjs-authz` never models or authenticates that user — it reads whatever your auth layer produced. This page explains exactly *where* the user comes from, the one caveat that trips everyone up, and how to fix it.
+
+## Two paths to the user
+
+There are precisely two ways the gate obtains a user, and they behave differently:
+
+1. **The context path** — `gate.allows(...)` / `gate.authorize(...)` / `@Can(...)` with no explicit user. The gate reads the current user from [nestjs-context](/docs/context).
+2. **The explicit path** — `gate.forUser(someUser)`. You hand the gate a user directly.
+
+Understanding the difference between these two is the key to using authz correctly.
+
+## The context path and `CONTEXT_ACCESSOR`
+
+When no user is passed explicitly, the gate resolves one from an optional **context accessor** — injected via `@Optional() @Inject('CONTEXT_ACCESSOR')`, the well-known token that [`@dudousxd/nestjs-context`](/docs/context) exports.
+
+The accessor is consumed **structurally**. authz never imports nestjs-context (it's an optional peer); it only relies on the shape:
+
+```ts
+interface ContextAccessor {
+  userRef(): { type: string; id: string | number } | undefined;
+  // (also tenantId(), traceId(), get() — mirrored from nestjs-context)
+}
+```
+
+Any object satisfying this interface works. When nestjs-context is wired into your app, the gate calls `userRef()` and gets the current user reference for free — no plumbing in your controllers or services.
+
+If **no accessor is present and no user is passed**, the gate treats the request as unauthenticated and denies. No crash, no `TypeError` — just a deny.
+
+## The caveat: you get a `UserRef`, not your entity
+
+Here's the subtlety that catches everyone. On the context path, `userRef()` returns a raw **`UserRef`** — just `{ type, id }`. It is **not** your hydrated `User` entity. nestjs-context stores a lightweight reference, not your full database row.
+
+So by default, this policy is **broken** on the context path:
+
+```ts
+@Policy(Post)
+export class PostPolicy {
+  update(user, post) {
+    return post.authorId === user.id; // ⚠️ user is { type, id } — `id` exists, but…
+  }
+}
+```
+
+…and this `superAdmin` hook **never fires** from a route or `gate.allows(...)`:
+
+```ts
+AuthzModule.forRoot({
+  superAdmin: (u) => u.isAdmin, // ⚠️ u is { type, id } — there is NO `isAdmin` field on a UserRef
+});
+```
+
+<Callout type="warn">
+On the **context path**, the `user` passed to your policies, the `before` hook, and the `superAdmin` hook is the raw `UserRef` (`{ type, id }`) — **not** your hydrated `User` entity. Any check that reads a field beyond `type`/`id` (`user.isAdmin`, `user.verified`, `user.email`) will silently see `undefined`. This is the single most common authz mistake. There are two ways to fix it.
+</Callout>
+
+## Fix #1 — hydrate with `resolveUser`
+
+Configure a `resolveUser` hook in the module. The gate calls it with the `UserRef` and uses the returned entity *before* running any policy, `before`, or `superAdmin`. Now those functions receive your real `User`:
+
+```ts
+AuthzModule.forRoot({
+  superAdmin: (u: User) => u.isAdmin, // now works — u is the hydrated entity
+  resolveUser: (ref) => userRepository.findOneBy({ id: ref.id }),
+});
+```
+
+The hook signature is:
+
+```ts
+resolveUser?: (ref: UserRef) => User | undefined | Promise<User | undefined>;
+```
+
+This is the option most apps want: write your policies against your real entity, just as you would in Laravel. It costs one lookup per authorization pass (cache it in your repository/identity-map if that matters for your workload).
+
+<Callout type="info">
+A `resolveUser` that returns nullish (`undefined`/`null`) is treated as **"no user"** — the same deny path as an anonymous request. Use this to reject refs that no longer resolve to a live user (deleted accounts, revoked tokens).
+</Callout>
+
+## Fix #2 — write policies against the ref
+
+If you'd rather not hit the database on every check, write your rules to use only what's on the `UserRef` — the `id`. Ownership checks are perfectly expressible against the id alone:
+
+```ts
+@Policy(Post)
+export class PostPolicy {
+  update(user, post: Post) {
+    return Number(post.authorId) === Number(user.id); // compares ids only — no entity fields
+  }
+}
+```
+
+This keeps the context path DB-free, at the cost of not being able to read richer fields (`isAdmin`, `verified`) without `resolveUser`. Mix and match: hydrate where you need rich rules, compare-by-id where you don't.
+
+## `forUser` bypasses `resolveUser`
+
+The explicit path is different — and simpler. When you call `gate.forUser(entity)`, **you receive exactly what you passed**. The `resolveUser` hook is **not** applied:
+
+```ts
+const user = await userRepository.findOneBy({ id: 1 }); // your real entity
+await this.gate.forUser(user).authorize('update', post); // policies see `user` verbatim — isAdmin, etc.
+```
+
+This makes `forUser` the natural choice in services, jobs, and tests where you already hold the full entity — and the way to authorize when **nestjs-context isn't installed** at all. Because you pass the hydrated object directly, `superAdmin: (u) => u.isAdmin` and `post.authorId === user.id` "just work" with no `resolveUser` configured.
+
+| | Context path (`allows`/`@Can`) | Explicit path (`forUser`) |
+|---|---|---|
+| Source of user | `CONTEXT_ACCESSOR.userRef()` | the value you pass |
+| What policies see (default) | `UserRef` = `{ type, id }` | your object, verbatim |
+| `resolveUser` applied? | **Yes** (if configured) | **No** — never |
+| Needs nestjs-context? | Yes | No |
+
+## Anonymous and deny behavior
+
+authz fails safe everywhere a user is missing:
+
+- **No context accessor, no user** → unauthenticated → **deny**.
+- **`userRef()` returns `undefined`** (context present, nobody logged in) → **deny**.
+- **`resolveUser` returns nullish** → treated as no user → **deny**.
+- **`forUser(undefined)` / `forUser(null)`** → an *explicit* anonymous request → **deny** (the same path as an unauthenticated context).
+
+In every case, your policy and gate functions are **never invoked with `undefined`** — the deny happens before dispatch, so you never write defensive null-checks for the user, and an anonymous request can never throw a `TypeError` or produce a 500. (A per-policy `before` or global `superAdmin` hook *does* still run for an anonymous request and can choose to grant — but the default is deny.)
+
+## Cross-link
+
+The user reference flows from your auth layer, through nestjs-context, into authz. See **[Context](/docs/context)** for how a guard populates `userRef()` and how `tenantId()` / `traceId()` ride along the same request-scoped store.
+
+## Next steps
+
+<Cards>
+  <Card title="Policies" href="/docs/authz/policies" description="Where the resolved user lands — your ability methods." />
+  <Card title="Gates" href="/docs/authz/gates" description="forUser and the BoundGate API in depth." />
+  <Card title="Context" href="/docs/context" description="The shared request context that provides userRef()." />
+  <Card title="RBAC" href="/docs/authz/rbac" description="Deriving roles & permissions from the resolved user." />
+</Cards>

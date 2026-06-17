@@ -1,0 +1,137 @@
+---
+title: Testing
+description: Run unit tests inside a fake context store with runWithContext and enterContext from the nestjs-context-testing package.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Code that reads `Context.userRef()` or `Context.tenantId()` needs an active context to read *from*. In production that context comes from the HTTP middleware; in a unit test there is no request, so you build a fake one. The `@dudousxd/nestjs-context-testing` package gives you two helpers to do exactly that, with sensible defaults so you set only the fields your test cares about.
+
+---
+
+## Install
+
+```bash
+pnpm add -D @dudousxd/nestjs-context-testing
+```
+
+The package re-uses the core `Context` under the hood, so the fake store it builds is the very same ALS store your production code reads from — there is no mock, just a real store with values you chose.
+
+---
+
+## `runWithContext(partial, fn)`
+
+`runWithContext` runs `fn` inside a fake store built from a partial. Any field you omit defaults sensibly, and `traceId` is auto-filled with a random W3C-shaped id when you do not provide one — so you only specify what the test is actually about:
+
+```ts
+import { runWithContext } from '@dudousxd/nestjs-context-testing';
+import { Context } from '@dudousxd/nestjs-context';
+
+it('reads the tenant from context', () => {
+  runWithContext({ tenantId: 't1', userRef: { type: 'user', id: 7 } }, () => {
+    expect(Context.tenantId()).toBe('t1');
+    expect(Context.userRef()).toEqual({ type: 'user', id: 7 });
+    expect(Context.traceId()).toBeDefined(); // auto-filled
+  });
+});
+```
+
+It mirrors `Context.run`: the fake store is active for the duration of `fn` and torn down when `fn` returns. That callback boundary makes it the right choice for **synchronous** assertions and for tests where everything you care about happens inside the callback.
+
+`runWithContext` returns whatever `fn` returns, so you can assert on the result of the code under test:
+
+```ts
+it('stamps the causer on an audit row', () => {
+  const row = runWithContext(
+    { userRef: { type: 'user', id: 42 } },
+    () => auditService.buildRow({ change: 'updated' }),
+  );
+
+  expect(row.causer).toEqual({ type: 'user', id: 42 });
+});
+```
+
+Because `fn` can be async, you can `await` it — but be aware that `run`-style scoping tears the store down when the **callback** returns, not when the awaited work settles. If the code under test reads the context *after* an `await` that escapes the callback, reach for `enterContext` instead.
+
+---
+
+## `enterContext(partial)`
+
+`enterContext` builds the same fake store but installs it with `enterWith` — so it **survives past the call**, with no callback to wrap. This is the helper for code that reads the context *after* the setup returns, typically across an `await`:
+
+```ts
+import { enterContext } from '@dudousxd/nestjs-context-testing';
+import { Context } from '@dudousxd/nestjs-context';
+
+it('keeps the context across an await', async () => {
+  enterContext({ tenantId: 't1', userRef: { type: 'user', id: 7 } });
+
+  // No callback wrapping the rest of the test — the context is simply active now.
+  await service.doSomethingAsync();
+
+  expect(Context.tenantId()).toBe('t1');
+});
+```
+
+The relationship between the two helpers mirrors the core API exactly: `runWithContext` is to `Context.run` what `enterContext` is to `Context.enterWith`. Use `runWithContext` when you have a clean callback to assert inside; use `enterContext` when you want the fake context to persist through the rest of the test body.
+
+<Callout type="info">
+  Both helpers accept a `PartialContextStore` — a `Partial<ContextStore>`, so every field including `traceId` is optional. Pass `{}` to run inside an otherwise-empty context whose only populated field is the auto-generated `traceId`. Augmented (Level 1) fields are accepted too, since the partial is typed against your augmented `ContextStore`.
+</Callout>
+
+---
+
+## Testing consumer code
+
+Most of the time you are not testing the context itself — you are testing a service that *reads* it. Wrap the call in a helper and assert on its output:
+
+```ts
+import { runWithContext } from '@dudousxd/nestjs-context-testing';
+
+describe('OrdersService', () => {
+  it('scopes the query to the current tenant', () => {
+    const spy = jest.spyOn(repo, 'find');
+
+    runWithContext({ tenantId: 'acme' }, () => service.listOrders());
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: 'acme' }),
+    );
+  });
+
+  it('degrades cleanly with no context', () => {
+    // Called outside any context: accessors return undefined, never throw.
+    expect(() => service.listOrders()).not.toThrow();
+  });
+});
+```
+
+That second test captures an important property: the accessors never throw outside a context, they return `undefined`. Testing the no-context path is as simple as *not* wrapping the call.
+
+---
+
+## Resetting config between tests
+
+If your suite exercises the **carrier configuration** — `ContextModule.forRoot({ carrier, serialize, deserialize })` — remember that this config is **process-global** and replaced wholesale on each `forRoot` (see [Customization → cross-process carrier](/docs/context/customization#level-4--cross-process-carrier)). A test that configures one carrier can leak that config into the next test, and a second differing `forRoot` will emit a warning.
+
+Reset it between tests with `Context.resetConfig()`:
+
+```ts
+import { Context } from '@dudousxd/nestjs-context';
+
+afterEach(() => {
+  Context.resetConfig(); // back to default carrier behaviour
+});
+```
+
+<Callout type="warn">
+  You only need `Context.resetConfig()` in suites that actually change the carrier / serialize / deserialize config. Tests that just build a fake store with `runWithContext` / `enterContext` do not touch the process-global config and need no reset.
+</Callout>
+
+---
+
+## Next steps
+
+- [Getting Started](/docs/context/getting-started) — the `run` vs `enterWith` distinction the helpers mirror
+- [Cross-Process](/docs/context/cross-process) — what the carrier config you might be resetting actually does
+- [Customization](/docs/context/customization) — the five customization levels and `resetConfig()` in context

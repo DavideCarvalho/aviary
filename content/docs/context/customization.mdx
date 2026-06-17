@@ -1,0 +1,230 @@
+---
+title: Customization
+description: The five levels of customizing nestjs-context — custom fields, populating values, non-HTTP entrypoints, the cross-process carrier, and swapping the accessor.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`nestjs-context` is plug-and-play with sane defaults — `ContextModule.forRoot()` with no arguments works for most HTTP apps. But every layer is customizable, and the customization surface is organized as **five levels**, ordered from the most common to the most advanced. Nothing here is mandatory; reach for a level only when the default no longer fits.
+
+| Level | What you change | How | Default |
+|-------|-----------------|-----|---------|
+| **1** | Add your own fields | module augmentation | — |
+| **2** | Populate fields / trace id | `initialize` / `traceId` in `forRoot` | `traceparent` header → random |
+| **3** | Non-HTTP entrypoints | `autoMiddleware: false` + `Context.run` | middleware on `*` |
+| **4** | What survives cross-process | `carrier: [...]` / `serialize` override | `traceId` + `tenantId` + `userRef` |
+| **5** | Swap the accessor libs read | override the `CONTEXT_ACCESSOR` token | default accessor |
+
+---
+
+## Level 1 — Custom fields
+
+Add typed fields to the store with module augmentation. This is covered in detail on [The Store](/docs/context/the-store#adding-your-own-typed-fields); the short version:
+
+```ts
+// src/types/context.d.ts
+import '@dudousxd/nestjs-context';
+
+declare module '@dudousxd/nestjs-context' {
+  interface ContextStore {
+    locale?: string;
+    impersonatorId?: string;
+  }
+}
+```
+
+Augmentation only declares the field. Populating it is Level 2.
+
+---
+
+## Level 2 — Populate fields and override the trace id
+
+`ContextModule.forRoot()` accepts hooks that run inside the HTTP middleware at the start of every request. They let you control how the trace id is produced and pre-fill any store field (including your Level 1 custom fields):
+
+```ts
+import { ContextModule, randomTraceId } from '@dudousxd/nestjs-context';
+
+ContextModule.forRoot({
+  // Override how the trace id is produced for a request.
+  traceId: (req) => req.headers['x-correlation-id'] ?? randomTraceId(),
+
+  // Merge extra fields into the initial store at request start.
+  initialize: (req) => ({
+    locale: parseAcceptLanguage(req),
+    tenantId: tenantFromSubdomain(req),
+  }),
+});
+```
+
+The available population options on `ContextModuleOptions`:
+
+- **`traceHeader?: string`** — the header to read the inbound trace id from. Defaults to the W3C `traceparent`. When the header is absent or malformed, a fresh trace id is generated.
+- **`traceId?: (req) => string`** — a full override of trace-id production. When provided, its return value wins over `traceHeader` and the random fallback.
+- **`initialize?: (req) => Partial<ContextStore>`** — a bag of fields merged into the initial store. Ideal for pre-populating `tenantId` and your custom fields.
+
+The `req` passed to these hooks is structural (`{ headers?, [key]: unknown }`), so the same hooks work on Express, Fastify, or any other adapter — the library never depends on a concrete request type.
+
+`userRef` still typically enters **later**, via `Context.set()` in your auth guard, because authentication runs after the context is established (see [Getting Started](/docs/context/getting-started#step-4--populate-the-user-and-tenant)).
+
+### Precedence — the resolved `traceId` and `requestId` always win
+
+The middleware applies values in a specific order, and the order matters:
+
+1. It computes the trace id (from your `traceId` hook → the `traceHeader` → a random fallback) and reads `requestId` from the `x-request-id` header.
+2. It merges the `initialize(req)` bag into the store **first**.
+3. It writes the dedicated `traceId` and `requestId` **last**.
+
+The consequence: the **resolved `traceId` and `requestId` always win**. A stray `traceId` returned by `initialize()` cannot clobber the trace id the middleware resolved — the dedicated path is authoritative.
+
+<Callout type="warn">
+  Two edge cases to keep in mind:
+  <br />— An **empty-string** `x-request-id` (`''`) is treated as **absent** — it will not overwrite a `requestId` you set in `initialize()`.
+  <br />— If `initialize()` returns a `requestId` and there is **no** `x-request-id` header, the value from `initialize()` persists. So `initialize()` is the right place to set a `requestId` fallback.
+</Callout>
+
+---
+
+## Level 3 — Non-HTTP entrypoints
+
+The HTTP middleware is just the default. For GraphQL subscriptions, gRPC, or a queue consumer, turn the middleware off and create the context yourself with the public primitive:
+
+```ts
+ContextModule.forRoot({ autoMiddleware: false });
+```
+
+Then, in your own interceptor, guard, or consumer, wrap the unit of work in `Context.run`:
+
+```ts
+import { Context, randomTraceId } from '@dudousxd/nestjs-context';
+
+// e.g. a queue consumer
+async function handleJob(job: Job) {
+  const store = {
+    traceId: job.data.traceId ?? randomTraceId(),
+    userRef: job.data.userRef,
+    tenantId: job.data.tenantId,
+  };
+  return Context.run(store, () => this.process(job));
+}
+```
+
+Here `Context.run` is the right tool (not `enterWith`): you own a clean callback boundary, so the context is established for the duration of the job and torn down cleanly when it finishes. (For cross-process jobs there is a dedicated helper, `Context.deserialize` — see [Cross-Process](/docs/context/cross-process).)
+
+### Partial HTTP coverage
+
+If you want the middleware on *some* HTTP routes only, you do not need to turn it off entirely — use `forRoutes` and `exclude`:
+
+```ts
+ContextModule.forRoot({
+  forRoutes: ['api/*'],     // default is ['*']
+  exclude: ['health', 'metrics'],
+});
+```
+
+These accept the same route descriptors as Nest's `MiddlewareConsumer`.
+
+---
+
+## Level 4 — Cross-process carrier
+
+When the context crosses a process or queue boundary it is reduced to a **carrier** — a flat, serializable snapshot. By default the carrier includes `traceId`, `tenantId`, and `userRef`. To carry an additional (Level 1) custom field across the boundary, list the fields explicitly:
+
+```ts
+ContextModule.forRoot({
+  carrier: ['traceId', 'tenantId', 'userRef', 'locale'],
+});
+```
+
+Or take full control of both directions with `serialize` / `deserialize` overrides:
+
+```ts
+ContextModule.forRoot({
+  serialize: (store) => ({
+    traceId: store.traceId,
+    tenantId: store.tenantId,
+    userRef: store.userRef,
+    // ...anything else you want on the wire
+  }),
+  deserialize: (carrier) => ({
+    traceId: carrier.traceId,
+    tenantId: carrier.tenantId,
+    userRef: carrier.userRef,
+  }),
+});
+```
+
+The mechanics of `serialize()` / `deserialize()` and the queue patterns that use them are covered on [Cross-Process](/docs/context/cross-process). What matters *here* is a sharp edge in how this config is stored.
+
+<Callout type="warn" title="The carrier config is process-global">
+  The `carrier` / `serialize` / `deserialize` trio does **not** live in the DI container — it lives in a module-level singleton, because it has to be readable from places Nest cannot inject into (queue workers, ORM subscribers, the durable worker). That makes it **process-global**: shared across every `ContextModule.forRoot()` in the process.
+
+  Each `forRoot()` call **replaces the whole carrier config wholesale** — it is never merged. The options of a single `forRoot()` are treated as the *complete* carrier/serialize/deserialize config. This is on purpose: it guarantees you can never end up pairing one app's `serialize` with another app's `deserialize`.
+
+  Because of that, a **second `forRoot()` with a *different* config emits a `console.warn`** — the last one wins, which is rarely what you want. In multi-app setups (one process hosting several Nest apps) or in test suites that configure the module repeatedly, call **`Context.resetConfig()`** between apps/tests to clear the singleton back to defaults.
+</Callout>
+
+```ts
+import { Context } from '@dudousxd/nestjs-context';
+
+// In a test or multi-app harness, between apps:
+Context.resetConfig();
+```
+
+---
+
+## Level 5 — Swapping the accessor
+
+Consumer libraries (audit, filter, telescope) do not import `Context` directly — they inject a read-only **accessor** through the global `CONTEXT_ACCESSOR` token. Because it is a DI token, you can override it.
+
+The accessor surface is intentionally narrow — consumers *read*, they do not drive the lifecycle:
+
+```ts
+interface ContextAccessor {
+  traceId(): string | undefined;
+  tenantId(): string | undefined;
+  userRef(): UserRef | undefined;
+  get(): ContextStore | undefined;
+}
+```
+
+The default implementation, `contextAccessor`, is a thin facade over the singleton `Context`. To change what every consumer sees — for instance, to make an accessor that resolves the *full* user from the `userRef`, or that derives the tenant differently — provide your own implementation against the token:
+
+```ts
+import { Module } from '@nestjs/common';
+import {
+  CONTEXT_ACCESSOR,
+  type ContextAccessor,
+  ContextModule,
+  Context,
+} from '@dudousxd/nestjs-context';
+
+class HydratingAccessor implements ContextAccessor {
+  constructor(private readonly users: UserRepository) {}
+
+  traceId() { return Context.traceId(); }
+  tenantId() { return Context.tenantId(); }
+  userRef() { return Context.userRef(); }
+  get() { return Context.get(); }
+  // ...plus whatever extra resolution your consumers expect
+}
+
+@Module({
+  imports: [ContextModule.forRoot()],
+  providers: [
+    { provide: CONTEXT_ACCESSOR, useClass: HydratingAccessor },
+  ],
+})
+export class AppModule {}
+```
+
+<Callout type="info">
+  Because the override is a normal provider, the usual DI rules apply — `useClass`, `useFactory`, and `useValue` all work, and your custom accessor can inject other providers. Consumer libraries pick it up automatically through `@Optional() @Inject(CONTEXT_ACCESSOR)`.
+</Callout>
+
+---
+
+## Next steps
+
+- [Cross-Process](/docs/context/cross-process) — the full story behind `serialize` / `deserialize` and the queue / durable patterns
+- [Testing](/docs/context/testing) — `Context.resetConfig()` and the testing helpers
+- [The Store](/docs/context/the-store) — the field-level reference for everything you are customizing

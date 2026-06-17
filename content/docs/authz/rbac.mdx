@@ -1,0 +1,180 @@
+---
+title: RBAC (roles & permissions)
+description: The opt-in, persisted roles-and-permissions layer — coarse @Roles checks in the core, and database-backed providers via the typeorm / mikro-orm / prisma adapters.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+[Gates](/docs/authz/gates) and [policies](/docs/authz/policies) answer fine-grained questions ("can *this* user update *this* post?"). **RBAC** — role-based access control — answers coarse-grained ones ("is this user an `editor`?", "does this user hold the `posts.publish` permission?"). authz splits these on purpose: the core ships the coarse *check* machinery with **zero database**, and persistence is an **opt-in adapter** you add only when you need stored roles.
+
+This mirrors how Laravel keeps `Gate`/`Policy` in the framework while roles-and-permissions storage lives in a separate package like `spatie/laravel-permission`.
+
+## Two halves: the seam and the store
+
+RBAC in authz is two cooperating pieces:
+
+1. **The seam (in the core).** The `@Roles` decorator + `RolesGuard`, and the `RoleProvider` / `PermissionProvider` interfaces behind the `ROLE_PROVIDER` / `PERMISSION_PROVIDER` tokens. These let your code *ask* for a user's roles and permissions without knowing where they're stored.
+2. **The store (an adapter).** A persisted implementation of those providers, backed by your database, shipped as `@dudousxd/nestjs-authz-typeorm`, `-mikro-orm`, or `-prisma`.
+
+If you never install an adapter, the seam still exists — role checks simply resolve against whatever `RoleProvider` you supply (or deny when none is present). Nothing in the core touches a database.
+
+## Coarse checks with `@Roles`
+
+The simplest RBAC tool is the `@Roles` decorator, enforced by the `RolesGuard` (registered as an `APP_GUARD` by `AuthzModule.forRoot()`, exactly like the [`CanGuard`](/docs/authz/enforcement)):
+
+```ts
+import { Controller, Post as HttpPost } from '@nestjs/common';
+import { Roles } from '@dudousxd/nestjs-authz';
+
+@Controller('admin')
+export class AdminController {
+  @HttpPost('rebuild-index')
+  @Roles('staff', 'admin') // allowed if the current user holds ANY of these roles
+  rebuildIndex() {}
+}
+```
+
+The guard reads the current user (see [Current user](/docs/authz/current-user)), asks the configured `RoleProvider` for that user's roles, and allows the request when there's an overlap. Like every authz guard, it is **inert on un-annotated routes**.
+
+<Callout type="info">
+`@Roles` is a *coarse* gate. When a decision depends on the resource — "can edit **this** post" — reach for a [policy](/docs/authz/policies) instead. The two compose freely: use `@Roles` to fence off an admin area and policies for per-record rules inside it.
+</Callout>
+
+## The provider seam
+
+`@Roles`, and any permission lookups your policies perform, go through two interfaces:
+
+- **`RoleProvider`** — given the current user reference, returns the roles they hold.
+- **`PermissionProvider`** — resolves the permissions granted to the user (typically the union of the permissions attached to their roles).
+
+The core exports the interfaces and a `defaultRoleResolver` (the `RoleResolver` used to read roles off the user when you don't wire a database). You provide an implementation through DI tokens:
+
+```ts
+import { ROLE_PROVIDER, PERMISSION_PROVIDER } from '@dudousxd/nestjs-authz';
+
+// the RBAC adapter supplies these for you (see below); this is the shape
+{ provide: ROLE_PROVIDER, useClass: MyRoleProvider }
+{ provide: PERMISSION_PROVIDER, useClass: MyPermissionProvider }
+```
+
+Because the providers are optional and token-based, a policy can consult roles/permissions when they're available and fall back gracefully when they're not — the same "degrade cleanly if absent" pattern authz uses for [the current-user accessor](/docs/authz/current-user).
+
+```ts
+@Policy(Post)
+export class PostPolicy {
+  publish(user: User, post: Post) {
+    // a permission-backed rule; resolves against the PermissionProvider
+    return user.can('posts.publish') && post.status === 'draft';
+  }
+}
+```
+
+## Adding persistence
+
+When you want roles and permissions stored in your database, install the adapter for your ORM. It provides the `RoleProvider`/`PermissionProvider` implementations *and* manages the schema.
+
+<Tabs items={['TypeORM', 'MikroORM', 'Prisma']}>
+<Tab value="TypeORM">
+
+```bash
+pnpm add @dudousxd/nestjs-authz-typeorm
+```
+
+</Tab>
+<Tab value="MikroORM">
+
+```bash
+pnpm add @dudousxd/nestjs-authz-mikro-orm
+```
+
+</Tab>
+<Tab value="Prisma">
+
+```bash
+pnpm add @dudousxd/nestjs-authz-prisma
+```
+
+</Tab>
+</Tabs>
+
+### The store is a plain object
+
+Following the ecosystem convention, the store is a **POJO that receives your database connection in its constructor** — it is *not* an `@Injectable`, and it owns no internal DI token. You construct it with the connection you already have, which keeps the adapter from fighting your ORM setup:
+
+```ts
+import { TypeOrmAuthzStore } from '@dudousxd/nestjs-authz-typeorm';
+import { DataSource } from 'typeorm';
+
+const store = new TypeOrmAuthzStore(dataSource, { /* options */ });
+```
+
+You then hand the store to the RBAC module, plugging in the connection through `forRootAsync` so the *app* — not the library — owns the connection token:
+
+```ts
+import { AuthzRbacModule } from '@dudousxd/nestjs-authz-typeorm';
+import { TypeOrmAuthzStore } from '@dudousxd/nestjs-authz-typeorm';
+import { getDataSourceToken } from '@nestjs/typeorm';
+
+@Module({
+  imports: [
+    AuthzRbacModule.forRootAsync({
+      inject: [getDataSourceToken('auth')], // or [DataSource] for the default connection
+      useFactory: (ds) => ({
+        store: new TypeOrmAuthzStore(ds),
+        autoCreateSchema: true, // default; non-destructive (see below)
+        schema: 'auth', // optional Postgres schema (this is a DB schema, not a connection)
+        tableNames: {
+          roles: 'roles',
+          permissions: 'permissions',
+          roleUser: 'role_user',
+          rolePermission: 'role_permission',
+        },
+      }),
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+### Schema management
+
+The adapters expose schema helpers so you can let the library create tables or manage them yourself:
+
+- **`autoCreateSchema: true`** (default) runs `ensureAuthzSchema` at boot. It **creates any missing table and adds any missing column** — and it is strictly **non-destructive**: it never drops or alters existing data, and post-v1 columns are added nullable or with defaults. This is ideal for getting started.
+- **`autoCreateSchema: false`** leaves the schema entirely to you. Use the exported helpers (`createAuthzTables`, `ensureAuthzSchema`) inside your own migrations, or hand-roll the tables. The entity classes (`RoleEntity`, `PermissionEntity`, `RolePermissionEntity`, `UserRoleEntity`) are exported so you can register them with your ORM's migration tooling.
+
+<Callout type="warn">
+`autoCreateSchema: true` is convenient for development and small deployments, but for production with a migration workflow, set it to `false` and apply schema changes through your migration pipeline so changes are reviewed and versioned.
+</Callout>
+
+Adapter specifics:
+
+- **TypeORM** — `TypeOrmAuthzStore`, schema via `ensureAuthzSchema`.
+- **MikroORM** — applies updates through `getUpdateSchemaSQL({ safe: true })`, so generated DDL is non-destructive by construction.
+- **Prisma** — consumer-managed: Prisma owns the schema, so you add the models to your `schema.prisma` and run `prisma migrate`; the adapter reads/writes through your `PrismaClient`.
+
+### Tenant-scoped permissions
+
+Because authz reads the current tenant from [`@dudousxd/nestjs-context`](/docs/context) (`Context.tenantId()`), permission lookups can be **scoped to the active tenant** automatically — the same user can be an `editor` in one tenant and a `viewer` in another, and the provider resolves the right set for the request in flight. No per-call tenant argument required.
+
+## How it fits together
+
+```text
+@Roles / policy permission check
+        │
+        ▼
+ROLE_PROVIDER / PERMISSION_PROVIDER   ← core seam (zero DB)
+        │
+        ▼
+TypeOrmAuthzStore (POJO + your DataSource)   ← opt-in adapter
+        │
+        ▼
+roles / permissions / role_user / role_permission tables
+```
+
+Your policies and `@Roles` annotations never change when you add or remove persistence — they always talk to the seam. The adapter just decides whether the answer comes from memory or from your database.
+
+<Callout type="info">
+RBAC is genuinely optional. Plenty of apps ship with [gates](/docs/authz/gates) and [policies](/docs/authz/policies) alone and never install an adapter. Add RBAC when "who can do what" becomes data your admins edit at runtime rather than logic you deploy.
+</Callout>

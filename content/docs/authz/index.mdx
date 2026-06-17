@@ -6,37 +6,69 @@ icon: ShieldCheck
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-**Authz** brings Laravel's Gate & Policy ergonomics to NestJS. Define abilities once as plain functions or policy classes, then check them anywhere — guards, resolvers, services — with full type inference and zero database coupling.
+**`@dudousxd/nestjs-authz`** brings Laravel's Gate & Policy ergonomics to NestJS. You declare *abilities* — `view`, `update`, `delete`, `access-admin` — as plain TypeScript functions and methods, then check them anywhere: in a route guard, in a service, or from a controller. The decision logic lives in code you can read, test, and step through with a debugger, not in an external policy DSL or a rules table.
 
-<Callout title="Part of the Aviary ecosystem">
-Every Aviary library reads from a shared [Context](/docs/context), so adopting one
-makes the next one cheaper.
+<Callout type="info" title="Alpha">
+This library is in **alpha** (`0.0.0`). The API documented here matches the current source, but it may still change before a stable release. Pin an exact version in production.
 </Callout>
 
-## Install
+## Authorization, not authentication
 
-```bash
-pnpm add @dudousxd/nestjs-authz
-```
+The single most important thing to internalize: **authz answers "what may this user do?", never "who is this user?"**
 
-## Two ways to fly
+- **Authentication** (authn) establishes *identity*. It runs login forms, validates passwords, issues and verifies JWTs or session cookies, and ultimately attaches a user to the request. That is the job of Passport, your JWT guard, your session middleware — whatever you already use.
+- **Authorization** (authz) takes an *already-identified* user and decides whether they're allowed to perform a specific action on a specific resource.
 
-### Plug-n-play
-
-Register `AuthzModule.forRoot()`, define a Gate, and guard a route with `@Can('update', post)`. The defaults assume nothing about your persistence layer.
-
-### Fully configurable
-
-Bring your own subject resolution, policy discovery and response shaping. Authz is the core; storage and ORM-aware adapters layer on top without touching your call sites.
+`@dudousxd/nestjs-authz` does the second job and **only** the second job. It never creates a user, never logs anyone in, never stores a password, and never touches your session store. It reads the current user (see [Current user](/docs/authz/current-user)) and renders a verdict.
 
 <Callout type="info">
-This page is a scaffold. Flesh out concepts, a real quickstart and an API reference
-under `content/docs/authz/`.
+The name is a convention: **auth*z*** = authori**z**ation, as opposed to **auth*n*** = authenticatio**n**. Bring your own authentication layer; authz slots in behind it.
 </Callout>
 
-## Packages in this family
+## The Laravel Gate/Policy idiom
+
+If you've written Laravel, this will feel familiar. The core insight is that an authorization rule is *just a function*:
+
+```ts
+update(user: User, post: Post) {
+  return post.authorId === user.id;
+}
+```
+
+That method **is** the rule. There's no condition-as-data, no policy file to compile, no external evaluator. authz is a thin dispatcher: given an ability name like `'update'` and a resource like a `Post`, it finds the matching function, calls it with `(user, resource)`, and returns the boolean. This is deliberately *not* a CASL/Casbin-style engine — those model "condition as data" and "policy as external rules", which is a different (and heavier) mental model. authz keeps the rule in plain code.
+
+## The three layers
+
+authz gives you three escalating tools. Reach for the simplest one that fits.
+
+1. **[Gates](/docs/authz/gates)** — ad-hoc, model-less abilities. `gate.define('access-admin', (user) => user.role === 'staff')`. Perfect for app-wide checks that aren't tied to a particular entity.
+2. **[Policies](/docs/authz/policies)** — a class per resource, the heart of the library. `PostPolicy` groups every ability for a `Post` (`view`, `update`, `create`, …) with an optional `before` bypass hook. This is where most of your authorization logic lives.
+3. **[RBAC](/docs/authz/rbac)** — an *opt-in, separate* package for persisted roles and permissions. The core has zero database dependencies; RBAC ships as `@dudousxd/nestjs-authz-{typeorm,mikro-orm,prisma}` adapters that you wire in only if you need stored roles.
+
+## Zero-DB core, opt-in persistence
+
+The core package is intentionally storage-agnostic. It has **no database**, no migrations, and no ORM dependency — exactly like Laravel's Gate/Policy sit apart from `spatie/laravel-permission`. Everything in [Gates](/docs/authz/gates), [Policies](/docs/authz/policies), and [Enforcement](/docs/authz/enforcement) runs purely in memory against the user object your auth layer produced.
+
+When you *do* need persisted roles and permissions, you add an RBAC adapter. It plugs in through two optional seams (`RoleProvider` and `PermissionProvider`) without changing any of your policy or gate code. See [RBAC](/docs/authz/rbac).
+
+## Where the current user comes from
+
+authz needs to know the current user to make a decision. It gets it two ways:
+
+- **From [`@dudousxd/nestjs-context`](/docs/context)** — when present, the gate reads the current user for free via the well-known `CONTEXT_ACCESSOR` token. nestjs-context is an *optional* peer dependency, consumed structurally; authz never imports it.
+- **Explicitly** — call `gate.forUser(someUser)` to check any user directly, with no context wiring required.
+
+There's an important subtlety on the context path (you get a raw `UserRef`, not your hydrated entity). The [Current user](/docs/authz/current-user) page covers it in full — read it before you ship.
+
+## Where to go next
 
 <Cards>
-  <Card title="@dudousxd/nestjs-authz" href="https://www.npmjs.com/package/@dudousxd/nestjs-authz" />
-  <Card title="@dudousxd/nestjs-authz-typeorm" href="https://www.npmjs.com/package/@dudousxd/nestjs-authz-typeorm" />
+  <Card title="Getting Started" href="/docs/authz/getting-started" description="Install, register the module, write your first policy, and guard a route." />
+  <Card title="Policies" href="/docs/authz/policies" description="Resource policy classes, ability methods, the before hook, and registration." />
+  <Card title="Gates" href="/docs/authz/gates" description="Ad-hoc, model-less abilities with define / allows / authorize." />
+  <Card title="Enforcement" href="/docs/authz/enforcement" description="@Can, CanGuard, @Roles, RolesGuard, and the optional can-endpoint." />
+  <Card title="Current user" href="/docs/authz/current-user" description="How the gate resolves the user — and the UserRef hydration caveat." />
+  <Card title="Resource resolution" href="/docs/authz/resource-resolution" description="Loading the instance @Can needs, and writing an ORM-backed resolver." />
+  <Card title="RBAC" href="/docs/authz/rbac" description="The opt-in persisted roles & permissions adapters." />
+  <Card title="Ecosystem" href="/docs/authz/ecosystem" description="Inertia, codegen, React, telescope, and filter integrations." />
 </Cards>

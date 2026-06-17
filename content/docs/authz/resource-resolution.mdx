@@ -1,0 +1,163 @@
+---
+title: Resource resolution
+description: How @Can loads the instance it passes to your policy — the default IdParamResourceResolver, the RESOURCE_RESOLVER token, and writing a custom ORM-backed resolver.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`@Can('update', Post)` runs `PostPolicy.update(currentUser, post)` — which means the guard needs a **`post` instance** to pass to your ability method. But the route only has an `:id` in the URL. **Resource resolution** is the bridge: it turns the request into the resource instance your policy expects.
+
+This is the piece of authorization that's easy to overlook and important to get right, so the library makes it explicit and pluggable.
+
+## Why `@Can` needs an instance
+
+Instance abilities are *about the resource*: ownership (`post.authorId === user.id`), state (`post.published`), relationships. The policy can't answer them without the actual object. So before dispatching, the `CanGuard` resolves an instance:
+
+1. Read the `@Can` metadata: the ability name and the resource **class**.
+2. Hand the class and the request `ExecutionContext` to a `ResourceResolver`.
+3. The resolver returns an **instance** (or `undefined` for "not found").
+4. The guard calls `gate.authorize(ability, instance)`.
+
+If the resolver returns `undefined`, the guard **denies** with `ForbiddenException` rather than running your policy with a bogus resource.
+
+## The `ResourceResolver` interface
+
+A resolver is a single-method object:
+
+```ts
+import type { ExecutionContext, Type } from '@nestjs/common';
+
+interface ResourceResolver {
+  resolve(
+    resource: Type<unknown>,
+    ctx: ExecutionContext,
+  ): Promise<object | undefined> | object | undefined;
+}
+```
+
+`resource` is the class from `@Can`; `ctx` is the Nest execution context (use it to reach the request, params, query, body, headers). Return the instance, or `undefined` to signal "not found" → deny.
+
+## The default — `IdParamResourceResolver`
+
+`AuthzModule.forRoot()` / `forRootAsync()` **automatically** register an `IdParamResourceResolver` under the `RESOURCE_RESOLVER` token, so `@Can('update', Post)` works on a clean install with no resolver wiring.
+
+The default reads the route `:id` param and builds a lightweight shim: an object shaped as the resource class with its `id` set.
+
+```ts
+// Given GET /posts/42  with  @Can('update', Post)
+// the default resolver produces, roughly:
+const shim = Object.create(Post.prototype);
+shim.id = '42';
+// → PostPolicy.update(user, shim)
+```
+
+This is enough for **id-based checks** out of the box — for example, ownership comparisons that only need the resource's `id`. Crucially, the shim's prototype is the resource class, so `PolicyRegistry` maps it back to the correct policy.
+
+<Callout type="warn">
+The default shim has **only** an `id`. It does **not** load your row — there's no `authorId`, `published`, or any other column on it. If your policy reads fields beyond `id`, the default resolver isn't enough; register a real, ORM-backed resolver (next section). The default is a zero-config convenience, not a substitute for loading the entity.
+</Callout>
+
+### Changing the param name with `idParam`
+
+If your route uses a param other than `:id` — say `:postId` — point the default resolver at it:
+
+```ts
+AuthzModule.forRoot({
+  idParam: 'postId', // the default IdParamResourceResolver now reads req.params.postId
+});
+```
+
+`idParam` is ignored when you supply your own `resourceResolver` (your resolver owns param reading).
+
+## Writing a custom, ORM-backed resolver
+
+For real apps you'll want to **load the actual entity** so policies can read its fields. Implement `ResourceResolver`, read the id from the context, and fetch from your ORM:
+
+```ts
+// src/orm-resource.resolver.ts
+import { Injectable, type ExecutionContext, type Type } from '@nestjs/common';
+import type { ResourceResolver } from '@dudousxd/nestjs-authz';
+import { EntityManager } from '@mikro-orm/core'; // or your ORM of choice
+
+@Injectable()
+export class OrmResourceResolver implements ResourceResolver {
+  constructor(private readonly em: EntityManager) {}
+
+  async resolve(resource: Type<unknown>, ctx: ExecutionContext): Promise<object | undefined> {
+    const req = ctx.switchToHttp().getRequest<{ params: Record<string, string> }>();
+    const id = req.params.id;
+    if (id === undefined) return undefined;
+    // Load the real row so the policy can read every field.
+    return (await this.em.findOne(resource as any, { id })) ?? undefined;
+  }
+}
+```
+
+Returning `undefined` for a missing row means the guard denies with a 403 — note this collapses "not found" and "forbidden" into a single 403, which is often the desired behavior (don't leak existence to unauthorized callers).
+
+### Registering your resolver
+
+Two ways, both honored from `forRoot` and `forRootAsync`.
+
+**Option A — pass an instance via `resourceResolver`:**
+
+```ts
+AuthzModule.forRoot({
+  resourceResolver: new OrmResourceResolver(em),
+});
+```
+
+**Option B — bind the `RESOURCE_RESOLVER` token directly** (lets Nest inject your resolver's dependencies):
+
+```ts
+import { RESOURCE_RESOLVER } from '@dudousxd/nestjs-authz';
+
+@Module({
+  providers: [
+    { provide: RESOURCE_RESOLVER, useClass: OrmResourceResolver },
+  ],
+})
+export class AppModule {}
+```
+
+<Callout type="info">
+The `CanGuard` lives in the global `AuthzModule`, but it locates the resolver with a **non-strict** lookup — so a `RESOURCE_RESOLVER` provider you bind anywhere in the app (e.g. your root module, where your ORM is available) is found even though the guard isn't in that module. This is what lets Option B work without circular-module gymnastics.
+</Callout>
+
+### Dispatching by resource type
+
+A single resolver handles **every** `@Can` route, so it must work for any resource class. The `resource: Type` argument tells you which entity to load — branch on it, or use a generic ORM lookup as above:
+
+```ts
+async resolve(resource: Type<unknown>, ctx: ExecutionContext) {
+  const id = this.idOf(ctx);
+  if (id === undefined) return undefined;
+  // generic: most ORMs accept the entity class + a where clause
+  return (await this.em.findOne(resource as any, { id })) ?? undefined;
+}
+```
+
+## Class-level abilities skip resolution entirely
+
+Resolution only happens for **instance** abilities. A `@Can('create', Post, { classLevel: true })` route has no instance to load, so the guard **never calls the resolver** — it dispatches `PostPolicy.create(user)` directly against the class.
+
+```ts
+@Post()
+@Can('create', Post, { classLevel: true }) // resolver is skipped; PostPolicy.create(user) runs
+create() {}
+```
+
+The same is true for model-less gate routes (`@Can('access-admin')`): no resource class, no resolution. So you only pay the resolution cost when an ability genuinely needs the instance. See [Enforcement](/docs/authz/enforcement#class-level-abilities).
+
+<Callout type="warn">
+If an **instance** ability route fires and no resolver is registered at all, the guard throws `ResourceResolverMissingException`. In practice you won't hit this — `forRoot` registers the default `IdParamResourceResolver` — but you can if you deliberately unbind `RESOURCE_RESOLVER`.
+</Callout>
+
+## Next steps
+
+<Cards>
+  <Card title="Enforcement" href="/docs/authz/enforcement" description="The @Can decorator and CanGuard that drive resolution." />
+  <Card title="Policies" href="/docs/authz/policies" description="The ability methods that receive the resolved instance." />
+  <Card title="Current user" href="/docs/authz/current-user" description="The other half of the (user, resource) pair." />
+  <Card title="Ecosystem" href="/docs/authz/ecosystem" description="Filter integration — policy-scoped queries." />
+</Cards>
