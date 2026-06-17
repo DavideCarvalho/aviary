@@ -1,0 +1,53 @@
+---
+title: The field guide
+description: Aviary is a habitat of plug-n-play, fully-configurable libraries for NestJS, published under @dudousxd.
+icon: Bird
+---
+
+import { Bell, Boxes, Braces, Filter, Layers, ShieldCheck, Telescope, Workflow } from 'lucide-react';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+**Aviary** is a collection of libraries for NestJS that are designed to live together —
+in the spirit of [TanStack](https://tanstack.com) for the React world and
+[Laravel](https://laravel.com) for the PHP world. Every library is independent, every
+library is typed end-to-end, and every library ships under the `@dudousxd` scope.
+
+Two promises hold across the whole habitat:
+
+1. **Plug-n-play** — import a module, get defaults that work. No config marathon.
+2. **Fully configurable** — every adapter, store, transport and validator is a public API.
+
+They also share a common nervous system: [Context](/docs/context). Adopt one library and
+the next one is cheaper, because they already speak the same language.
+
+<Callout title="Pick a specimen">
+Each library is its own section in the sidebar (tap the selector at the top of it). Start
+with whichever solves your problem today — you can always add more of the flock later.
+</Callout>
+
+## The collection
+
+<Cards>
+  <Card icon={<ShieldCheck />} title="Authz" href="/docs/authz" description="Laravel-style Gates & Policies. Zero-DB authorization core." />
+  <Card icon={<Braces />} title="Codegen" href="/docs/codegen" description="Typed client artifacts with pluggable validators." />
+  <Card icon={<Boxes />} title="Context" href="/docs/context" description="Shared AsyncLocalStorage context for the whole stack." />
+  <Card icon={<Workflow />} title="Durable" href="/docs/durable" description="Durable, resumable cross-app workflows." />
+  <Card icon={<Filter />} title="Filter" href="/docs/filter" description="A query filter language with ORM adapters." />
+  <Card icon={<Layers />} title="Inertia" href="/docs/inertia" description="TypeScript-first Inertia.js adapter, multi-app." />
+  <Card icon={<Bell />} title="Notifications" href="/docs/notifications" description="Laravel-style notifications, many channels." />
+  <Card icon={<Telescope />} title="Telescope" href="/docs/telescope" description="Telescope-style observability console." />
+</Cards>
+
+## Conventions
+
+Across every package you'll find the same shapes:
+
+| You'll see | It means |
+| --- | --- |
+| `XxxModule.forRoot(options)` | Global, configured-once setup. |
+| `XxxModule.forFeature(...)` | Per-feature / per-module registration. |
+| `@dudousxd/nestjs-<lib>-<adapter>` | An optional adapter you opt into. |
+| `@dudousxd/nestjs-<lib>-testing` | First-class testing helpers. |
+
+Ready? Open a specimen from the sidebar, or jump straight to
+[Context](/docs/context) — the library everything else builds on.

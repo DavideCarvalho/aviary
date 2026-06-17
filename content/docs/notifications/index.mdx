@@ -1,0 +1,65 @@
+---
+title: Notifications
+description: Laravel-style notifications for NestJS — one notification, many channels.
+icon: Bell
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+**Notifications** lets you describe a notification once and deliver it across many channels — mail, database, push, SMS, Slack, Discord, Teams, Telegram, webhooks and real-time (SSE / broadcast). Preferences, delivery tracking and queueing are first-class.
+
+<Callout title="Aviary call sign: Nightingale">
+Part of the **Aviary** ecosystem — every library reads from a shared [Context](/docs/context),
+so adopting one makes the next one cheaper.
+</Callout>
+
+## Install
+
+```bash
+pnpm add @dudousxd/nestjs-notifications
+```
+
+## Two ways to fly
+
+### Plug-n-play
+
+Define a notification class with the channels it supports, then `notify(user, new InvoicePaid())`. Database + mail work out of the box.
+
+### Fully configurable
+
+Add channels à la carte, pick a database driver (Prisma / TypeORM / MikroORM), queue with BullMQ or Redis, honour per-user preferences, and track deliveries.
+
+<Callout type="info">
+This page is a scaffold. Flesh out concepts, a real quickstart and an API reference
+under `content/docs/notifications/`.
+</Callout>
+
+## Packages in this family
+
+<Cards>
+  <Card title="@dudousxd/nestjs-notifications-core" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-core" />
+  <Card title="@dudousxd/nestjs-notifications-mail" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-mail" />
+  <Card title="@dudousxd/nestjs-notifications-database" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-database" />
+  <Card title="@dudousxd/nestjs-notifications-broadcast" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-broadcast" />
+  <Card title="@dudousxd/nestjs-notifications-sse" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-sse" />
+  <Card title="@dudousxd/nestjs-notifications-push" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-push" />
+  <Card title="@dudousxd/nestjs-notifications-sms" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-sms" />
+  <Card title="@dudousxd/nestjs-notifications-slack" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-slack" />
+  <Card title="@dudousxd/nestjs-notifications-discord" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-discord" />
+  <Card title="@dudousxd/nestjs-notifications-teams" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-teams" />
+  <Card title="@dudousxd/nestjs-notifications-telegram" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-telegram" />
+  <Card title="@dudousxd/nestjs-notifications-webhook" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-webhook" />
+  <Card title="@dudousxd/nestjs-notifications-preferences" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-preferences" />
+  <Card title="@dudousxd/nestjs-notifications-delivery-tracking" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-delivery-tracking" />
+  <Card title="@dudousxd/nestjs-notifications-bullmq" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-bullmq" />
+  <Card title="@dudousxd/nestjs-notifications-redis" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-redis" />
+  <Card title="@dudousxd/nestjs-notifications-event-emitter" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-event-emitter" />
+  <Card title="@dudousxd/nestjs-notifications-react" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-react" />
+  <Card title="@dudousxd/nestjs-notifications-client" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-client" />
+  <Card title="@dudousxd/nestjs-notifications-codegen" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-codegen" />
+  <Card title="@dudousxd/nestjs-notifications-database-prisma" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-database-prisma" />
+  <Card title="@dudousxd/nestjs-notifications-database-typeorm" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-database-typeorm" />
+  <Card title="@dudousxd/nestjs-notifications-database-mikro-orm" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-database-mikro-orm" />
+  <Card title="@dudousxd/nestjs-notifications-telescope" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-telescope" />
+  <Card title="@dudousxd/nestjs-notifications-testing" href="https://www.npmjs.com/package/@dudousxd/nestjs-notifications-testing" />
+</Cards>

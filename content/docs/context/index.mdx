@@ -1,0 +1,42 @@
+---
+title: Context
+description: Shared AsyncLocalStorage context for NestJS — user, tenant and traceId across the request.
+icon: Boxes
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+**Context** is the connective tissue of the aviary. A single `AsyncLocalStorage` store carries identity (user, tenant) and correlation (traceId) across the entire request — and every other Aviary library reads from it so you wire it once.
+
+<Callout title="Aviary call sign: Swift">
+Part of the **Aviary** ecosystem — every library reads from a shared [Context](/docs/context),
+so adopting one makes the next one cheaper.
+</Callout>
+
+## Install
+
+```bash
+pnpm add @dudousxd/nestjs-context
+```
+
+## Two ways to fly
+
+### Plug-n-play
+
+Add the module, and `ctx.user` / `ctx.tenant` / `ctx.traceId` are available anywhere downstream — no prop drilling, no manual passing.
+
+### Fully configurable
+
+Define your own context shape, seeding strategy and propagation rules. Testing helpers let you run code inside a fabricated context deterministically.
+
+<Callout type="info">
+This page is a scaffold. Flesh out concepts, a real quickstart and an API reference
+under `content/docs/context/`.
+</Callout>
+
+## Packages in this family
+
+<Cards>
+  <Card title="@dudousxd/nestjs-context" href="https://www.npmjs.com/package/@dudousxd/nestjs-context" />
+  <Card title="@dudousxd/nestjs-context-testing" href="https://www.npmjs.com/package/@dudousxd/nestjs-context-testing" />
+</Cards>

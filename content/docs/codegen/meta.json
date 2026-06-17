@@ -1,0 +1,9 @@
+{
+  "root": true,
+  "title": "Codegen",
+  "description": "Extensible codegen for NestJS — typed client artifacts with pluggable validation libraries.",
+  "icon": "Braces",
+  "pages": [
+    "index"
+  ]
+}

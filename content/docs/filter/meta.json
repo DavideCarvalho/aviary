@@ -1,0 +1,9 @@
+{
+  "root": true,
+  "title": "Filter",
+  "description": "A query filter language for NestJS with ORM adapters, a typed client and React bindings.",
+  "icon": "Filter",
+  "pages": [
+    "index"
+  ]
+}

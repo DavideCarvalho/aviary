@@ -1,0 +1,45 @@
+---
+title: Codegen
+description: Extensible codegen for NestJS — typed client artifacts with pluggable validation libraries.
+icon: Braces
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+**Codegen** weaves a fully-typed client out of your NestJS app. Pick the validation library you already use — Zod, Valibot or ArkType — and optionally emit TanStack Query hooks and superjson transport. Works with or without Inertia.
+
+<Callout title="Aviary call sign: Weaver">
+Part of the **Aviary** ecosystem — every library reads from a shared [Context](/docs/context),
+so adopting one makes the next one cheaper.
+</Callout>
+
+## Install
+
+```bash
+pnpm add @dudousxd/nestjs-codegen
+```
+
+## Two ways to fly
+
+### Plug-n-play
+
+Point codegen at your app, choose a validator preset, and get a ready-to-import typed client. One command, sane defaults.
+
+### Fully configurable
+
+Every emitter is a plugin: swap the validator, add TanStack Query, change the transport, or write your own artifact. The pipeline is the public API.
+
+<Callout type="info">
+This page is a scaffold. Flesh out concepts, a real quickstart and an API reference
+under `content/docs/codegen/`.
+</Callout>
+
+## Packages in this family
+
+<Cards>
+  <Card title="@dudousxd/nestjs-codegen" href="https://www.npmjs.com/package/@dudousxd/nestjs-codegen" />
+  <Card title="@dudousxd/nestjs-codegen-zod" href="https://www.npmjs.com/package/@dudousxd/nestjs-codegen-zod" />
+  <Card title="@dudousxd/nestjs-codegen-valibot" href="https://www.npmjs.com/package/@dudousxd/nestjs-codegen-valibot" />
+  <Card title="@dudousxd/nestjs-codegen-arktype" href="https://www.npmjs.com/package/@dudousxd/nestjs-codegen-arktype" />
+  <Card title="@dudousxd/nestjs-codegen-tanstack" href="https://www.npmjs.com/package/@dudousxd/nestjs-codegen-tanstack" />
+</Cards>

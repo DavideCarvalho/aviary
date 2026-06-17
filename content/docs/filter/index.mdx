@@ -1,0 +1,46 @@
+---
+title: Filter
+description: A query filter language for NestJS with ORM adapters, a typed client and React bindings.
+icon: Filter
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+**Filter** turns query strings into safe, typed database filters. Define what's filterable, and Filter handles parsing, validation and translation to your ORM — with a matching typed client and React hooks for the front end.
+
+<Callout title="Aviary call sign: Sandpiper">
+Part of the **Aviary** ecosystem — every library reads from a shared [Context](/docs/context),
+so adopting one makes the next one cheaper.
+</Callout>
+
+## Install
+
+```bash
+pnpm add @dudousxd/nestjs-filter
+```
+
+## Two ways to fly
+
+### Plug-n-play
+
+Declare filterable fields on a resource and get a ready endpoint that accepts a structured filter query, validated and translated for you.
+
+### Fully configurable
+
+Choose your ORM adapter (MikroORM or TypeORM), generate a typed client, and drop in the React bindings — or use just the core and translate filters yourself.
+
+<Callout type="info">
+This page is a scaffold. Flesh out concepts, a real quickstart and an API reference
+under `content/docs/filter/`.
+</Callout>
+
+## Packages in this family
+
+<Cards>
+  <Card title="@dudousxd/nestjs-filter" href="https://www.npmjs.com/package/@dudousxd/nestjs-filter" />
+  <Card title="@dudousxd/nestjs-filter-mikro-orm" href="https://www.npmjs.com/package/@dudousxd/nestjs-filter-mikro-orm" />
+  <Card title="@dudousxd/nestjs-filter-typeorm" href="https://www.npmjs.com/package/@dudousxd/nestjs-filter-typeorm" />
+  <Card title="@dudousxd/nestjs-filter-client" href="https://www.npmjs.com/package/@dudousxd/nestjs-filter-client" />
+  <Card title="@dudousxd/nestjs-filter-react" href="https://www.npmjs.com/package/@dudousxd/nestjs-filter-react" />
+  <Card title="@dudousxd/nestjs-filter-codegen" href="https://www.npmjs.com/package/@dudousxd/nestjs-filter-codegen" />
+</Cards>

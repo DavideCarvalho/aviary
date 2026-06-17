@@ -1,0 +1,42 @@
+---
+title: Authz
+description: Laravel-style Gates & Policies for NestJS — a zero-dependency authorization core.
+icon: ShieldCheck
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+**Authz** brings Laravel's Gate & Policy ergonomics to NestJS. Define abilities once as plain functions or policy classes, then check them anywhere — guards, resolvers, services — with full type inference and zero database coupling.
+
+<Callout title="Aviary call sign: Falcon">
+Part of the **Aviary** ecosystem — every library reads from a shared [Context](/docs/context),
+so adopting one makes the next one cheaper.
+</Callout>
+
+## Install
+
+```bash
+pnpm add @dudousxd/nestjs-authz
+```
+
+## Two ways to fly
+
+### Plug-n-play
+
+Register `AuthzModule.forRoot()`, define a Gate, and guard a route with `@Can('update', post)`. The defaults assume nothing about your persistence layer.
+
+### Fully configurable
+
+Bring your own subject resolution, policy discovery and response shaping. Authz is the core; storage and ORM-aware adapters layer on top without touching your call sites.
+
+<Callout type="info">
+This page is a scaffold. Flesh out concepts, a real quickstart and an API reference
+under `content/docs/authz/`.
+</Callout>
+
+## Packages in this family
+
+<Cards>
+  <Card title="@dudousxd/nestjs-authz" href="https://www.npmjs.com/package/@dudousxd/nestjs-authz" />
+  <Card title="@dudousxd/nestjs-authz-typeorm" href="https://www.npmjs.com/package/@dudousxd/nestjs-authz-typeorm" />
+</Cards>

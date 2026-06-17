@@ -1,0 +1,9 @@
+{
+  "root": true,
+  "title": "Durable",
+  "description": "Durable, resumable cross-app workflows for NestJS.",
+  "icon": "Workflow",
+  "pages": [
+    "index"
+  ]
+}
