@@ -1,0 +1,7 @@
+{
+  "root": true,
+  "title": "Diagnostics",
+  "description": "A vendor-neutral diagnostics channel for the NestJS ecosystem — emit once, observe anywhere.",
+  "icon": "Activity",
+  "pages": ["index", "getting-started", "consumers"]
+}

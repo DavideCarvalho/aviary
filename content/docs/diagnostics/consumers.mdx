@@ -1,0 +1,126 @@
+---
+title: Consumers
+description: Observe diagnostic events from anywhere — Telescope, OpenTelemetry, an APM, a logger, or your own subscriber.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A diagnostic event is just a message on a Node channel. **Anything can read it.** This page shows how to wire the common consumers — and how to write your own in a few lines.
+
+## The wildcard problem (and the registry)
+
+Node's `diagnostics_channel` has **no wildcard subscription**: you can only subscribe to a channel by its exact name. Since channels are named per event (`aviary:authz:decision`, `aviary:billing:invoice-paid`, …), a generic consumer needs to know which channels exist. That's what the registry is for:
+
+```ts
+import diagnostics_channel from 'node:diagnostics_channel';
+import { registeredChannels, onChannelRegistered } from '@dudousxd/nestjs-diagnostics';
+import type { DiagnosticEvent } from '@dudousxd/nestjs-diagnostics';
+
+function observeAll(handler: (e: DiagnosticEvent) => void) {
+  const subscribe = (name: string) =>
+    diagnostics_channel.subscribe(name, (msg) => handler(msg as DiagnosticEvent));
+
+  // every channel registered so far…
+  for (const name of registeredChannels()) subscribe(name);
+  // …and any registered later
+  return onChannelRegistered(subscribe);
+}
+```
+
+`observeAll` is the whole pattern: every consumer below is just a `handler` plugged into it.
+
+## Telescope (batteries-included)
+
+The simplest consumer is [Telescope](/docs/telescope) via the generic watcher — no code, every event becomes a `diagnostic` entry:
+
+```ts
+import { TelescopeModule } from '@dudousxd/nestjs-telescope';
+import { nestjsDiagnosticsTelescope } from '@dudousxd/nestjs-diagnostics-telescope';
+
+TelescopeModule.forRoot({
+  extensions: [nestjsDiagnosticsTelescope()],
+});
+```
+
+Each event lands tagged `lib:<lib>` / `event:<event>`, with `content` = the payload and the envelope's `traceId` for correlation.
+
+## OpenTelemetry
+
+Map each diagnostic event onto the active span as a span event (and attributes). Now your ecosystem's domain events show up inline on your traces:
+
+```ts
+import { trace } from '@opentelemetry/api';
+
+observeAll((e) => {
+  trace.getActiveSpan()?.addEvent(`${e.lib}.${e.event}`, {
+    'aviary.lib': e.lib,
+    'aviary.event': e.event,
+    'aviary.trace_id': e.traceId ?? '',
+    ...flatten(e.payload), // your own payload → attribute mapping
+  });
+});
+```
+
+<Callout type="info">
+Because `emit` already correlates with `traceId` (from [nestjs-context](/docs/context)), you can also stitch events to spans by id when there's no active span on the emitting path — e.g. in a background worker.
+</Callout>
+
+## An APM or a logger
+
+Forwarding to Datadog, Sentry, an HTTP collector, or just structured logs is the same shape — subscribe and ship:
+
+```ts
+observeAll((e) => {
+  logger.info('aviary.diagnostic', {
+    lib: e.lib,
+    event: e.event,
+    traceId: e.traceId,
+    ts: e.ts,
+    ...e.payload,
+  });
+  // or: apm.captureEvent(...), fetch(collectorUrl, { method: 'POST', body: JSON.stringify(e) }), …
+});
+```
+
+<Callout type="warn">
+Keep consumers cheap and non-blocking. The emit path is guarded (`hasSubscribers`, never throws), but a *subscriber* runs inline on the producer's call. Do heavy work (network, disk) off the hot path — batch, queue, or hand off to a worker.
+</Callout>
+
+## A custom subscriber
+
+You don't need a generic observer at all if you only care about one event. Subscribe to a single channel by name:
+
+```ts
+import diagnostics_channel from 'node:diagnostics_channel';
+import { channelName } from '@dudousxd/nestjs-diagnostics';
+import type { DiagnosticEvent } from '@dudousxd/nestjs-diagnostics';
+
+diagnostics_channel.subscribe(channelName('authz', 'decision'), (msg) => {
+  const e = msg as DiagnosticEvent;
+  if (e.payload.allowed === false) alertOnRepeatedDenials(e);
+});
+```
+
+This is the lowest-overhead way to react to a specific ecosystem event — a denial alert, a metric counter, a webhook.
+
+## In tests
+
+Subscribing makes events assertable. Drop a collector in your test, exercise the code, and check what was emitted:
+
+```ts
+import diagnostics_channel from 'node:diagnostics_channel';
+import { channelName } from '@dudousxd/nestjs-diagnostics';
+
+const seen: any[] = [];
+const channel = channelName('authz', 'decision');
+const handler = (msg: unknown) => seen.push(msg);
+
+diagnostics_channel.subscribe(channel, handler);
+// … exercise the code that emits …
+diagnostics_channel.unsubscribe(channel, handler);
+
+expect(seen).toHaveLength(1);
+expect(seen[0].payload.allowed).toBe(false);
+```
+
+Note that, by design, **events are only built when something is subscribed** — so asserting on them requires an active subscription, exactly as above.

@@ -1,4 +1,5 @@
 import {
+  Activity,
   Bell,
   Boxes,
   Braces,
@@ -119,6 +120,17 @@ export const libs: AviaryLib[] = [
     iconName: 'Telescope',
     packages: 19,
     stage: 'wip',
+  },
+  {
+    slug: 'diagnostics',
+    pkg: 'nestjs-diagnostics',
+    name: 'Diagnostics',
+    blurb: 'A vendor-neutral diagnostics channel for the ecosystem — emit once over Node’s diagnostics_channel, observe anywhere (Telescope, OpenTelemetry, your own subscriber).',
+    bird: 'Starling',
+    icon: Activity,
+    iconName: 'Activity',
+    packages: 2,
+    stage: 'alpha',
   },
 ];
 

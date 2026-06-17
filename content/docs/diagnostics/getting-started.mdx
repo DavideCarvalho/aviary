@@ -1,0 +1,68 @@
+---
+title: Getting Started
+description: Install the package, emit diagnostic events, and correlate them with a trace id.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Install
+
+```bash
+pnpm add @dudousxd/nestjs-diagnostics
+```
+
+There's nothing to register — no module, no provider. The package is a set of functions over Node's `diagnostics_channel`.
+
+## Emitting events
+
+Call `emit(lib, event, payload)` wherever something interesting happens:
+
+```ts
+import { emit } from '@dudousxd/nestjs-diagnostics';
+
+emit('billing', 'invoice-paid', { invoiceId: 'inv_123', amount: 4200 });
+```
+
+- `lib` identifies the emitting library (`'billing'`, `'authz'`, `'jobs'`…).
+- `event` is the event within it (`'invoice-paid'`, `'decision'`…).
+- `payload` is your own data.
+
+The event is published on the channel `aviary:billing:invoice-paid`.
+
+<Callout type="info" title="Free when unobserved">
+`emit` builds and publishes the envelope **only when the channel has subscribers** (`channel.hasSubscribers`). A production process with no observer attached pays essentially nothing per call — so libraries can emit by default. `emit` also never throws: observability must never break the code path that produced the event.
+</Callout>
+
+## Trace correlation
+
+If your app uses [`@dudousxd/nestjs-context`](/docs/context), register its accessor once and every `emit` auto-fills `traceId` from the active request:
+
+```ts
+import { setContextAccessor, CONTEXT_ACCESSOR } from '@dudousxd/nestjs-diagnostics';
+
+// e.g. in a Nest module, after resolving the optional CONTEXT_ACCESSOR provider:
+setContextAccessor(accessor);
+```
+
+`CONTEXT_ACCESSOR` is `Symbol.for('@dudousxd/nestjs-context:accessor')` — the same token nestjs-context publishes under, so any object structurally matching the accessor works. nestjs-context is an optional peer; it is never imported here.
+
+Need an explicit id instead? Pass it in `opts`:
+
+```ts
+emit('billing', 'invoice-paid', payload, { traceId: req.id });
+```
+
+## API surface
+
+| Export | Description |
+| --- | --- |
+| `emit(lib, event, payload, opts?)` | Build + publish a `DiagnosticEvent` on `aviary:<lib>:<event>` (only when subscribed). |
+| `channelName(lib, event)` | The `aviary:<lib>:<event>` string. |
+| `getChannel(lib, event)` | The memoized `diagnostics_channel` for a pair (also registers its name). |
+| `CHANNEL_PREFIX` | `'aviary'`. |
+| `registeredChannels()` | Snapshot of every registered channel name. |
+| `onChannelRegistered(cb)` | Notified once per future channel registration; returns an unsubscribe. |
+| `setContextAccessor(accessor \| null)` | Register the accessor `emit` reads `traceId` from. |
+| `CONTEXT_ACCESSOR` | Shared DI token for the optional context accessor. |
+
+The `registeredChannels` / `onChannelRegistered` pair is what makes generic, wildcard-style observing possible — see [Consumers](/docs/diagnostics/consumers).

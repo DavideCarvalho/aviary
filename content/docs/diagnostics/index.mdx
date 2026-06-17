@@ -1,0 +1,71 @@
+---
+title: Introduction
+description: A vendor-neutral diagnostics channel for the NestJS ecosystem — emit once, observe anywhere.
+icon: Activity
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
+
+**`@dudousxd/nestjs-diagnostics`** is a tiny, standard convention for `@dudousxd/nestjs-*` libraries to emit observability events over Node's built-in [`diagnostics_channel`](https://nodejs.org/api/diagnostics_channel.html). A library calls `emit('authz', 'decision', payload)` and is done — whoever wants to observe it subscribes. It costs essentially nothing when nobody is listening, and never throws.
+
+<Callout type="info" title="Alpha">
+Published as alpha. The API here matches the current source. Pin a version in production.
+</Callout>
+
+## The point: producers stay decoupled from consumers
+
+The key idea is that **the channel is neutral**. A library that emits a diagnostic event doesn't know — and doesn't care — who reads it. [Telescope](/docs/telescope) is one consumer (the batteries-included one), but the same event can just as easily feed an OpenTelemetry span, an APM tool, a custom logger, or an assertion in a test. See [Consumers](/docs/diagnostics/consumers).
+
+This is why it's a separate package from Telescope: if emitting required Telescope, every producing library would be coupled to it. Instead, producers depend only on this thin layer, and observability is opt-in on the *consumer* side.
+
+## The convention
+
+Every event flows over a channel named **`aviary:<lib>:<event>`** and carries a standard envelope:
+
+```ts
+interface DiagnosticEvent<TPayload = unknown> {
+  ts: number;        // Date.now() at publish time
+  lib: string;       // the <lib>, e.g. "authz"
+  event: string;     // the <event>, e.g. "decision"
+  traceId?: string;  // auto-filled from nestjs-context when present
+  payload: TPayload; // your library-defined data
+}
+```
+
+## Quickstart
+
+<Steps>
+<Step>
+
+Install:
+
+```bash
+pnpm add @dudousxd/nestjs-diagnostics
+```
+
+</Step>
+<Step>
+
+Emit an event from anywhere — it's published only when something is subscribed:
+
+```ts
+import { emit } from '@dudousxd/nestjs-diagnostics';
+
+emit('billing', 'invoice-paid', { invoiceId: 'inv_123', amount: 4200 });
+```
+
+</Step>
+<Step>
+
+Observe it from any consumer — the simplest being [Telescope](/docs/telescope) with the one generic watcher, or [your own subscriber](/docs/diagnostics/consumers#a-custom-subscriber). See [Getting Started](/docs/diagnostics/getting-started) for trace correlation.
+
+</Step>
+</Steps>
+
+## Where to go next
+
+<Cards>
+  <Card title="Getting Started" href="/docs/diagnostics/getting-started" description="Install, emit events, and auto-fill traceId from nestjs-context." />
+  <Card title="Consumers" href="/docs/diagnostics/consumers" description="Wire Telescope, OpenTelemetry, an APM, or your own subscriber to the channel." />
+</Cards>
