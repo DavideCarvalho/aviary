@@ -80,10 +80,6 @@ TelescopeModule.forRoot({
 
 Now every unexpected `403` lands in Telescope tagged `lib:authz` / `event:decision`, showing exactly which policy method ran and why it denied — authorization failures stop being opaque ("forbidden — but why?").
 
-<Callout type="warn" title="Renamed in alpha">
-The dedicated `@dudousxd/nestjs-authz-telescope` package is **retired** — its job is now done by the generic `@dudousxd/nestjs-diagnostics-telescope` watcher. The `AUTHZ_DECISION_CHANNEL` constant was likewise removed; the channel name is now derived through `@dudousxd/nestjs-diagnostics`.
-</Callout>
-
 ## Typed client — `@dudousxd/nestjs-authz-client`
 
 The client package provides the runtime that the [codegen](#codegen--dudousxdnestjs-authz-codegen) output builds on — the small surface your frontend calls to evaluate abilities against the backend (for cases where the answer can't be precomputed and shipped with the page).
