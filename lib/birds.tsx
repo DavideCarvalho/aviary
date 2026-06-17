@@ -91,6 +91,27 @@ const art: Record<string, ReactElement> = {
       <path d="M-12 60 l0 8 M12 60 l0 8" stroke={INK} strokeOpacity="0.5" strokeWidth="3" strokeLinecap="round" />
     </g>
   ),
+  // Speckled starling — the specks are the call sign: each one a diagnostic
+  // event landing on the channel.
+  Starling: (
+    <g>
+      <path d="M-20 6 C-25 -19 -3 -33 17 -27 C33 -22 34 2 20 11 C9 17 -8 19 -20 6 Z" fill={C} />
+      <path d="M17 9 C32 9 45 5 54 -1 L50 9 L47 18 C39 15 27 15 17 13 Z" fill={C} />
+      <circle cx="-15" cy="-19" r="10" fill={C} />
+      <path d="M-23 -22 l-17 1 l15 6 z" fill={C} />
+      <circle cx="-16" cy="-21" r="1.7" fill={INK} />
+      <path d="M-5 16 l0 13 M9 18 l0 12" stroke={C} strokeWidth="3" strokeLinecap="round" />
+      <path d="M-5 29 l-5 4 M-5 29 l5 4 M9 30 l-5 4 M9 30 l5 4" stroke={C} strokeWidth="2.5" strokeLinecap="round" />
+      <circle cx="-7" cy="-7" r="1.9" fill={BONE} />
+      <circle cx="4" cy="-11" r="1.9" fill={BONE} />
+      <circle cx="13" cy="-3" r="1.9" fill={BONE} />
+      <circle cx="-1" cy="2" r="1.9" fill={BONE} />
+      <circle cx="9" cy="5" r="1.9" fill={BONE} />
+      <circle cx="18" cy="1" r="1.7" fill={BONE} />
+      <circle cx="-12" cy="3" r="1.7" fill={BONE} />
+      <circle cx="3" cy="-3" r="1.6" fill={BONE} />
+    </g>
+  ),
 };
 
 // slug → { call sign, plate number }
@@ -103,6 +124,7 @@ const meta: Record<string, { call: keyof typeof art; plate: string }> = {
   inertia: { call: 'Swallow', plate: '06' },
   notifications: { call: 'Nightingale', plate: '07' },
   telescope: { call: 'Owl', plate: '08' },
+  diagnostics: { call: 'Starling', plate: '09' },
 };
 
 export interface Specimen {
