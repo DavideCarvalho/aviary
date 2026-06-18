@@ -103,7 +103,7 @@ export const libs: AviaryLib[] = [
     slug: 'notifications',
     pkg: 'nestjs-notifications',
     name: 'Notifications',
-    blurb: 'Laravel-style notifications for NestJS — one notification, many channels (mail, database, broadcast).',
+    blurb: 'Laravel-style notifications for NestJS — one notification, many channels (mail, database, Slack) plus real-time in-app delivery over SSE or WebSocket.',
     bird: 'Nightingale',
     icon: Bell,
     iconName: 'Bell',
