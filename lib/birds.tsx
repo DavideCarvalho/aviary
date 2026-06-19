@@ -91,6 +91,22 @@ const art: Record<string, ReactElement> = {
       <path d="M-12 60 l0 8 M12 60 l0 8" stroke={INK} strokeOpacity="0.5" strokeWidth="3" strokeLinecap="round" />
     </g>
   ),
+  // Cockatiel — the swept-back crest and the round cheek patch are the call
+  // sign, mirroring the resilience banner: a circuit that bends but holds.
+  Cockatiel: (
+    <g>
+      <path d="M-18 8 C-22 -16 -4 -30 14 -24 C30 -18 30 4 18 12 C8 18 -6 20 -18 8 Z" fill={C} />
+      <path d="M16 10 C30 8 40 0 47 -11 C39 -5 28 -3 18 -1 Z" fill={C} />
+      <circle cx="-12" cy="-18" r="9" fill={C} />
+      <path d="M-20 -19 l-11 -2 l9 6 z" fill={C} />
+      <path d="M-14 -25 C-12 -37 -4 -44 6 -46" stroke={C} strokeWidth="3" fill="none" strokeLinecap="round" />
+      <path d="M-11 -26 C-6 -36 3 -41 12 -41" stroke={C} strokeWidth="3" fill="none" strokeLinecap="round" />
+      <path d="M-8 -25 C-2 -33 7 -36 15 -35" stroke={C} strokeWidth="3" fill="none" strokeLinecap="round" />
+      <circle cx="-15" cy="-13" r="3" fill={BONE} />
+      <circle cx="-13" cy="-20" r="1.7" fill={INK} />
+      <path d="M-6 16 l0 11 M7 18 l0 10" stroke={C} strokeWidth="3" strokeLinecap="round" />
+    </g>
+  ),
   // Speckled starling — the specks are the call sign: each one a diagnostic
   // event landing on the channel.
   Starling: (
@@ -125,6 +141,7 @@ const meta: Record<string, { call: keyof typeof art; plate: string }> = {
   notifications: { call: 'Nightingale', plate: '07' },
   telescope: { call: 'Owl', plate: '08' },
   diagnostics: { call: 'Starling', plate: '09' },
+  resilience: { call: 'Cockatiel', plate: '10' },
 };
 
 export interface Specimen {

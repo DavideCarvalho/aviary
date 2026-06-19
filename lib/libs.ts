@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   Telescope,
   Workflow,
+  Zap,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -130,6 +131,17 @@ export const libs: AviaryLib[] = [
     icon: Activity,
     iconName: 'Activity',
     packages: 2,
+    stage: 'alpha',
+  },
+  {
+    slug: 'resilience',
+    pkg: 'nestjs-resilience',
+    name: 'Resilience',
+    blurb: 'Composable timeout, retry, circuit-breaker and failover policies for NestJS — with a pluggable, distributed breaker store (Redis, Postgres, SQLite).',
+    bird: 'Cockatiel',
+    icon: Zap,
+    iconName: 'Zap',
+    packages: 6,
     stage: 'alpha',
   },
 ];

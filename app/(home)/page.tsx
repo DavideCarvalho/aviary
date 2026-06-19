@@ -31,7 +31,7 @@ export default function HomePage() {
             style={{ animationDelay: '120ms' }}
           >
             Aviary is a habitat of plug-n-play, fully-configurable libraries for NestJS —
-            Laravel-grade ergonomics, TanStack-grade composability. Use one. Use all eight.
+            Laravel-grade ergonomics, TanStack-grade composability. Use one. Use all ten.
             They speak the same language.
           </p>
 
