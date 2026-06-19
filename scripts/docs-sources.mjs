@@ -77,4 +77,15 @@ export const sources = [
     publicDir: 'website/public',
     migrated: true,
   },
+  {
+    slug: 'resilience',
+    name: 'Resilience',
+    description: "Composable timeout, retry, circuit-breaker and failover policies — with a pluggable, distributed breaker store.",
+    icon: 'Zap',
+    repo: 'DavideCarvalho/nestjs-resilience',
+    ref: 'master',
+    path: 'website/content/docs',
+    repoDir: 'nestjs-resilience',
+    migrated: true,
+  },
 ];

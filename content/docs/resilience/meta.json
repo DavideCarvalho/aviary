@@ -1,7 +1,0 @@
-{
-  "root": true,
-  "title": "Resilience",
-  "description": "Composable resilience policies for NestJS — timeout, retry, circuit breaker and failover, with a pluggable distributed store.",
-  "icon": "Zap",
-  "pages": ["index"]
-}
