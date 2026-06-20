@@ -17,7 +17,7 @@ interface ImageProcessor { convert(input, preset): Promise<ConversionResult> }
 
 **`StorageManager`** — the named-disk registry behind `media.disk(name)`.
 
-**`MediaLibrary`** — the camada-2 orchestrator: `attach / list / delete / url / ensureConversion`, collections, MIME validation, conversion generation, and diagnostics emission.
+**`MediaLibrary`** — the layer-2 orchestrator: `attach / list / delete / url / ensureConversion`, collections, MIME validation, conversion generation, and diagnostics emission.
 
 **The upload engine** — `ResumableUploadManager` plus the framework-agnostic `TusUploadHandler` (request → response, no web framework).
 

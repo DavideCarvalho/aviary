@@ -167,7 +167,7 @@ const link = await this.media.disk('s3').temporaryUrl(`reports/${id}.csv`, 300);
 ## Troubleshooting
 
 <Callout type="warn" title="`MediaLibrary is not configured`">
-You called `media.library` without passing a `store` to `MediaModule`. The two layers are independent — add a `store` to enable camada 2, or use `media.disk(...)` for raw storage.
+You called `media.library` without passing a `store` to `MediaModule`. The two layers are independent — add a `store` to enable layer 2, or use `media.disk(...)` for raw storage.
 </Callout>
 
 <Callout type="warn" title="`temporaryUrl` throws on the local disk">

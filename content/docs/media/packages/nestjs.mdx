@@ -27,8 +27,8 @@ The single injectable surface:
 
 ```ts
 class MediaService {
-  disk(name?: string): StorageDriver;    // camada 1
-  get library(): MediaLibrary;           // camada 2 (throws if no store)
+  disk(name?: string): StorageDriver;    // layer 1
+  get library(): MediaLibrary;           // layer 2 (throws if no store)
   get uploads(): ResumableUploadManager; // resumable (throws if no uploadSessions)
 }
 ```

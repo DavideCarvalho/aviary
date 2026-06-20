@@ -1,6 +1,6 @@
 ---
 title: The two layers
-description: Storage (camada 1) is a disk-agnostic filesystem; media-library (camada 2) attaches files to entities on top of it. How they relate, and why they're split.
+description: Storage (layer 1) is a disk-agnostic filesystem; media-library (layer 2) attaches files to entities on top of it. How they relate, and why they're split.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -13,7 +13,7 @@ Plenty of file handling is *not* about entities. Writing a generated PDF to disk
 
 Bundling both into one rigid API would make the simple case carry the weight of the complex one. So media keeps them as two layers with a single, narrow seam: **the media-library writes bytes through a disk and records metadata through a store.** Everything else is independent.
 
-## Camada 1 — Storage
+## Layer 1 — Storage
 
 A `StorageManager` holds named disks; each disk is a `StorageDriver`. You get it from `MediaService.disk()`:
 
@@ -57,7 +57,7 @@ import { StorageManager, type StorageDriver } from '@dudousxd/nestjs-media/stora
 This is the whole reason media *absorbed* storage instead of shipping a separate `nestjs-storage`: there's one filesystem abstraction, and the media library is just its biggest consumer.
 </Callout>
 
-## Camada 2 — Media-library
+## Layer 2 — Media-library
 
 `MediaLibrary` (exposed as `media.library`) attaches files to **owning entities** in named **collections**. It writes the bytes through a disk and persists a `MediaRecord` through a `MediaStore`.
 

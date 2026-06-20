@@ -11,11 +11,11 @@ The complete configuration surface for `@dudousxd/nestjs-media`.
 
 ```ts
 interface MediaModuleOptions {
-  // ── storage (camada 1) ──────────────────────────────────────────────
+  // ── storage (layer 1) ──────────────────────────────────────────────
   default: string;                          // name of the default disk
   disks: Record<string, StorageDriver>;     // named disks
 
-  // ── media-library (camada 2) — enabled when `store` is present ───────
+  // ── media-library (layer 2) — enabled when `store` is present ───────
   store?: MediaStore;
   collections?: MediaCollectionConfig[];
   imageProcessor?: ImageProcessor;
@@ -82,8 +82,8 @@ interface ConversionPreset {
 
 ```ts
 class MediaService {
-  disk(name?: string): StorageDriver;   // camada 1
-  get library(): MediaLibrary;          // camada 2 — throws if no store configured
+  disk(name?: string): StorageDriver;   // layer 1
+  get library(): MediaLibrary;          // layer 2 — throws if no store configured
   get uploads(): ResumableUploadManager;// resumable — throws if no uploadSessions configured
 }
 ```

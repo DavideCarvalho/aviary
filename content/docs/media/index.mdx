@@ -1,6 +1,6 @@
 ---
 title: Media
-description: Filesystem and media-library for NestJS in one package — the Laravel/spatie feel for files. Disk-agnostic storage, resumable uploads, entity attachments, and image conversions, all wired into the ecosystem's diagnostics, codegen, and React colas.
+description: Filesystem and media-library for NestJS in one package — the Laravel/spatie feel for files. Disk-agnostic storage, resumable uploads, entity attachments, and image conversions, all wired into the ecosystem's diagnostics, codegen, and React glue points.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -8,9 +8,9 @@ import { Callout } from 'fumadocs-ui/components/callout';
 **`@dudousxd/nestjs-media`** brings the Laravel + spatie/media-library experience to NestJS — and it does it in a *single* package. Where a Node backend usually stitches together a storage SDK, a hand-rolled upload endpoint, a thumbnail script, and a pile of glue, media gives you one cohesive module: disk-agnostic storage, resumable uploads, file-to-entity attachments, and image conversions — all idiomatic NestJS, all behind small contracts you can swap.
 
 <Callout type="info" title="Two layers, one package">
-**Camada 1 — Storage:** a disk-agnostic `put / get / url / temporaryUrl / stream / delete` API over local, S3, or in-memory disks.
+**Layer 1 — Storage:** a disk-agnostic `put / get / url / temporaryUrl / stream / delete` API over local, S3, or in-memory disks.
 
-**Camada 2 — Media-library:** attach files to your entities in named collections, with image conversions — built on top of the storage layer.
+**Layer 2 — Media-library:** attach files to your entities in named collections, with image conversions — built on top of the storage layer.
 
 You can use the bottom layer entirely on its own.
 </Callout>
@@ -31,7 +31,7 @@ Handling user files in a backend is deceptively fiddly, and the pain shows up in
         your code
             │
    media.library            media.disk(...)
-   (camada 2)               (camada 1)
+   (layer 2)               (layer 1)
    attach / list /          put / get / url /
    url / conversions        stream / delete
             │                    │
@@ -49,7 +49,7 @@ The two layers share nothing but the storage facade: the media-library writes by
 - **Media-library**: spatie-style collections (single-file or multi), ordering, MIME validation, custom properties, and `attach / list / delete / url`.
 - **Image conversions**: a pluggable `ImageProcessor` (sharp by default), generated **lazily** on first access (and cached) or **eagerly** on upload.
 - **Four ORM stores**: TypeORM, MikroORM, Drizzle, Prisma — POJO adapters that all satisfy the same `MediaStore` contract, with non-destructive auto-schema where the ORM allows.
-- **Ecosystem colas**: `nestjs:media:*` diagnostics channels, a [Telescope](/docs/media/telescope) watcher, a codegen-emitted typed client, and a React `useMediaUpload` hook + `<MediaUploader/>`.
+- **Ecosystem glue points**: `nestjs:media:*` diagnostics channels, a [Telescope](/docs/media/telescope) watcher, a codegen-emitted typed client, and a React `useMediaUpload` hook + `<MediaUploader/>`.
 
 ## When (and when not) to use it
 
@@ -63,6 +63,6 @@ import { StorageManager, type StorageDriver } from '@dudousxd/nestjs-media/stora
 
 ## How it fits the ecosystem
 
-media is plugged into the same four "colas" every `@dudousxd/nestjs-*` library shares — it emits to [diagnostics](/docs/media/diagnostics) channels that [Telescope](/docs/media/telescope) consumes, contributes a typed client through [Codegen](/docs/media/codegen), and ships a `-react` family package. See [Concepts → Diagnostics & the colas](/docs/media/concepts/diagnostics) for the wiring.
+media is plugged into the same four glue points every `@dudousxd/nestjs-*` library shares — it emits to [diagnostics](/docs/media/diagnostics) channels that [Telescope](/docs/media/telescope) consumes, contributes a typed client through [Codegen](/docs/media/codegen), and ships a `-react` family package. See [Concepts → Diagnostics & the glue points](/docs/media/concepts/diagnostics) for the wiring.
 
 Continue to [Getting Started](/docs/media/getting-started).

@@ -1,6 +1,6 @@
 ---
 title: Overview
-description: The full nestjs-media package set — core, the NestJS module, the browser client, disks, ORM stores, the image engine, and the ecosystem colas.
+description: The full nestjs-media package set — core, the NestJS module, the browser client, disks, ORM stores, the image engine, and the ecosystem glue points.
 ---
 
 Everything ships under the `@dudousxd/nestjs-media*` scope, versioned together. Install only what you use — disks, stores, and the image engine are separate packages so you never pull an S3 SDK or sharp into an app that doesn't need it.
@@ -36,4 +36,4 @@ Everything ships under the `@dudousxd/nestjs-media*` scope, versioned together. 
                           -telescope ──────────────┘  (diagnostics consumer)
 ```
 
-`-core` defines the contracts; everything else either implements one (disks, stores, the image engine) or consumes the library (the umbrella module, the colas). Start at [`-core`](/docs/media/packages/core) for the SPIs, or jump to the package you're wiring.
+`-core` defines the contracts; everything else either implements one (disks, stores, the image engine) or consumes the library (the umbrella module, the glue points). Start at [`-core`](/docs/media/packages/core) for the SPIs, or jump to the package you're wiring.

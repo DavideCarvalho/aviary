@@ -33,7 +33,7 @@ per-call  ▸  per-disk  ▸  global  ▸  auto
 ```
 
 <Callout type="info" title="The override is the point">
-Even on an S3 disk that *could* go direct, you can force `proxy` for a specific upload — e.g. user-supplied images you want to virus-scan or re-encode on the way in — and force `direct` elsewhere for raw throughput. The driver's capability sets the default; you keep the final say. This is exactly the "pela API ou pelo disco" choice: the disk proposes, the call disposes.
+Even on an S3 disk that *could* go direct, you can force `proxy` for a specific upload — e.g. user-supplied images you want to virus-scan or re-encode on the way in — and force `direct` elsewhere for raw throughput. The driver's capability sets the default; you keep the final say. This is exactly the override choice: the disk proposes, the call disposes.
 </Callout>
 
 ## Resumable (tus) server
