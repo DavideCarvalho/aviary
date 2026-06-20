@@ -47,12 +47,19 @@ pnpm add @dudousxd/nestjs-diagnostics
 </Step>
 <Step>
 
-Emit an event from anywhere — it's published only when something is subscribed:
+Emit an event from a provider — it's published only when something is subscribed:
 
 ```ts
+import { Injectable } from '@nestjs/common';
 import { emit } from '@dudousxd/nestjs-diagnostics';
 
-emit('billing', 'invoice-paid', { invoiceId: 'inv_123', amount: 4200 });
+@Injectable()
+export class BillingService {
+  async markInvoicePaid(invoiceId: string, amount: number) {
+    // … your domain logic …
+    emit('billing', 'invoice-paid', { invoiceId, amount });
+  }
+}
 ```
 
 </Step>

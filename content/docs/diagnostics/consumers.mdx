@@ -16,18 +16,22 @@ import diagnostics_channel from 'node:diagnostics_channel';
 import { registeredChannels, onChannelRegistered } from '@dudousxd/nestjs-diagnostics';
 import type { DiagnosticEvent } from '@dudousxd/nestjs-diagnostics';
 
-function observeAll(handler: (e: DiagnosticEvent) => void) {
-  const subscribe = (name: string) =>
-    diagnostics_channel.subscribe(name, (msg) => handler(msg as DiagnosticEvent));
+/** Subscribe a handler to every channel (current + future); returns a teardown. */
+export function observeAll(handler: (e: DiagnosticEvent) => void): () => void {
+  const offs: Array<() => void> = [];
+  const subscribe = (name: string) => {
+    const listener = (msg: unknown) => handler(msg as DiagnosticEvent);
+    diagnostics_channel.subscribe(name, listener);
+    offs.push(() => diagnostics_channel.unsubscribe(name, listener));
+  };
 
-  // every channel registered so far…
-  for (const name of registeredChannels()) subscribe(name);
-  // …and any registered later
-  return onChannelRegistered(subscribe);
+  for (const name of registeredChannels()) subscribe(name); // every channel so far…
+  offs.push(onChannelRegistered(subscribe));                // …and any registered later
+  return () => offs.forEach((off) => off());
 }
 ```
 
-`observeAll` is the whole pattern: every consumer below is just a `handler` plugged into it.
+`observeAll` is the whole pattern: every consumer below is just a `handler` plugged into it from a NestJS provider, subscribed on boot and torn down on shutdown.
 
 ## Telescope (batteries-included)
 
@@ -46,20 +50,34 @@ Each event lands tagged `lib:<lib>` / `event:<event>`, with `content` = the payl
 
 ## OpenTelemetry
 
-Map each diagnostic event onto the active span as a span event (and attributes). Now your ecosystem's domain events show up inline on your traces:
+Map each diagnostic event onto the active span as a span event (and attributes). Now your ecosystem's domain events show up inline on your traces. Wire it in a provider so the subscription follows the app lifecycle:
 
 ```ts
+import { Injectable, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
 import { trace } from '@opentelemetry/api';
 
-observeAll((e) => {
-  trace.getActiveSpan()?.addEvent(`${e.lib}.${e.event}`, {
-    'aviary.lib': e.lib,
-    'aviary.event': e.event,
-    'aviary.trace_id': e.traceId ?? '',
-    ...flatten(e.payload), // your own payload → attribute mapping
-  });
-});
+@Injectable()
+export class OtelDiagnosticsBridge implements OnModuleInit, OnModuleDestroy {
+  private stop?: () => void;
+
+  onModuleInit() {
+    this.stop = observeAll((e) => {
+      trace.getActiveSpan()?.addEvent(`${e.lib}.${e.event}`, {
+        'aviary.lib': e.lib,
+        'aviary.event': e.event,
+        'aviary.trace_id': e.traceId ?? '',
+        ...flatten(e.payload), // your own payload → attribute mapping
+      });
+    });
+  }
+
+  onModuleDestroy() {
+    this.stop?.();
+  }
+}
 ```
+
+Register `OtelDiagnosticsBridge` in a module's `providers` and Nest handles the rest.
 
 <Callout type="info">
 Because `emit` already correlates with `traceId` (from [nestjs-context](/docs/context)), you can also stitch events to spans by id when there's no active span on the emitting path — e.g. in a background worker.
@@ -67,19 +85,30 @@ Because `emit` already correlates with `traceId` (from [nestjs-context](/docs/co
 
 ## An APM or a logger
 
-Forwarding to Datadog, Sentry, an HTTP collector, or just structured logs is the same shape — subscribe and ship:
+Forwarding to Datadog, Sentry, an HTTP collector, or just structured logs is the same shape — the same provider, a different handler body:
 
 ```ts
-observeAll((e) => {
-  logger.info('aviary.diagnostic', {
-    lib: e.lib,
-    event: e.event,
-    traceId: e.traceId,
-    ts: e.ts,
-    ...e.payload,
-  });
-  // or: apm.captureEvent(...), fetch(collectorUrl, { method: 'POST', body: JSON.stringify(e) }), …
-});
+@Injectable()
+export class DiagnosticsLogger implements OnModuleInit, OnModuleDestroy {
+  private stop?: () => void;
+
+  onModuleInit() {
+    this.stop = observeAll((e) => {
+      logger.info('aviary.diagnostic', {
+        lib: e.lib,
+        event: e.event,
+        traceId: e.traceId,
+        ts: e.ts,
+        ...e.payload,
+      });
+      // or: apm.captureEvent(...), fetch(collectorUrl, { method: 'POST', body: JSON.stringify(e) }), …
+    });
+  }
+
+  onModuleDestroy() {
+    this.stop?.();
+  }
+}
 ```
 
 <Callout type="warn">
@@ -88,17 +117,30 @@ Keep consumers cheap and non-blocking. The emit path is guarded (`hasSubscribers
 
 ## A custom subscriber
 
-You don't need a generic observer at all if you only care about one event. Subscribe to a single channel by name:
+You don't need a generic observer at all if you only care about one event. Subscribe to a single channel by name — again from a provider, so you also unsubscribe on shutdown:
 
 ```ts
+import { Injectable, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
 import diagnostics_channel from 'node:diagnostics_channel';
 import { channelName } from '@dudousxd/nestjs-diagnostics';
 import type { DiagnosticEvent } from '@dudousxd/nestjs-diagnostics';
 
-diagnostics_channel.subscribe(channelName('authz', 'decision'), (msg) => {
-  const e = msg as DiagnosticEvent;
-  if (e.payload.allowed === false) alertOnRepeatedDenials(e);
-});
+@Injectable()
+export class DenialAlerter implements OnModuleInit, OnModuleDestroy {
+  private readonly channel = channelName('authz', 'decision');
+  private readonly handler = (msg: unknown) => {
+    const e = msg as DiagnosticEvent;
+    if (e.payload.allowed === false) this.alertOnRepeatedDenials(e);
+  };
+
+  onModuleInit() {
+    diagnostics_channel.subscribe(this.channel, this.handler);
+  }
+
+  onModuleDestroy() {
+    diagnostics_channel.unsubscribe(this.channel, this.handler);
+  }
+}
 ```
 
 This is the lowest-overhead way to react to a specific ecosystem event — a denial alert, a metric counter, a webhook.

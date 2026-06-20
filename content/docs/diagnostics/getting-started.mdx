@@ -15,12 +15,19 @@ There's nothing to register — no module, no provider. The package is a set of 
 
 ## Emitting events
 
-Call `emit(lib, event, payload)` wherever something interesting happens:
+Call `emit(lib, event, payload)` from your provider wherever something interesting happens:
 
 ```ts
+import { Injectable } from '@nestjs/common';
 import { emit } from '@dudousxd/nestjs-diagnostics';
 
-emit('billing', 'invoice-paid', { invoiceId: 'inv_123', amount: 4200 });
+@Injectable()
+export class BillingService {
+  async markInvoicePaid(invoiceId: string, amount: number) {
+    // … your domain logic …
+    emit('billing', 'invoice-paid', { invoiceId, amount });
+  }
+}
 ```
 
 - `lib` identifies the emitting library (`'billing'`, `'authz'`, `'jobs'`…).
@@ -46,10 +53,15 @@ setContextAccessor(accessor);
 
 `CONTEXT_ACCESSOR` is `Symbol.for('@dudousxd/nestjs-context:accessor')` — the same token nestjs-context publishes under, so any object structurally matching the accessor works. nestjs-context is an optional peer; it is never imported here.
 
-Need an explicit id instead? Pass it in `opts`:
+Need an explicit id instead? Pass it in `opts` — e.g. from a method that already holds a correlation id:
 
 ```ts
-emit('billing', 'invoice-paid', payload, { traceId: req.id });
+@Injectable()
+export class BillingService {
+  async markInvoicePaid(payload: InvoicePaid, traceId: string) {
+    emit('billing', 'invoice-paid', payload, { traceId });
+  }
+}
 ```
 
 ## API surface
