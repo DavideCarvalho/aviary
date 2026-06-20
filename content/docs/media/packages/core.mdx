@@ -17,7 +17,9 @@ interface ImageProcessor { convert(input, preset): Promise<ConversionResult> }
 
 **`StorageManager`** — the named-disk registry behind `media.disk(name)`.
 
-**`MediaLibrary`** — the layer-2 orchestrator: `attach / list / delete / url / ensureConversion`, collections, MIME validation, conversion generation, and diagnostics emission.
+**`MediaLibrary`** — the layer-2 *table* orchestrator: `attach / list / delete / url / ensureConversion`, the `for(ownerType, id)` owner binding, collections, MIME validation, conversion generation, and diagnostics emission.
+
+**`Attachment` + `AttachmentManager`** — the layer-2 *column* model ([attachments](/docs/media/concepts/attachments)): an immutable, JSON-serializable value object plus the manager that uploads it (`createFromFile`), resolves URLs, and deletes it with its variants.
 
 **The upload engine** — `ResumableUploadManager` plus the framework-agnostic `TusUploadHandler` (request → response, no web framework).
 

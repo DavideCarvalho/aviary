@@ -27,11 +27,14 @@ The single injectable surface:
 
 ```ts
 class MediaService {
-  disk(name?: string): StorageDriver;    // layer 1
-  get library(): MediaLibrary;           // layer 2 (throws if no store)
-  get uploads(): ResumableUploadManager; // resumable (throws if no uploadSessions)
+  disk(name?: string): StorageDriver;        // layer 1
+  get library(): MediaLibrary;               // layer 2, table model (throws if no store)
+  get attachments(): AttachmentManager;      // layer 2, column model (always available)
+  get uploads(): ResumableUploadManager;     // resumable (throws if no uploadSessions)
 }
 ```
+
+`media.attachments` is the [attachment column model](/docs/media/concepts/attachments) and is always provided — it only needs storage (and an [image processor](/docs/media/packages/image-sharp) for variants), no store or table. `media.library` is the [media table](/docs/media/concepts/two-layers#layer-2--media-library) and throws until you pass a `store`.
 
 ```ts
 @Injectable()
@@ -60,7 +63,7 @@ import { StorageManager, type StorageDriver } from '@dudousxd/nestjs-media/stora
 ## Injection tokens
 
 ```ts
-import { MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_UPLOADS, MEDIA_TUS } from '@dudousxd/nestjs-media';
+import { MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_ATTACHMENTS, MEDIA_UPLOADS, MEDIA_TUS } from '@dudousxd/nestjs-media';
 ```
 
 <Callout type="info">

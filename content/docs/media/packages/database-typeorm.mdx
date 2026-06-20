@@ -40,6 +40,37 @@ inject: [getDataSourceToken('media')],
 useFactory: (ds) => ({ /* … */ store: new TypeOrmMediaStore(ds) }),
 ```
 
+## Attachment column
+
+Beyond the `media` table, this package also wires the [attachment column model](/docs/media/concepts/attachments) — a single file stored as a JSON value object directly on your entity. Use the `@AttachmentColumn()` decorator:
+
+```ts
+import { Entity, PrimaryColumn } from 'typeorm';
+import type { Attachment } from '@dudousxd/nestjs-media-core';
+import { AttachmentColumn } from '@dudousxd/nestjs-media-database-typeorm';
+
+@Entity()
+export class User {
+  @PrimaryColumn() id!: string;
+
+  @AttachmentColumn() avatar!: Attachment | null;
+}
+```
+
+It stores a portable `simple-json` column, nullable by default, and rehydrates the value into an `Attachment` on read. Pass any `ColumnOptions` to override (`@AttachmentColumn({ name: 'avatar_data' })`).
+
+Using `EntitySchema` instead of decorators? Apply the underlying `attachmentTransformer` to a `simple-json` column directly:
+
+```ts
+import { attachmentTransformer } from '@dudousxd/nestjs-media-database-typeorm';
+
+columns: {
+  avatar: { type: 'simple-json', nullable: true, transformer: attachmentTransformer },
+}
+```
+
+The round-trip is verified against real sqlite in the package's test suite.
+
 ## Peer dependencies
 
-`typeorm` (^0.3) and `@dudousxd/nestjs-media-core`. See [Concepts → Persistence](/docs/media/concepts/persistence) for the shared store contract.
+`typeorm` (^0.3) and `@dudousxd/nestjs-media-core`. See [Concepts → Persistence](/docs/media/concepts/persistence) for the shared store contract, and [Concepts → Attachments](/docs/media/concepts/attachments) for the column model.

@@ -3,7 +3,7 @@ title: '@dudousxd/nestjs-media-telescope'
 description: Telescope watcher that surfaces media events in the observability console.
 ---
 
-The observability cola. A `MediaWatcher` subscribes to the [`nestjs:media:*` diagnostics channels](/docs/media/concepts/diagnostics) and records a `media` entry per `attach` / `delete` / `conversion` — so file activity shows up in the [Telescope](/docs/media/telescope) console alongside your requests, queries, jobs, and mails, correlated under the same batch.
+The observability glue point. A `MediaWatcher` subscribes to the [`nestjs:media:*` diagnostics channels](/docs/media/concepts/diagnostics) and records a `media` entry per milestone — `attach` / `delete` / `conversion`, the resumable `upload.start` / `upload.complete` / `upload.abort`, and `attachment.create` / `attachment.delete` — so file activity shows up in the [Telescope](/docs/media/telescope) console alongside your requests, queries, jobs, and mails, correlated under the same batch.
 
 ```ts
 import { MediaWatcher } from '@dudousxd/nestjs-media-telescope';
@@ -20,7 +20,7 @@ The watcher is the *only* link between media and Telescope, and it's one-directi
 
 ## What you see
 
-Each entry carries the event payload — id, owner, collection, disk, path, size, mime — so you can answer "what did this request upload, and where did it land?" without grepping logs. Conversions appear as their own entries, so a slow first-thumbnail request is visible.
+Each entry carries the event payload — id, owner, collection, disk, path, size, mime — so you can answer "what did this request upload, and where did it land?" without grepping logs. Conversions appear as their own entries, so a slow first-thumbnail request is visible; resumable uploads show their start and completion. Per-chunk `upload.progress` is intentionally **not** recorded — it would flood the timeline on a large upload — but it's still on its channel if you want to consume it yourself.
 
 ## Peer dependencies
 

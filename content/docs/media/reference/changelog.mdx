@@ -5,12 +5,21 @@ description: Release history for the nestjs-media packages.
 
 All packages are versioned together via [changesets](https://github.com/changesets/changesets).
 
+## 0.2.0
+
+Adds the **[attachment column model](/docs/media/concepts/attachments)** (adonis-attachment style) alongside the existing media table, and an owner-binding ergonomic for the table model.
+
+- **Attachments** (layer 2, column model): the `Attachment` value object + `AttachmentManager` (`createFromFile` / `url` / `temporaryUrl` / `delete`, eager image variants), exposed as `media.attachments`.
+- **ORM column integration**: TypeORM `@AttachmentColumn()`, MikroORM `AttachmentType`, Prisma `toAttachmentJson` / `fromAttachmentJson`, Drizzle `attachment()` — all storing the same portable JSON shape.
+- **Owner binding**: `media.library.for(ownerType, id)` so `attach` / `list` no longer repeat the owner — the table-model take on spatie's `HasMedia`/`InteractsWithMedia`.
+- **Lifecycle diagnostics**: resumable uploads now emit `upload.start` / `upload.progress` / `upload.complete` / `upload.abort`, and attachments emit `attachment.create` / `attachment.delete` — all typed, all on `nestjs:media:*` channels (`MEDIA_DIAGNOSTIC_EVENTS` exported). The Telescope watcher records every milestone (skipping per-chunk progress).
+
 ## 0.1.0
 
 Initial release — filesystem + media-library for NestJS in one package.
 
 - **Storage** (layer 1): `StorageDriver` SPI + `StorageManager`; local and S3 drivers; `uploadMode` resolution; resumable upload engine + tus 1.0.0 HTTP handler.
-- **Media-library** (layer 2): spatie-style `HasMedia` collections, single-file replace, MIME validation, image conversions (sharp, lazy + eager).
+- **Media-library** (layer 2): spatie-style collections (single-file replace, MIME validation, ordering, custom properties), image conversions (sharp, lazy + eager).
 - **ORM stores**: TypeORM, MikroORM, Drizzle, Prisma — one shared `MediaStore` conformance suite.
 - **Glue points**: `nestjs:media:*` diagnostics, Telescope watcher, codegen client, React `useMediaUpload` / `MediaUploader`.
 - **NestJS** `MediaModule` wiring all layers; `/storage` subpath for raw-filesystem consumers.

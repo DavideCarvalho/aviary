@@ -64,3 +64,24 @@ await this.media.library.url(avatar.id, 'sm');
 <Callout type="info">
 `customProperties` is free-form JSON stored on the record — handy for things like the original uploader, alt text, or a moderation flag. It round-trips untouched.
 </Callout>
+
+## Or: skip the table entirely
+
+An avatar is the textbook case for the [attachment column model](/docs/media/concepts/attachments) — one file, one field, no separate `media` table. The avatar *is* a column on your `User`:
+
+```ts title="users.service.ts"
+async setAvatar(user: User, file: Express.Multer.File) {
+  if (user.avatar) await this.media.attachments.delete(user.avatar); // drop the old one + variants
+  user.avatar = await this.media.attachments.createFromFile(
+    { fileName: file.originalname, mimeType: file.mimetype, contents: file.buffer },
+    { variants: [{ name: 'sm', width: 64 }] },
+  );
+  await this.users.save(user);
+}
+
+avatarUrl(user: User) {
+  return user.avatar ? this.media.attachments.url(user.avatar, 'sm') : null;
+}
+```
+
+No collection config, no `list`, no `ownerType`/`ownerId` — just a column. Reach for the collection above instead when a user can have *several* images or you want lazy (on-demand) conversions. See [Concepts → Attachments](/docs/media/concepts/attachments) for the full comparison and the per-ORM column wiring.

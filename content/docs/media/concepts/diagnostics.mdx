@@ -9,28 +9,50 @@ media is wired into the same four glue points every `@dudousxd/nestjs-*` library
 
 ## 1. Diagnostics channels
 
-`MediaLibrary` publishes to `node:diagnostics_channel` with the standard ecosystem envelope. This is the lowest-coupling integration there is: media doesn't import Telescope or know it exists — it just emits, and anything that cares subscribes. When nobody's listening, publishing is a no-op (a cheap `hasSubscribers` check), so it's always on by default with no measurable cost.
+Every layer of the library publishes to `node:diagnostics_channel` with the standard ecosystem envelope. This is the lowest-coupling integration there is: media doesn't import Telescope or know it exists — it just emits, and anything that cares subscribes. When nobody's listening, publishing is a no-op (a cheap `hasSubscribers` check), so it's always on by default with no measurable cost.
 
 ```ts
-// channel: nestjs:media:<event>   where event ∈ attach | delete | conversion
+// channel: nestjs:media:<event>
 { ts: number, lib: 'media', event: 'attach', payload: { id, ownerType, ownerId, collection, disk, path, size, mimeType } }
 ```
 
-Subscribe to it yourself if you want custom metrics or audit logging:
+### Every event
+
+Each event is its own channel (`nestjs:media:<event>`) carrying a typed payload. The full set (`MEDIA_DIAGNOSTIC_EVENTS` is exported for convenience):
+
+| Event | Emitted by | Payload |
+|---|---|---|
+| `attach` | media-library | `id, ownerType, ownerId, collection, disk, path, size, mimeType` |
+| `delete` | media-library | `id, ownerType, ownerId` |
+| `conversion` | media-library | `id, conversion, path` |
+| `upload.start` | resumable uploads | `id, disk, key, size?, contentType?` |
+| `upload.progress` | resumable uploads | `id, offset, parts, size?` |
+| `upload.complete` | resumable uploads | `id, disk, key, size` |
+| `upload.abort` | resumable uploads | `id` |
+| `attachment.create` | attachments | `disk, path, size, mimeType, name, variants` |
+| `attachment.delete` | attachments | `disk, path, variants` |
+
+This is what makes "do something on upload start / end" a two-line subscription — no hooks API to learn, just the channel:
 
 ```ts
 import { subscribe } from 'node:diagnostics_channel';
+import type { MediaDiagnosticEnvelope, UploadCompletePayload } from '@dudousxd/nestjs-media-core';
 
-subscribe('nestjs:media:attach', (msg) => {
-  metrics.increment('media.attach', { disk: (msg as any).payload.disk });
+subscribe('nestjs:media:upload.start', (msg) => {
+  console.log('upload started', (msg as MediaDiagnosticEnvelope).payload);
+});
+
+subscribe('nestjs:media:upload.complete', (msg) => {
+  const { key, size } = (msg as MediaDiagnosticEnvelope<UploadCompletePayload>).payload;
+  metrics.observe('media.upload.bytes', size, { key });
 });
 ```
 
-Turn emission off with `emitDiagnostics: false` on the `MediaLibrary` options if you never want it. See [Diagnostics](/docs/media/diagnostics) for the cross-ecosystem convention this follows.
+Each emitter takes `emitDiagnostics: false` to opt out (`MediaLibrary`, `ResumableUploadManager`, `AttachmentManager`). See [Diagnostics](/docs/media/diagnostics) for the cross-ecosystem convention this follows.
 
 ## 2. Telescope
 
-[`@dudousxd/nestjs-media-telescope`](/docs/media/packages/telescope) ships a `MediaWatcher` that subscribes to those channels and records a `media` entry per event — so attaches, deletes, and conversions show up in the [Telescope](/docs/media/telescope) console next to your requests, queries, jobs, and mails, correlated under the same batch.
+[`@dudousxd/nestjs-media-telescope`](/docs/media/packages/telescope) ships a `MediaWatcher` that subscribes to those channels and records a `media` entry per event — so attaches, deletes, conversions, uploads, and attachments show up in the [Telescope](/docs/media/telescope) console next to your requests, queries, jobs, and mails, correlated under the same batch. It records every **milestone** but skips per-chunk `upload.progress` so a large resumable upload doesn't flood the timeline (progress stays on its channel for your own code).
 
 ```ts
 import { MediaWatcher } from '@dudousxd/nestjs-media-telescope';

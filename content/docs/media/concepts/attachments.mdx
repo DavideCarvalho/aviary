@@ -1,0 +1,121 @@
+---
+title: Attachments (column model)
+description: The adonis-attachment-style persistence model — a file stored as a JSON value object on your own entity's column, instead of in a separate media table. When to reach for it, the Attachment value object, the AttachmentManager API, and how each ORM serializes it.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The [media-library](/docs/media/concepts/two-layers#layer-2--media-library) is one way to persist files — a separate `media` table that points back at owning entities. It's the right model when an entity has *many* files, or files arranged in collections with ordering and rules ("a post's gallery"). But a great many cases are simpler: **one entity, one file, one field.** A user's avatar. A product's hero image. A document's PDF.
+
+For those, a whole polymorphic table is overkill. media offers a second persistence model, borrowed from Laravel's [adonis-attachment](https://packages.adonisjs.com/packages/adonis-attachment): the file lives as a **JSON value object in a column on your own model**. No join, no `ownerType`/`ownerId`, no extra table — `user.avatar` *is* the attachment.
+
+## Two models, one core
+
+Both models sit on top of the same [storage layer](/docs/media/concepts/two-layers#layer-1--storage) and share the same [image conversions](/docs/media/concepts/conversions). They differ only in **where the metadata lives**.
+
+| | Media-library (table) | Attachment (column) |
+|---|---|---|
+| Inspiration | spatie/laravel-medialibrary | adonisjs/attachment |
+| Metadata home | a `media` table | a JSON column on your entity |
+| Cardinality | many files per owner, collections | one file per field |
+| Owner link | polymorphic `ownerType` + `ownerId` | the row *is* the owner |
+| API surface | `media.library` | `media.attachments` |
+| Best for | galleries, ordered sets, rules per collection | avatars, single hero images, one-off documents |
+
+Neither is "better" — they answer different questions. You can use both in the same app: a gallery through the library, an avatar through an attachment column.
+
+## The `Attachment` value object
+
+An `Attachment` is an immutable, JSON-serializable description of a stored file and its variants. It carries the disk + path (so it can be resolved later) but holds no live connection — URL resolution and deletion go through the `AttachmentManager`.
+
+```ts
+interface AttachmentVariant {
+  disk: string; path: string; size: number; mimeType: string;
+}
+
+class Attachment {
+  readonly name: string;        // display name (defaults to the upload's file name)
+  readonly disk: string;        // disk the original lives on
+  readonly path: string;        // key of the original on that disk
+  readonly size: number;        // bytes
+  readonly mimeType: string;
+  readonly variants: Record<string, AttachmentVariant>; // eager image variants, by name
+  readonly meta: Record<string, unknown>;               // your own metadata (alt text, etc.)
+
+  toJSON(): AttachmentData;                              // what the ORM stores
+  static fromJSON(json): Attachment | null;             // rebuild from a stored column
+}
+```
+
+Because it's a plain value object with `toJSON`/`fromJSON`, every ORM integration is just "serialize on save, rehydrate on load" — see [each adapter](#per-orm-column-wiring) below.
+
+## The `AttachmentManager`
+
+You don't construct attachments by hand; the manager uploads the bytes and hands you the value object. In a NestJS app it's `media.attachments` (always available — it only needs storage, and an [image processor](/docs/media/packages/image-sharp) if you want variants).
+
+```ts
+@Injectable()
+export class UsersService {
+  constructor(private readonly media: MediaService) {}
+
+  async setAvatar(user: User, file: { buffer: Buffer; mimetype: string; originalname: string }) {
+    user.avatar = await this.media.attachments.createFromFile(
+      { fileName: file.originalname, mimeType: file.mimetype, contents: file.buffer },
+      {
+        disk: 's3',
+        variants: [
+          { name: 'thumb', width: 128, height: 128 },
+          { name: 'medium', width: 512 },
+        ],
+        meta: { alt: `${user.name}'s avatar` },
+      },
+    );
+    await this.users.save(user); // the ORM serializes the Attachment into the column
+  }
+
+  async avatarUrl(user: User) {
+    if (!user.avatar) return null;
+    return this.media.attachments.url(user.avatar, 'thumb'); // original if no variant given
+  }
+
+  async signedAvatar(user: User) {
+    return user.avatar && this.media.attachments.temporaryUrl(user.avatar, 300); // 5-min signed URL
+  }
+
+  async removeAvatar(user: User) {
+    if (user.avatar) await this.media.attachments.delete(user.avatar); // deletes original + every variant
+    user.avatar = null;
+    await this.users.save(user);
+  }
+}
+```
+
+| Method | What it does |
+|---|---|
+| `createFromFile(input, options?)` | Uploads bytes under `attachments/<id>/<fileName>`, generates any requested `variants` eagerly, returns an `Attachment` |
+| `url(att, variant?)` | Public URL for the original or a named variant (throws if the variant is unknown) |
+| `temporaryUrl(att, ttl, variant?)` | Signed, expiring URL on presign-capable disks |
+| `delete(att)` | Removes the original **and** every variant from storage |
+
+`createFromFile` options mirror the library: `disk` (override the default), `keyPrefix` (default `attachments`), `variants` (image presets — requires an image processor), `name`, and `meta`.
+
+<Callout type="info" title="Variants are eager">
+Attachment variants are generated **at upload time** and recorded on the value object, because the column carries no row of its own to lazily update later. (The media-library, which owns a `media` row, generates conversions lazily on first request instead.) Request variants you'll actually use.
+</Callout>
+
+## Per-ORM column wiring
+
+The `Attachment` is the same everywhere; only the column mapping differs. Each adapter ships the minimal glue so the value object round-trips through a JSON column on *your* entity:
+
+| ORM | How | Page |
+|---|---|---|
+| TypeORM | `@AttachmentColumn()` (or the `attachmentTransformer` on a `simple-json` column) | [database-typeorm](/docs/media/packages/database-typeorm#attachment-column) |
+| MikroORM | `AttachmentType` custom type | [database-mikro-orm](/docs/media/packages/database-mikro-orm#attachment-column) |
+| Prisma | `toAttachmentJson` / `fromAttachmentJson` on a `Json` field | [database-prisma](/docs/media/packages/database-prisma#attachment-column) |
+| Drizzle | the `attachment()` custom column | [database-drizzle](/docs/media/packages/database-drizzle#attachment-column) |
+
+All four store the exact same JSON shape, so an attachment written by one ORM is readable by another — handy in mixed or migrating codebases.
+
+## Choosing between the models
+
+Reach for **attachments** when the answer to "how many files?" is "one, and it belongs right here on this record." Reach for the **media-library** when it's "several, possibly in named collections, possibly ordered." If you're unsure, start with an attachment column — it's the smaller commitment, and nothing stops you from also attaching gallery items through the library later.

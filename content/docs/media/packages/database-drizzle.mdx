@@ -22,6 +22,22 @@ Drizzle is migration-first by design — there's no runtime auto-schema. In prod
 Drizzle's schema is dialect-specific (`sqliteTable` vs `pgTable` vs `mysqlTable`), so this adapter ships the **sqlite/libSQL** schema — matching the ecosystem's other Drizzle adapters (e.g. `durable-store-drizzle`). For Postgres/MySQL, define the equivalent table with that dialect's drizzle core and pass it; the store's query logic (insert/onConflictDoUpdate/select/orderBy) is the same.
 </Callout>
 
+## Attachment column
+
+For the [attachment column model](/docs/media/concepts/attachments) — a single file as a JSON value object on your own table — use the `attachment()` custom column:
+
+```ts
+import { sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { attachment } from '@dudousxd/nestjs-media-database-drizzle';
+
+export const users = sqliteTable('users', {
+  id: text('id').primaryKey(),
+  avatar: attachment('avatar'), // Attachment | null, stored as JSON text
+});
+```
+
+On write it `JSON.stringify`s the `Attachment` (or stores `null`); on read it rehydrates an `Attachment`. Like the media store, the column is sqlite/libSQL — for Postgres/MySQL define the equivalent JSON column in that dialect and (de)serialize with the value object's `toJSON()` / `Attachment.fromJSON()`.
+
 ## Peer dependencies
 
-`drizzle-orm` (^0.38) and `@dudousxd/nestjs-media-core`, plus a driver (`better-sqlite3`, `libsql`, …). See [Concepts → Persistence](/docs/media/concepts/persistence).
+`drizzle-orm` (^0.38) and `@dudousxd/nestjs-media-core`, plus a driver (`better-sqlite3`, `libsql`, …). See [Concepts → Persistence](/docs/media/concepts/persistence) and [Concepts → Attachments](/docs/media/concepts/attachments).

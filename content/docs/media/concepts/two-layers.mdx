@@ -81,6 +81,19 @@ await media.library.delete(record.id);               // removes record + bytes +
 
 `attach` derives a deterministic storage path (`ownerType/ownerId/collection/<id>/fileName`), writes the bytes, reads the size back if you didn't supply it, computes the next `order` in the collection, and saves the record. `delete` cleans up the original *and* all generated conversion files before removing the row — no orphans.
 
+### Binding an owner
+
+Repeating `ownerType`/`ownerId` on every call gets old. `media.library.for(type, id)` binds them once — the table-model equivalent of spatie's `HasMedia`/`InteractsWithMedia`:
+
+```ts
+const post = media.library.for('Post', post.id); // id coerced to a string
+await post.attach({ collection: 'gallery', fileName, mimeType, contents });
+await post.list('gallery'); // ordered MediaRecord[]
+await post.list();          // every collection for this post
+```
+
+`url` and `delete` act on a record id (not an owner), so they stay on `media.library`.
+
 ### The `MediaRecord`
 
 ```ts

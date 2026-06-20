@@ -50,6 +50,35 @@ The store depends on a structural `PrismaClientLike` interface (just the `media`
 The structural contract is verified by an integration suite that **generates a real Prisma client** and runs the store against real Postgres (testcontainers) — confirming a genuine `PrismaClient` is assignable, not just an interface that looks right on paper.
 </Callout>
 
+## Attachment column
+
+Prisma has no entity classes, so the [attachment column model](/docs/media/concepts/attachments) is two null-safe helpers around a `Json` column instead of a decorator. Add a `Json?` field to your model:
+
+```prisma
+model User {
+  id     String @id
+  avatar Json?
+}
+```
+
+Then (de)serialize the `Attachment` at the boundary:
+
+```ts
+import { toAttachmentJson, fromAttachmentJson } from '@dudousxd/nestjs-media-database-prisma';
+
+// write
+await prisma.user.update({
+  where: { id },
+  data: { avatar: toAttachmentJson(avatar) }, // Attachment | null → Json
+});
+
+// read
+const row = await prisma.user.findUniqueOrFail({ where: { id } });
+const avatar = fromAttachmentJson(row.avatar);  // Json → Attachment | null
+```
+
+Both helpers are null-safe, so an absent avatar round-trips as `null`. (Wrap them in a Prisma [result/query extension](https://www.prisma.io/docs/orm/prisma-client/client-extensions) if you'd rather rehydrate automatically.)
+
 ## Peer dependencies
 
-`@dudousxd/nestjs-media-core` only — you bring your own `@prisma/client`. See [Concepts → Persistence](/docs/media/concepts/persistence).
+`@dudousxd/nestjs-media-core` only — you bring your own `@prisma/client`. See [Concepts → Persistence](/docs/media/concepts/persistence) and [Concepts → Attachments](/docs/media/concepts/attachments).

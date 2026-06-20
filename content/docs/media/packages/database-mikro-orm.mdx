@@ -26,6 +26,26 @@ The entity is an `EntitySchema` with `order` mapped to a `position` column. JSON
 Verified by an integration suite running the store against real Postgres (testcontainers), in addition to the in-memory and sqlite unit runs.
 </Callout>
 
+## Attachment column
+
+For the [attachment column model](/docs/media/concepts/attachments) — a single file as a JSON value object on your entity — register the `AttachmentType` custom type on a property:
+
+```ts
+import { Entity, PrimaryKey, Property } from '@mikro-orm/core';
+import type { Attachment } from '@dudousxd/nestjs-media-core';
+import { AttachmentType } from '@dudousxd/nestjs-media-database-mikro-orm';
+
+@Entity()
+export class User {
+  @PrimaryKey() id!: string;
+
+  @Property({ type: AttachmentType, nullable: true })
+  avatar?: Attachment | null;
+}
+```
+
+`AttachmentType` serializes to a `json` column on write and rehydrates an `Attachment` on load — accepting both already-parsed JSON (postgres `json`) and string values (sqlite). The round-trip is verified against real sqlite in the package's test suite.
+
 ## Peer dependencies
 
-`@mikro-orm/core` (^6) and `@dudousxd/nestjs-media-core` — plus your driver package (`@mikro-orm/postgresql`, `@mikro-orm/mysql`, `@mikro-orm/better-sqlite`, …). See [Concepts → Persistence](/docs/media/concepts/persistence).
+`@mikro-orm/core` (^6) and `@dudousxd/nestjs-media-core` — plus your driver package (`@mikro-orm/postgresql`, `@mikro-orm/mysql`, `@mikro-orm/better-sqlite`, …). See [Concepts → Persistence](/docs/media/concepts/persistence) and [Concepts → Attachments](/docs/media/concepts/attachments).
