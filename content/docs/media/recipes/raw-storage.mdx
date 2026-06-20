@@ -1,37 +1,64 @@
 ---
 title: Raw storage (no entities)
-description: Use the filesystem layer alone — for other libraries or one-off files.
+description: Use the filesystem layer alone — for generated files, caches, or other libraries.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-You don't need the media-library layer to use the disks. Register `MediaModule` with just `disks` (no `store`) and use `media.disk(...)`:
+Not every file belongs to a record. Generated reports, rendered caches, exports, temp artifacts — these want a filesystem, not a media library. Register `MediaModule` with just `disks` (no `store`) and use `media.disk(...)` directly.
+
+## Minimal setup
 
 ```ts
 MediaModule.forRoot({
   default: 'local',
-  disks: { local: new LocalDriver({ root: './storage' }) },
+  disks: {
+    local: new LocalDriver({ root: './storage' }),
+    s3: new S3Driver({ client: s3, bucket: 'app-files' }),
+  },
 });
 ```
 
-```ts
+## Write, read, sign
+
+```ts title="export.service.ts"
 @Injectable()
 export class ExportService {
   constructor(private readonly media: MediaService) {}
 
-  async writeReport(id: string, csv: Buffer) {
-    await this.media.disk().put(`reports/${id}.csv`, csv, { contentType: 'text/csv' });
-    return this.media.disk().temporaryUrl(`reports/${id}.csv`, 300);
+  async writeReport(id: string, csv: Buffer): Promise<string> {
+    await this.media.disk('s3').put(`reports/${id}.csv`, csv, { contentType: 'text/csv' });
+    // a 5-minute signed link the user can download
+    return this.media.disk('s3').temporaryUrl(`reports/${id}.csv`, 300);
+  }
+
+  streamReport(id: string) {
+    return this.media.disk('s3').stream(`reports/${id}.csv`); // pipe to the HTTP response
+  }
+
+  async purgeOld(id: string) {
+    await this.media.disk('s3').delete(`reports/${id}.csv`); // idempotent
   }
 }
 ```
 
-<Callout type="info" title="Consuming from another library">
-Libraries (mail attachments, durable steps) import the facade through the subpath so they depend on the filesystem without the media-library layer:
+Prefer `stream` over `get` for anything large — it pipes without buffering the whole file in memory.
+
+## Consuming from another library
+
+This is exactly why media *absorbed* storage instead of shipping a separate package. A library that needs a filesystem (a mail channel attaching files, a durable workflow step staging a big upload) imports the facade through the subpath — no media-library layer, no NestJS coupling:
 
 ```ts
 import { StorageManager, type StorageDriver } from '@dudousxd/nestjs-media/storage';
-```
-</Callout>
 
-Calling `media.library` without a configured `store` throws a clear error — the two layers are independent.
+export class MailAttachments {
+  constructor(private readonly storage: StorageManager) {}
+  read(path: string) {
+    return this.storage.disk().stream(path);
+  }
+}
+```
+
+<Callout type="info">
+Calling `media.library` without a configured `store` throws a clear error — the two layers are independent, and the storage layer never requires a database.
+</Callout>

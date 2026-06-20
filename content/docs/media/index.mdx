@@ -5,25 +5,64 @@ description: Filesystem and media-library for NestJS in one package — the Lara
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-**`@dudousxd/nestjs-media`** brings the Laravel + spatie/media-library experience to NestJS, in a single package. It **absorbs the filesystem abstraction** — there is no separate `nestjs-storage`. Libraries that only need raw file access depend on this and import `@dudousxd/nestjs-media/storage`.
+**`@dudousxd/nestjs-media`** brings the Laravel + spatie/media-library experience to NestJS — and it does it in a *single* package. Where a Node backend usually stitches together a storage SDK, a hand-rolled upload endpoint, a thumbnail script, and a pile of glue, media gives you one cohesive module: disk-agnostic storage, resumable uploads, file-to-entity attachments, and image conversions — all idiomatic NestJS, all behind small contracts you can swap.
 
 <Callout type="info" title="Two layers, one package">
 **Camada 1 — Storage:** a disk-agnostic `put / get / url / temporaryUrl / stream / delete` API over local, S3, or in-memory disks.
 
 **Camada 2 — Media-library:** attach files to your entities in named collections, with image conversions — built on top of the storage layer.
+
+You can use the bottom layer entirely on its own.
 </Callout>
+
+## The problem it solves
+
+Handling user files in a backend is deceptively fiddly, and the pain shows up in three places.
+
+**Storage portability.** You start on the local filesystem in dev and move to S3 in production — and suddenly half your file code has `fs` calls and the other half has `@aws-sdk` calls. media gives you one `StorageDriver` contract; your application code calls `media.disk('s3').put(...)` and never imports a vendor SDK.
+
+**Uploads that survive reality.** A 400 MB video upload that dies at 90% because the user's wifi blinked is a terrible experience — and proxying every byte through your Node process doesn't scale. media ships both answers: a **resumable tus** server for the proxy path, and **presigned S3 multipart** for the direct path, with an `uploadMode` that picks the right one per disk and lets you override it per call.
+
+**Files that belong to things.** "This post has a gallery of images, each with a thumbnail and an OG variant; the avatar is single-file and replaces on re-upload." That's not raw storage — it's a *media library*. media models it spatie-style: entities have **collections**, collections have rules and **conversions**, and the bytes-plus-metadata live in a `media` table managed by your ORM.
+
+## Mental model
+
+```text
+        your code
+            │
+   media.library            media.disk(...)
+   (camada 2)               (camada 1)
+   attach / list /          put / get / url /
+   url / conversions        stream / delete
+            │                    │
+       MediaStore           StorageDriver
+   (typeorm/mikro/          (local / s3 /
+    drizzle/prisma)          in-memory)
+```
+
+The two layers share nothing but the storage facade: the media-library writes bytes *through* a disk and records metadata *through* a store. Swap either side without touching the other.
 
 ## What you get
 
-- **Disks**: `local` and `s3` (presign + native multipart), plus an in-memory disk for tests — all behind one `StorageDriver` contract with a shared conformance suite.
+- **Disks**: `local` and `s3` (presign + native multipart), plus an in-memory disk for tests — all behind one `StorageDriver` contract with a shared conformance suite, so a custom disk is a few methods away.
 - **Resumable uploads**: the `proxy` path is a real [tus 1.0.0](https://tus.io) server (chunked, resumable through a dropped connection); the `direct` path uses presigned S3 multipart. An overridable `uploadMode` (`auto | proxy | direct`) decides which, resolved **global → per-disk → per-call**.
 - **Media-library**: spatie-style collections (single-file or multi), ordering, MIME validation, custom properties, and `attach / list / delete / url`.
 - **Image conversions**: a pluggable `ImageProcessor` (sharp by default), generated **lazily** on first access (and cached) or **eagerly** on upload.
 - **Four ORM stores**: TypeORM, MikroORM, Drizzle, Prisma — POJO adapters that all satisfy the same `MediaStore` contract, with non-destructive auto-schema where the ORM allows.
 - **Ecosystem colas**: `nestjs:media:*` diagnostics channels, a [Telescope](/docs/media/telescope) watcher, a codegen-emitted typed client, and a React `useMediaUpload` hook + `<MediaUploader/>`.
 
+## When (and when not) to use it
+
+Reach for media when files are a first-class part of your domain — user uploads, attachments, galleries, documents — and you want one consistent API across environments plus a browser upload story that doesn't fall over on large files.
+
+You *don't* need the media-library layer for everything. Writing a generated report to disk, or caching a rendered asset, is pure [raw storage](/docs/media/recipes/raw-storage) — register a disk and skip the `store`. And if another library just needs a filesystem (mail attachments, a durable workflow step), it imports the facade through the subpath:
+
+```ts
+import { StorageManager, type StorageDriver } from '@dudousxd/nestjs-media/storage';
+```
+
 ## How it fits the ecosystem
 
-Media is plugged into the same four "colas" every `@dudousxd/nestjs-*` library shares — it emits to [diagnostics](/docs/media/diagnostics) channels that [Telescope](/docs/media/telescope) consumes, contributes a typed client through [Codegen](/docs/media/codegen), and ships a `-react` family package. See [Concepts → Diagnostics](/docs/media/concepts/diagnostics) for the wiring.
+media is plugged into the same four "colas" every `@dudousxd/nestjs-*` library shares — it emits to [diagnostics](/docs/media/diagnostics) channels that [Telescope](/docs/media/telescope) consumes, contributes a typed client through [Codegen](/docs/media/codegen), and ships a `-react` family package. See [Concepts → Diagnostics & the colas](/docs/media/concepts/diagnostics) for the wiring.
 
 Continue to [Getting Started](/docs/media/getting-started).

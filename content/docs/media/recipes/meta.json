@@ -1,4 +1,4 @@
 {
   "title": "Recipes",
-  "pages": ["avatar", "gallery", "raw-storage"]
+  "pages": ["avatar", "gallery", "direct-s3-upload", "custom-driver", "raw-storage"]
 }

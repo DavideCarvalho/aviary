@@ -5,7 +5,8 @@
     "getting-started",
     "concepts",
     "packages",
-    "recipes"
+    "recipes",
+    "reference"
   ],
   "root": true,
   "description": "Filesystem + media-library in one package — disks, resumable uploads, attachments, conversions.",

@@ -1,45 +1,65 @@
 ---
 title: The two layers
-description: Storage (camada 1) is a disk-agnostic filesystem; media-library (camada 2) attaches files to entities on top of it.
+description: Storage (camada 1) is a disk-agnostic filesystem; media-library (camada 2) attaches files to entities on top of it. How they relate, and why they're split.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-The package is two layers stacked in one module. You can use the bottom layer alone.
+The package is two layers stacked in one module. Understanding the seam between them is the key to using media well — and to knowing when you only need the bottom half.
+
+## Why split at all?
+
+Plenty of file handling is *not* about entities. Writing a generated PDF to disk, caching a rendered image, letting the mail channel attach a buffer — these want a filesystem, nothing more. Meanwhile, "this user's avatar" or "this post's gallery with thumbnails" is genuinely a *media library*: files that belong to records, with rules and variants.
+
+Bundling both into one rigid API would make the simple case carry the weight of the complex one. So media keeps them as two layers with a single, narrow seam: **the media-library writes bytes through a disk and records metadata through a store.** Everything else is independent.
 
 ## Camada 1 — Storage
 
-A `StorageManager` holds named disks; each disk is a `StorageDriver`:
+A `StorageManager` holds named disks; each disk is a `StorageDriver`. You get it from `MediaService.disk()`:
 
 ```ts
-const disk = media.disk('s3');           // or media.disk() for the default
-await disk.put('a/b.png', buffer, { contentType: 'image/png' });
+const disk = media.disk('s3');           // a named disk
+const def = media.disk();                // the configured default disk
+
+await disk.put('a/b.png', buffer, { contentType: 'image/png', visibility: 'public' });
 await disk.get('a/b.png');               // Buffer
-await disk.stream('a/b.png');            // Readable
-await disk.url('a/b.png');               // public URL (if the disk has one)
-await disk.temporaryUrl('a/b.png', 300); // signed, 5-min URL (presign-capable disks)
-await disk.exists('a/b.png');
-await disk.delete('a/b.png');
-await disk.copy(from, to); await disk.move(from, to); await disk.size(path);
+await disk.stream('a/b.png');            // Readable — stream large files, don't buffer
+await disk.url('a/b.png');               // stable public URL (throws if the disk has none)
+await disk.temporaryUrl('a/b.png', 300); // signed, expiring URL (presign-capable disks)
+await disk.exists('a/b.png');            // boolean
+await disk.size('a/b.png');              // bytes
+await disk.delete('a/b.png');            // idempotent — no error if absent
+await disk.copy(from, to);
+await disk.move(from, to);
 ```
 
-Every driver advertises what it can do:
+### Capabilities
+
+Drivers are honest about what they can do, and the rest of the library reads this rather than special-casing vendors:
 
 ```ts
-disk.capabilities; // { presign: boolean, multipart: boolean, publicUrls: boolean }
+disk.capabilities; // { presign: boolean; multipart: boolean; publicUrls: boolean }
 ```
+
+`publicUrls` gates `url()`, `presign` gates `temporaryUrl()` and is consulted by [`uploadMode`](/docs/media/concepts/uploads) to decide direct vs proxied uploads. A driver that can't do something throws `UnsupportedOperationError` instead of silently faking it.
+
+### Errors
+
+The storage layer raises typed errors with stable `code`s — `FileNotFoundError` (`MEDIA_FILE_NOT_FOUND`), `UnknownDiskError` (`MEDIA_UNKNOWN_DISK`), `UnsupportedOperationError` (`MEDIA_UNSUPPORTED_OP`) — so you can branch on `err.code` rather than message strings.
 
 <Callout type="info" title="Raw-storage consumers">
-Other libraries (mail attachments, durable large-file steps) that just need a filesystem import the storage facade directly via the subpath, without pulling in the media-library layer:
+Other libraries (mail attachments, durable large-file steps) that just need a filesystem import the facade directly via the subpath, without pulling in the media-library layer:
 
 ```ts
 import { StorageManager, type StorageDriver } from '@dudousxd/nestjs-media/storage';
 ```
+
+This is the whole reason media *absorbed* storage instead of shipping a separate `nestjs-storage`: there's one filesystem abstraction, and the media library is just its biggest consumer.
 </Callout>
 
 ## Camada 2 — Media-library
 
-`MediaLibrary` (exposed as `media.library`) attaches files to **owning entities** in named **collections**, spatie-style. It writes the bytes through a disk and persists a `MediaRecord` through a `MediaStore`.
+`MediaLibrary` (exposed as `media.library`) attaches files to **owning entities** in named **collections**. It writes the bytes through a disk and persists a `MediaRecord` through a `MediaStore`.
 
 ```ts
 const record = await media.library.attach({
@@ -49,12 +69,30 @@ const record = await media.library.attach({
   fileName: 'photo.png',
   mimeType: 'image/png',
   contents: buffer,            // Buffer | Readable
-  // optional: name, size, customProperties, disk
+  // optional: name, size, customProperties, disk (override)
 });
 
 await media.library.list('Post', '42', 'gallery'); // ordered MediaRecord[]
+await media.library.list('Post', '42');             // all collections for the owner
 await media.library.url(record.id);                  // url to the original
-await media.library.delete(record.id);               // removes record + bytes + conversions
+await media.library.url(record.id, 'thumb');         // url to a conversion (lazily generated)
+await media.library.delete(record.id);               // removes record + bytes + every conversion
+```
+
+`attach` derives a deterministic storage path (`ownerType/ownerId/collection/<id>/fileName`), writes the bytes, reads the size back if you didn't supply it, computes the next `order` in the collection, and saves the record. `delete` cleans up the original *and* all generated conversion files before removing the row — no orphans.
+
+### The `MediaRecord`
+
+```ts
+interface MediaRecord {
+  id: string;
+  ownerType: string; ownerId: string; collection: string;
+  name: string; fileName: string; mimeType: string; size: number;
+  disk: string; path: string; order: number;
+  customProperties: Record<string, unknown>;
+  conversions: Record<string, { path: string; disk: string }>;
+  createdAt: Date; updatedAt: Date;
+}
 ```
 
 ### Collections
@@ -72,9 +110,11 @@ collections: [
 
 | Option | Effect |
 |---|---|
-| `single` | Attaching replaces any existing media in the collection |
-| `disk` | Target disk for this collection (else the default disk) |
-| `acceptsMimeTypes` | Allow-list; other types are rejected with `MimeNotAllowedError` |
+| `single` | Attaching replaces any existing media in the collection (old record + bytes are deleted first) |
+| `disk` | Target disk for this collection (else the module default) |
+| `acceptsMimeTypes` | Allow-list; other types are rejected with `MimeNotAllowedError` before any bytes are written |
 | `conversions` | Image presets available for this collection (see [Conversions](/docs/media/concepts/conversions)) |
 
-The `media` table is polymorphic (`ownerType`/`ownerId`/`collection`/`order`/`customProperties`/`conversions`/disk/path/…) and is managed by your chosen [ORM store](/docs/media/packages/orm-stores).
+An unregistered collection name is permitted with default behavior (multi-file, default disk, no conversions) — so you can attach to ad-hoc collections without declaring every one up front, and declare only the ones that need rules.
+
+The `media` table is polymorphic and managed by your chosen [ORM store](/docs/media/packages/orm-stores) — TypeORM, MikroORM, Drizzle, or Prisma, all behind the same `MediaStore` contract.

@@ -1,38 +1,50 @@
 ---
 title: Uploads & multipart
-description: Resumable proxy uploads (tus) vs direct presigned uploads, and the uploadMode that picks between them.
+description: Resumable proxy uploads (tus) vs direct presigned uploads, the uploadMode that picks between them, and the engine underneath.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
 
-Large uploads come in two shapes, and the library does both — with the choice always overridable.
+Small files are easy — `multipart/form-data`, one request, done. Large files are where upload code earns its keep: a 500 MB video shouldn't restart from zero because a phone changed cell towers, and it shouldn't necessarily stream every byte through your Node event loop either. media does both shapes, and the choice is always yours to override.
 
 ## The two paths
 
-- **`proxy`** — bytes flow through your NestJS backend in chunks via a real **tus 1.0.0** server. Resumable: a dropped connection continues from the last offset. Works on any disk, and lets you inspect bytes (virus-scan, transform). 
-- **`direct`** — the backend only orchestrates; the client uploads chunks straight to the disk using **presigned S3 multipart**. The backend never sees the bytes — best at scale.
+**`proxy`** — bytes flow through your NestJS backend in chunks via a real **tus 1.0.0** server. The upload is *resumable*: a dropped connection continues from the last acknowledged offset instead of starting over. Works on any disk (even local), and because the bytes pass through you, it's where you'd virus-scan, watermark, or transform on the way in.
 
-## `uploadMode`
+**`direct`** — the backend only orchestrates; the browser uploads chunks straight to the storage backend using **presigned S3 multipart**. Your server never sees the bytes, so it never becomes the bandwidth bottleneck. This is the right default at scale, but it requires a disk that can presign.
 
-`resolveUploadMode` decides per upload, using the driver's `capabilities`:
+## `uploadMode`: choosing per upload
+
+`resolveUploadMode` decides, reading the driver's `capabilities`:
 
 ```ts
 type UploadMode = 'auto' | 'proxy' | 'direct';
 ```
 
-- `auto` (default) → `direct` when the driver is presign/multipart-capable (S3), else `proxy` (local).
-- `proxy` → always allowed.
-- `direct` → throws on a driver that can't presign.
+- **`auto`** (default) → `direct` when the driver is presign/multipart-capable (S3), otherwise `proxy` (local). The sensible default for most apps: scale where you can, proxy where you can't.
+- **`proxy`** → always allowed; every driver can accept bytes through `put`.
+- **`direct`** → throws on a driver that can't presign, rather than silently degrading.
 
-Resolution is **most-specific-wins**: per-call → per-disk → global.
+Resolution is **most-specific-wins**:
 
-<Callout type="info" title="Override is always available">
-Even on an S3 disk that *could* go direct, you can force `proxy` (e.g. to virus-scan or transform on the way in) — or force `direct` elsewhere. The driver capability sets the default; you keep the final say.
+```text
+per-call  ▸  per-disk  ▸  global  ▸  auto
+```
+
+<Callout type="info" title="The override is the point">
+Even on an S3 disk that *could* go direct, you can force `proxy` for a specific upload — e.g. user-supplied images you want to virus-scan or re-encode on the way in — and force `direct` elsewhere for raw throughput. The driver's capability sets the default; you keep the final say. This is exactly the "pela API ou pelo disco" choice: the disk proposes, the call disposes.
 </Callout>
 
 ## Resumable (tus) server
 
-Enable the proxy path by passing an upload session store, and mount the tus controller with `tus`:
+Enable the proxy path by giving the module an **upload session store**, and mount the tus controller with the `tus` option:
+
+<Steps>
+
+<Step>
+
+### Configure
 
 ```ts
 import { InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
@@ -41,24 +53,67 @@ MediaModule.forRoot({
   default: 'local',
   disks: { local },
   uploadSessions: new InMemoryUploadSessionStore(), // or your own UploadSessionStore
+  uploadTmpPrefix: '.uploads',                       // where in-progress chunks live (default)
   tus: { disk: 'local', basePath: '/media/uploads', maxSize: 100 * 1024 * 1024 },
 });
 ```
 
-This mounts `MediaUploadController` implementing the tus creation + termination protocol (`OPTIONS/POST/HEAD/PATCH/DELETE`) at `media/uploads`. Add a raw-body parser for the tus content type:
+This mounts `MediaUploadController`, implementing the tus creation + termination protocol (`OPTIONS / POST / HEAD / PATCH / DELETE`) at `media/uploads`.
 
-```ts
-app.use('/media/uploads', express.raw({ type: 'application/offset+octet-stream' }));
+</Step>
+
+<Step>
+
+### Add a raw-body parser
+
+tus `PATCH` bodies are `application/offset+octet-stream` — register a raw parser so they arrive as Buffers:
+
+```ts title="main.ts"
+import express from 'express';
+app.use('/media/uploads', express.raw({ type: 'application/offset+octet-stream', limit: '50mb' }));
 ```
 
 <Callout type="warn">
-The handler assembles chunks into the final object on completion. Register the raw-body middleware or `PATCH` bodies won't arrive as Buffers.
+Without this, `PATCH` bodies won't be Buffers and chunks won't assemble. This is the single most common setup mistake.
 </Callout>
 
-### From the browser
+</Step>
 
-The [React package](/docs/media/packages/colas) and the [codegen client](/docs/media/packages/colas) both ship a `uploadMedia()` that speaks this protocol — chunking, offset tracking, and resume are handled for you.
+<Step>
 
-## The engine
+### Upload from the browser
 
-Under both the HTTP handler and the React client sits `ResumableUploadManager` (framework-agnostic): `createUpload → writeChunk(offset) → status → complete`. Each chunk is written as a part on the target disk so resume needs no in-memory buffering; `complete` assembles the parts into the final object. Reach it directly via `media.uploads` when you want to drive uploads yourself.
+The [React package](/docs/media/packages/colas) and the [codegen client](/docs/media/packages/colas) both ship `uploadMedia()` — it POSTs to create the upload, PATCHes chunks with offset tracking, resumes on failure, and reports progress:
+
+```ts
+import { uploadMedia } from '@dudousxd/nestjs-media-client';
+
+const { location } = await uploadMedia(file, {
+  filename: file.name,
+  contentType: file.type,
+  basePath: '/media/uploads',
+  onProgress: (sent, total) => setPct(sent / total),
+});
+```
+
+</Step>
+
+</Steps>
+
+### What the server does
+
+On `POST` it creates a session (reading `Upload-Length` and `Upload-Metadata`), on `PATCH` it appends a chunk at the declared `Upload-Offset` (returning the new offset, or `409` on mismatch, `415` on the wrong content type), and when the offset reaches the declared length it assembles the parts into the final object automatically. `HEAD` reports the current offset so a client can resume; `DELETE` aborts and cleans up.
+
+## The engine underneath
+
+Both the HTTP handler and the browser client sit on top of `ResumableUploadManager` (framework-agnostic):
+
+```ts
+const session = await media.uploads.createUpload({ disk: 's3', key: 'videos/clip.bin', size });
+await media.uploads.writeChunk(session.id, 0, chunkA);   // → { offset }
+await media.uploads.writeChunk(session.id, offset, chunkB);
+const { key } = await media.uploads.complete(session.id); // assembles + cleans up parts
+// media.uploads.status(id) to resume; media.uploads.abort(id) to cancel
+```
+
+Each chunk is written immediately as a *part* on the target disk (under `uploadTmpPrefix`), so resuming needs no in-memory buffering and a half-finished upload survives a process restart. `complete` concatenates the parts into the final object and removes them. Reach `media.uploads` directly when you want to drive uploads from your own protocol or a non-HTTP transport.

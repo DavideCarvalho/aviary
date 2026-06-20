@@ -1,11 +1,13 @@
 ---
 title: Getting Started
-description: Install nestjs-media, wire MediaModule with a disk + store, and attach your first file.
+description: Install nestjs-media, wire MediaModule with a disk + store, attach your first file, and serve it back — in about five minutes.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 import { Steps, Step } from 'fumadocs-ui/components/steps';
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+By the end of this page you'll have a working upload endpoint that stores a file on a disk, records it against an entity, and serves a thumbnail back.
 
 <Steps>
 
@@ -13,7 +15,7 @@ import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
 ## Install
 
-Pick the umbrella package plus the disks, store, and image engine you want.
+Pick the umbrella package plus the disks, store, and image engine you want. Everything is à la carte — install only what you use.
 
 <Tabs items={['pnpm', 'npm', 'yarn']}>
 <Tab value="pnpm">
@@ -36,13 +38,15 @@ yarn add @dudousxd/nestjs-media @dudousxd/nestjs-media-disk-s3 \
 </Tab>
 </Tabs>
 
+The umbrella package (`@dudousxd/nestjs-media`) carries the NestJS module and the core SPIs. Each disk, ORM store, and image engine is its own package so you never pull S3 SDKs into a local-only app, or sharp into a service that doesn't resize.
+
 </Step>
 
 <Step>
 
 ## Register the module
 
-`MediaModule.forRoot` wires the **storage** layer (disks) and, when you pass a `store`, the **media-library** layer too.
+`MediaModule.forRoot` wires the **storage** layer (disks). Pass a `store` and you also get the **media-library** layer; pass an `imageProcessor` and `collections` with `conversions` and you get image variants.
 
 ```ts title="app.module.ts"
 import { Module } from '@nestjs/common';
@@ -84,25 +88,31 @@ export class AppModule {}
 ```
 
 <Callout type="info">
-`MediaModule` is `@Global()` — import it once and inject `MediaService` anywhere.
+`MediaModule` is `@Global()` — import it once and inject `MediaService` anywhere. Prefer `forRoot` (static config) when your disks don't need other providers; reach for `forRootAsync` when a disk needs an injected client or DataSource, as above.
 </Callout>
+
+The `TypeOrmMediaStore` creates the `media` table on first use by default (non-destructive — see [ORM stores](/docs/media/packages/orm-stores)). Nothing else to migrate to get started.
 
 </Step>
 
 <Step>
 
-## Use it
+## Accept an upload
 
-```ts title="photos.service.ts"
-import { Injectable } from '@nestjs/common';
+Wire a normal NestJS controller. Here with Multer's memory storage, so the file arrives as a Buffer:
+
+```ts title="photos.controller.ts"
+import { Controller, Param, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { MediaService } from '@dudousxd/nestjs-media';
 
-@Injectable()
-export class PhotosService {
+@Controller('posts/:id/photos')
+export class PhotosController {
   constructor(private readonly media: MediaService) {}
 
-  // Camada 2 — attach to an entity
-  upload(postId: string, file: { buffer: Buffer; mimetype: string; originalname: string }) {
+  @Post()
+  @UseInterceptors(FileInterceptor('file'))
+  upload(@Param('id') postId: string, @UploadedFile() file: Express.Multer.File) {
     return this.media.library.attach({
       ownerType: 'Post',
       ownerId: postId,
@@ -112,26 +122,62 @@ export class PhotosService {
       contents: file.buffer,
     });
   }
+}
+```
 
-  // Conversions are generated lazily on first request, then cached
-  thumbUrl(mediaId: string) {
-    return this.media.library.url(mediaId, 'thumb');
-  }
+`attach` writes the bytes to the collection's disk, records a `MediaRecord`, and (because `og` is `eager`) generates that variant right away. It returns the saved record, including its `id`.
 
-  // Camada 1 — raw storage, no DB
-  putRaw(path: string, data: Buffer) {
-    return this.media.disk('s3').put(path, data);
+</Step>
+
+<Step>
+
+## Serve it back
+
+Ask the library for a URL. Conversions are generated lazily the first time you request them, then cached:
+
+```ts title="photos.service.ts"
+@Injectable()
+export class PhotosService {
+  constructor(private readonly media: MediaService) {}
+
+  async list(postId: string) {
+    const media = await this.media.library.list('Post', postId, 'gallery');
+    return Promise.all(
+      media.map(async (m) => ({
+        id: m.id,
+        full: await this.media.library.url(m.id),
+        thumb: await this.media.library.url(m.id, 'thumb'), // generated + cached on first call
+      })),
+    );
   }
 }
+```
+
+And the raw storage layer is always there when you don't need an entity:
+
+```ts
+await this.media.disk('s3').put(`reports/${id}.csv`, csv, { contentType: 'text/csv' });
+const link = await this.media.disk('s3').temporaryUrl(`reports/${id}.csv`, 300);
 ```
 
 </Step>
 
 </Steps>
 
+## Troubleshooting
+
+<Callout type="warn" title="`MediaLibrary is not configured`">
+You called `media.library` without passing a `store` to `MediaModule`. The two layers are independent — add a `store` to enable camada 2, or use `media.disk(...)` for raw storage.
+</Callout>
+
+<Callout type="warn" title="`temporaryUrl` throws on the local disk">
+Signed URLs need a presign-capable driver (S3). The local disk only serves stable public URLs when you give it a `baseUrl`.
+</Callout>
+
 ## Next steps
 
-- [Concepts → The two layers](/docs/media/concepts/two-layers)
-- [Concepts → Uploads & multipart](/docs/media/concepts/uploads)
-- [Concepts → Conversions](/docs/media/concepts/conversions)
-- [Packages](/docs/media/packages) — every disk, store, and cola
+- [Concepts → The two layers](/docs/media/concepts/two-layers) — the model in depth
+- [Concepts → Uploads & multipart](/docs/media/concepts/uploads) — resumable tus + presigned direct
+- [Concepts → Conversions](/docs/media/concepts/conversions) — lazy vs eager image variants
+- [Recipes](/docs/media/recipes) — avatars, galleries, direct-to-S3, raw storage
+- [Reference → Configuration](/docs/media/reference/configuration) — every `MediaModule` option

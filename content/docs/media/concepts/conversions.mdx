@@ -5,9 +5,11 @@ description: Image conversions generated lazily on first access or eagerly on up
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Conversions are named, resized/reformatted variants of an image, declared per collection.
+A conversion is a named, transformed variant of an image — a thumbnail, an OG card, a WebP re-encode — declared per collection and generated on demand. You never write resize scripts; you declare presets and ask for URLs.
 
 ## Presets
+
+Conversions live on the collection:
 
 ```ts
 collections: [
@@ -16,6 +18,7 @@ collections: [
     conversions: [
       { name: 'thumb', width: 200, fit: 'cover' },
       { name: 'og', width: 1200, height: 630, format: 'webp', quality: 80, eager: true },
+      { name: 'avif', width: 1600, format: 'avif' },
     ],
   },
 ]
@@ -23,38 +26,58 @@ collections: [
 
 | Field | Meaning |
 |---|---|
-| `width` / `height` | Target dimensions (either or both) |
+| `name` | How you reference it: `library.url(id, 'thumb')` |
+| `width` / `height` | Target dimensions — set either or both |
 | `fit` | `cover` (default) · `contain` · `fill` · `inside` · `outside` |
 | `format` | `webp` (default) · `jpeg` · `png` · `avif` |
-| `quality` | Encoder quality |
+| `quality` | Encoder quality (engine-defined scale) |
 | `eager` | Generate on upload instead of on first access |
 
-## Lazy (default)
+## Lazy by default
 
-A conversion is generated the first time its URL is requested, then cached on the disk:
+A lazy conversion is generated the first time its URL is requested, written to the disk next to the original, recorded on the `MediaRecord`, and served from cache forever after:
 
 ```ts
-await media.library.url(mediaId, 'thumb'); // generates + caches on first call, cheap thereafter
+await media.library.url(mediaId, 'thumb');
+// 1st call: reads original → runs the processor → writes /…/conversions/thumb.webp → returns its url
+// later calls: returns the cached url, no processing
 ```
 
-Nothing is computed for variants nobody asks for.
+This means **you never compute a variant nobody asks for.** Add a new preset and it simply starts existing the next time someone requests it — no backfill job, no migration of existing media. The trade-off is that the very first request for each variant pays the conversion cost.
+
+You can also force generation ahead of a request:
+
+```ts
+await media.library.ensureConversion(mediaId, 'thumb'); // generate + cache now, return the record
+```
 
 ## Eager (opt-in)
 
-Mark a preset `eager` and it is generated synchronously during `attach` — handy for variants you know you'll need immediately (e.g. an OG image).
+Mark a preset `eager` and it's generated synchronously during `attach`, so it's ready the instant the upload returns — ideal for variants you *know* you'll need immediately, like an OG image a crawler will hit seconds later, or the one size your list view always shows.
+
+```ts
+{ name: 'og', width: 1200, height: 630, eager: true }
+```
 
 <Callout type="info" title="Background dispatch is a later phase">
-Eager conversions run synchronously today (the baseline). A durable/bullmq dispatcher — so eager generation rides the workflow engine's replay + dead-letter — is on the roadmap.
+Eager conversions run synchronously today — the dependable baseline. A durable/bullmq dispatcher (so eager generation rides the workflow engine's replay + dead-letter and doesn't block the request) is on the roadmap. Until then, keep heavy eager work to a small number of presets, and lean on lazy for the long tail.
 </Callout>
+
+## Where variants are stored
+
+Conversions go on the **same disk** as their original, under a sibling `conversions/` folder, e.g. `Post/42/gallery/<id>/conversions/thumb.webp`. They're tracked in the record's `conversions` map (`{ thumb: { path, disk } }`), and `library.delete(id)` removes every variant alongside the original — no orphaned files.
 
 ## Pluggable engine
 
-The processor is an SPI:
+The processor is an SPI, so the image library is swappable:
 
 ```ts
 interface ImageProcessor {
   convert(input: Buffer, preset: ConversionPreset): Promise<ConversionResult>;
+  // ConversionResult = { data: Buffer; format: string; contentType: string }
 }
 ```
 
-The default implementation is [`@dudousxd/nestjs-media-image-sharp`](/docs/media/packages/storage-drivers) (`SharpImageProcessor`). Pass your own to `MediaModule`'s `imageProcessor` option to swap engines. Non-image files are stored as-is — no conversions are attempted.
+The default is [`@dudousxd/nestjs-media-image-sharp`](/docs/media/packages/storage-drivers)'s `SharpImageProcessor`. Pass your own to `MediaModule`'s `imageProcessor` option to swap engines (e.g. an ImageMagick wrapper, or a remote transform service). If a collection declares conversions but no processor is configured, requesting one throws `ImageProcessorMissingError`; requesting an undeclared preset throws `ConversionNotDefinedError`.
+
+Non-image files (PDFs, video, archives) are stored as-is — conversions only run when you ask for a declared preset, so a mixed collection is fine.

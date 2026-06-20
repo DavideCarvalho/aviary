@@ -1,0 +1,140 @@
+---
+title: Configuration
+description: Every MediaModule option, the MediaService surface, and the injection tokens — in one place.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The complete configuration surface for `@dudousxd/nestjs-media`.
+
+## `MediaModule.forRoot(options)`
+
+```ts
+interface MediaModuleOptions {
+  // ── storage (camada 1) ──────────────────────────────────────────────
+  default: string;                          // name of the default disk
+  disks: Record<string, StorageDriver>;     // named disks
+
+  // ── media-library (camada 2) — enabled when `store` is present ───────
+  store?: MediaStore;
+  collections?: MediaCollectionConfig[];
+  imageProcessor?: ImageProcessor;
+
+  // ── resumable uploads — enabled when `uploadSessions` is present ─────
+  uploadSessions?: UploadSessionStore;
+  uploadTmpPrefix?: string;                 // default '.uploads'
+  tus?: {                                   // mounts the tus HTTP controller
+    disk: string;
+    basePath?: string;                      // default '/media/uploads'
+    maxSize?: number;                       // reject larger creations (bytes)
+    keyFor?: (filename: string, token: string, metadata: Record<string, string>) => string;
+  };
+}
+```
+
+| Option | Required | Purpose |
+|---|---|---|
+| `default` | ✅ | Which disk `media.disk()` returns with no name |
+| `disks` | ✅ | The named disks (`local`, `s3`, custom, …) |
+| `store` | — | Enables `media.library`; omit for raw-storage-only |
+| `collections` | — | Per-collection rules + conversions |
+| `imageProcessor` | — | Required only if any collection declares `conversions` |
+| `uploadSessions` | — | Enables `media.uploads` (the resumable engine) |
+| `uploadTmpPrefix` | — | Where in-progress chunks are staged on the disk |
+| `tus` | — | Mounts `MediaUploadController` (needs `uploadSessions`) |
+
+## `MediaModule.forRootAsync(options)`
+
+Same options, resolved through a factory with DI:
+
+```ts
+interface MediaModuleAsyncOptions {
+  imports?: any[];
+  inject?: any[];
+  useFactory: (...args: any[]) => MediaModuleOptions | Promise<MediaModuleOptions>;
+}
+```
+
+Use this whenever a disk or store needs an injected dependency (an `S3Client`, a `DataSource`, config service).
+
+## `MediaCollectionConfig`
+
+```ts
+interface MediaCollectionConfig {
+  name: string;
+  single?: boolean;            // attaching replaces existing media
+  disk?: string;               // override the target disk for this collection
+  acceptsMimeTypes?: string[]; // allow-list, else MimeNotAllowedError
+  conversions?: ConversionPreset[];
+}
+
+interface ConversionPreset {
+  name: string;
+  width?: number; height?: number;
+  fit?: 'cover' | 'contain' | 'fill' | 'inside' | 'outside';
+  format?: 'jpeg' | 'png' | 'webp' | 'avif';
+  quality?: number;
+  eager?: boolean;             // generate on attach instead of on first access
+}
+```
+
+## `MediaService`
+
+```ts
+class MediaService {
+  disk(name?: string): StorageDriver;   // camada 1
+  get library(): MediaLibrary;          // camada 2 — throws if no store configured
+  get uploads(): ResumableUploadManager;// resumable — throws if no uploadSessions configured
+}
+```
+
+<Callout type="info" title="Why the getters throw">
+`library` and `uploads` throw a clear, actionable error when their feature wasn't configured, rather than handing you `undefined`. The boundary is explicit: if you didn't pass a `store`, `media.library` tells you so by name.
+</Callout>
+
+## `MediaLibrary`
+
+```ts
+attach(input: AttachInput): Promise<MediaRecord>;
+ensureConversion(id: string, conversion: string): Promise<MediaRecord>;
+list(ownerType: string, ownerId: string, collection?: string): Promise<MediaRecord[]>;
+delete(id: string): Promise<void>;
+url(id: string, conversion?: string): Promise<string>;
+
+interface AttachInput {
+  ownerType: string; ownerId: string; collection: string;
+  fileName: string; mimeType: string; contents: Buffer | Readable;
+  size?: number; name?: string;
+  customProperties?: Record<string, unknown>;
+  disk?: string;
+}
+```
+
+## Injection tokens
+
+For advanced wiring, the module also exports tokens you can inject directly:
+
+```ts
+import { MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_UPLOADS, MEDIA_TUS } from '@dudousxd/nestjs-media';
+```
+
+| Token | Resolves to |
+|---|---|
+| `MEDIA_STORAGE` | `StorageManager` |
+| `MEDIA_LIBRARY` | `MediaLibrary \| null` |
+| `MEDIA_UPLOADS` | `ResumableUploadManager \| null` |
+| `MEDIA_TUS` | `TusUploadHandler \| null` |
+
+## Error codes
+
+| Error | `code` |
+|---|---|
+| `FileNotFoundError` | `MEDIA_FILE_NOT_FOUND` |
+| `UnknownDiskError` | `MEDIA_UNKNOWN_DISK` |
+| `UnsupportedOperationError` | `MEDIA_UNSUPPORTED_OP` |
+| `MimeNotAllowedError` | `MEDIA_MIME_NOT_ALLOWED` |
+| `MediaNotFoundError` | `MEDIA_RECORD_NOT_FOUND` |
+| `ConversionNotDefinedError` | `MEDIA_CONVERSION_NOT_DEFINED` |
+| `ImageProcessorMissingError` | `MEDIA_IMAGE_PROCESSOR_MISSING` |
+| `UploadSessionNotFoundError` | `MEDIA_UPLOAD_SESSION_NOT_FOUND` |
+| `UploadOffsetConflictError` | `MEDIA_UPLOAD_OFFSET_CONFLICT` |

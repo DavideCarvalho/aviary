@@ -1,0 +1,68 @@
+---
+title: Writing a custom disk driver
+description: Implement the StorageDriver contract for any backend, and verify it with the shared conformance suite.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Need Google Cloud Storage, Cloudflare R2, Azure Blob, or an in-house store? A disk is just a class implementing `StorageDriver`. The contract is small, and there's a ready-made test suite to prove yours behaves.
+
+## The contract
+
+```ts
+import type { DriverCapabilities, PutOptions, StorageDriver } from '@dudousxd/nestjs-media/storage';
+import type { Readable } from 'node:stream';
+
+export class GcsDriver implements StorageDriver {
+  readonly capabilities: DriverCapabilities;
+
+  constructor(private readonly bucket: /* your GCS bucket handle */ any, publicBaseUrl?: string) {
+    this.capabilities = { presign: true, multipart: false, publicUrls: !!publicBaseUrl };
+  }
+
+  async put(path: string, contents: Buffer | Readable, options?: PutOptions): Promise<void> { /* … */ }
+  async get(path: string): Promise<Buffer> { /* … throw FileNotFoundError when absent */ }
+  async stream(path: string): Promise<Readable> { /* … */ }
+  async exists(path: string): Promise<boolean> { /* … */ }
+  async size(path: string): Promise<number> { /* … */ }
+  async delete(path: string): Promise<void> { /* … idempotent */ }
+  async copy(from: string, to: string): Promise<void> { /* … */ }
+  async move(from: string, to: string): Promise<void> { /* … */ }
+  async url(path: string): Promise<string> { /* … or throw UnsupportedOperationError */ }
+  async temporaryUrl(path: string, expiresInSeconds: number): Promise<string> { /* … */ }
+}
+```
+
+## Capabilities are a promise
+
+Set `capabilities` honestly — the library trusts them. `presign: true` means `temporaryUrl` works and [`uploadMode: 'auto'`](/docs/media/concepts/uploads) may pick the direct path; `publicUrls: true` means `url()` returns a stable address. If you can't do an operation, throw `UnsupportedOperationError(driver, op)` rather than returning something fake.
+
+<Callout type="warn" title="Error semantics matter">
+`get`, `stream`, and `size` must throw `FileNotFoundError` for a missing key (not return null), and `delete` must be idempotent. The conformance suite checks exactly these — they're what the media-library layer relies on.
+</Callout>
+
+## Verify with the conformance suite
+
+`@dudousxd/nestjs-media-testing` exports the same contract every built-in driver is held to. Point it at a factory that returns a fresh driver:
+
+```ts title="gcs-driver.spec.ts"
+import { runStorageDriverConformance } from '@dudousxd/nestjs-media-testing';
+import { GcsDriver } from './gcs-driver';
+
+runStorageDriverConformance('GcsDriver', () => new GcsDriver(makeTestBucket()));
+```
+
+For a real backend, run it as a `*.db.spec.ts` against an emulator/container (the way `disk-s3` is verified against MinIO) so it stays out of the default unit run.
+
+## Use it
+
+A custom driver is just another entry in `disks`:
+
+```ts
+MediaModule.forRoot({
+  default: 'gcs',
+  disks: { gcs: new GcsDriver(bucket, 'https://cdn.example.com') },
+});
+```
+
+The same approach applies to a custom `MediaStore` (implement the interface, verify with `runMediaStoreConformance`) — see [ORM stores](/docs/media/packages/orm-stores).

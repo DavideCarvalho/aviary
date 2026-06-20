@@ -5,36 +5,52 @@ description: Media emits to nestjs:media:* diagnostics channels with zero coupli
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Media is wired into the same four "colas" (glue points) every `@dudousxd/nestjs-*` library shares.
+media is wired into the same four "colas" (glue points) every `@dudousxd/nestjs-*` library shares. None of them are required to use media — they're how it *composes* with the rest of the ecosystem when you want it to.
 
 ## 1. Diagnostics channels
 
-`MediaLibrary` publishes to `node:diagnostics_channel` with the standard ecosystem envelope — zero coupling, no-op when nobody is subscribed:
+`MediaLibrary` publishes to `node:diagnostics_channel` with the standard ecosystem envelope. This is the lowest-coupling integration there is: media doesn't import Telescope or know it exists — it just emits, and anything that cares subscribes. When nobody's listening, publishing is a no-op (a cheap `hasSubscribers` check), so it's always on by default with no measurable cost.
 
 ```ts
-// channel: nestjs:media:<event>
-{ ts: number, lib: 'media', event: 'attach' | 'delete' | 'conversion', payload: {...} }
+// channel: nestjs:media:<event>   where event ∈ attach | delete | conversion
+{ ts: number, lib: 'media', event: 'attach', payload: { id, ownerType, ownerId, collection, disk, path, size, mimeType } }
 ```
 
-Disable with `emitDiagnostics: false` on the `MediaLibrary` options. See [Diagnostics](/docs/media/diagnostics) for the cross-ecosystem convention.
+Subscribe to it yourself if you want custom metrics or audit logging:
+
+```ts
+import { subscribe } from 'node:diagnostics_channel';
+
+subscribe('nestjs:media:attach', (msg) => {
+  metrics.increment('media.attach', { disk: (msg as any).payload.disk });
+});
+```
+
+Turn emission off with `emitDiagnostics: false` on the `MediaLibrary` options if you never want it. See [Diagnostics](/docs/media/diagnostics) for the cross-ecosystem convention this follows.
 
 ## 2. Telescope
 
-[`@dudousxd/nestjs-media-telescope`](/docs/media/packages/colas) ships a `MediaWatcher` that subscribes to those channels and records a `media` entry per event — so attaches, deletes, and conversions show up in the [Telescope](/docs/media/telescope) console next to your requests, queries, and jobs.
+[`@dudousxd/nestjs-media-telescope`](/docs/media/packages/colas) ships a `MediaWatcher` that subscribes to those channels and records a `media` entry per event — so attaches, deletes, and conversions show up in the [Telescope](/docs/media/telescope) console next to your requests, queries, jobs, and mails, correlated under the same batch.
 
 ```ts
 import { MediaWatcher } from '@dudousxd/nestjs-media-telescope';
-// register MediaWatcher in your telescope watcher list
+// add new MediaWatcher() to your telescope watcher list
 ```
+
+That's the entire integration: media emits, the watcher records. No changes to your media code, no coupling between the packages beyond the channel name.
 
 ## 3. Codegen
 
-[`@dudousxd/nestjs-media-codegen`](/docs/media/packages/colas) contributes a typed media client to your generated output (a thin binding over the runtime client), so the front-end gets `uploadMedia()` + `mediaUrl()` with no hand-written protocol code. See [Codegen](/docs/media/codegen).
+[`@dudousxd/nestjs-media-codegen`](/docs/media/packages/colas) contributes a typed media client to your generated output, so the front-end gets `uploadMedia()` + `mediaUrl()` with no hand-written upload protocol. The emitted file is a *thin binding* over the runtime client (it bakes in your tus base path and re-exports), which is the point of the next section. See [Codegen](/docs/media/codegen).
 
 ## 4. React
 
-[`@dudousxd/nestjs-media-react`](/docs/media/packages/colas) provides `useMediaUpload()` and `<MediaUploader/>`, built on the same resumable client.
+[`@dudousxd/nestjs-media-react`](/docs/media/packages/colas) provides `useMediaUpload()` and `<MediaUploader/>`, built on the same resumable client — progress, status, and resume handled for you.
 
 <Callout type="info" title="One protocol, many surfaces">
-The tus client lives once in `@dudousxd/nestjs-media-client`; the React hook wraps it and the codegen extension re-exports it. There is a single implementation of the wire protocol.
+The tus client lives exactly once, in `@dudousxd/nestjs-media-client`. The React hook wraps it; the codegen extension re-exports it. There is a single implementation of the wire protocol, so a protocol change is a one-file change — the front-end surfaces follow automatically.
 </Callout>
+
+## Why this shape
+
+Every glue point here is *opt-in and decoupled*. media is useful with none of them (it's a storage + media library on its own), better with each of them, and never forced to depend on Telescope, the codegen runtime, or React to function. That's the ecosystem contract: libraries emit on shared channels and ship satellite packages, so you assemble exactly the surface you need.

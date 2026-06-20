@@ -1,22 +1,32 @@
 ---
 title: Single-file avatar
-description: A single-file collection that replaces the previous image on each upload.
+description: A single-file collection that replaces the previous image on each upload, with MIME validation.
 ---
 
-Declare a `single` collection — each `attach` replaces the prior file (record + bytes).
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The classic "one image per user, replaced on re-upload" case is a `single` collection. Attaching a new file deletes the previous record *and* its bytes automatically, so there's never a second avatar lying around.
+
+## Configure the collection
 
 ```ts
 collections: [
-  { name: 'avatar', single: true, acceptsMimeTypes: ['image/png', 'image/jpeg'] },
+  { name: 'avatar', single: true, acceptsMimeTypes: ['image/png', 'image/jpeg', 'image/webp'] },
 ]
 ```
 
-```ts
-@Injectable()
-export class UsersService {
+`single` gives you the replace-on-attach behavior; `acceptsMimeTypes` rejects anything else with `MimeNotAllowedError` *before* a byte is written, so a bad upload never touches the disk.
+
+## The controller + service
+
+```ts title="users.controller.ts"
+@Controller('users/:id/avatar')
+export class AvatarController {
   constructor(private readonly media: MediaService) {}
 
-  async setAvatar(userId: string, file: { buffer: Buffer; mimetype: string; originalname: string }) {
+  @Put()
+  @UseInterceptors(FileInterceptor('file'))
+  setAvatar(@Param('id') userId: string, @UploadedFile() file: Express.Multer.File) {
     return this.media.library.attach({
       ownerType: 'User',
       ownerId: userId,
@@ -24,14 +34,33 @@ export class UsersService {
       fileName: file.originalname,
       mimeType: file.mimetype,
       contents: file.buffer,
+      customProperties: { uploadedBy: userId },
     });
-  }
-
-  async avatarUrl(userId: string) {
-    const [avatar] = await this.media.library.list('User', userId, 'avatar');
-    return avatar ? this.media.library.url(avatar.id) : null;
   }
 }
 ```
 
-A disallowed MIME type throws `MimeNotAllowedError`; uploading a second avatar deletes the first automatically.
+```ts title="users.service.ts"
+async avatarUrl(userId: string): Promise<string | null> {
+  const [avatar] = await this.media.library.list('User', userId, 'avatar');
+  return avatar ? this.media.library.url(avatar.id) : null;
+}
+```
+
+`list` on a single-file collection returns zero or one record, so destructuring the first element is safe.
+
+## Add a thumbnail
+
+Want a 64px avatar for nav bars? Add a conversion and request it — generated lazily, cached forever:
+
+```ts
+{ name: 'avatar', single: true, conversions: [{ name: 'sm', width: 64 }] }
+```
+
+```ts
+await this.media.library.url(avatar.id, 'sm');
+```
+
+<Callout type="info">
+`customProperties` is free-form JSON stored on the record — handy for things like the original uploader, alt text, or a moderation flag. It round-trips untouched.
+</Callout>

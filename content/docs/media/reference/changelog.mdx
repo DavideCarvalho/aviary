@@ -1,0 +1,16 @@
+---
+title: Changelog
+description: Release history for the nestjs-media packages.
+---
+
+All packages are versioned together via [changesets](https://github.com/changesets/changesets).
+
+## 0.1.0
+
+Initial release — filesystem + media-library for NestJS in one package.
+
+- **Storage** (camada 1): `StorageDriver` SPI + `StorageManager`; local and S3 drivers; `uploadMode` resolution; resumable upload engine + tus 1.0.0 HTTP handler.
+- **Media-library** (camada 2): spatie-style `HasMedia` collections, single-file replace, MIME validation, image conversions (sharp, lazy + eager).
+- **ORM stores**: TypeORM, MikroORM, Drizzle, Prisma — one shared `MediaStore` conformance suite.
+- **Colas**: `nestjs:media:*` diagnostics, Telescope watcher, codegen client, React `useMediaUpload` / `MediaUploader`.
+- **NestJS** `MediaModule` wiring all layers; `/storage` subpath for raw-filesystem consumers.
