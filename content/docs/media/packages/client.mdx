@@ -1,0 +1,53 @@
+---
+title: '@dudousxd/nestjs-media-client'
+description: The framework-agnostic browser client — one implementation of the resumable tus upload, plus a URL helper.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`@dudousxd/nestjs-media-client` is the single, dependency-free implementation of the browser-side upload protocol. The [React package](/docs/media/packages/react) wraps it and the [codegen extension](/docs/media/packages/codegen) re-exports it — so there is exactly one copy of the tus wire protocol to maintain.
+
+## `uploadMedia`
+
+Resumably upload a `Blob`/`File` through the [tus endpoints](/docs/media/concepts/uploads), returning the created resource location:
+
+```ts
+import { uploadMedia } from '@dudousxd/nestjs-media-client';
+
+const { location } = await uploadMedia(file, {
+  filename: file.name,
+  contentType: file.type,
+  basePath: '/media/uploads',   // your tus mount; defaults to /media/uploads
+  chunkSize: 5 * 1024 * 1024,   // optional, default 5 MiB
+  onProgress: (sent, total) => setPct(sent / total),
+});
+```
+
+It POSTs to create the upload (sending `Upload-Length` + base64 `Upload-Metadata`), reads the `Location`, then PATCHes chunks while tracking `Upload-Offset` — the server assembles them on completion.
+
+## `mediaUrl`
+
+A small helper to build a media URL by id (and optional conversion):
+
+```ts
+import { mediaUrl } from '@dudousxd/nestjs-media-client';
+
+mediaUrl('abc');            // → /media/abc
+mediaUrl('abc', 'thumb');   // → /media/abc?conversion=thumb
+```
+
+## Bring-your-own fetch
+
+`fetchImpl` lets you inject a custom `fetch` (auth headers, a mock in tests):
+
+```ts
+await uploadMedia(file, { filename, fetchImpl: authedFetch });
+```
+
+<Callout type="info" title="Why a separate package">
+Keeping the protocol in one zero-dependency package means it works in any browser app — React, Vue, Svelte, or none — and a protocol change is a one-file change that every surface inherits.
+</Callout>
+
+## Resume
+
+Because each chunk is acknowledged with an offset, an interrupted `uploadMedia` can be retried — the server reports the current offset via `HEAD`, and a fresh call continues from there rather than re-sending. See [Uploads & multipart](/docs/media/concepts/uploads).

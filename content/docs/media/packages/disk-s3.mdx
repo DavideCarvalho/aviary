@@ -1,0 +1,53 @@
+---
+title: '@dudousxd/nestjs-media-disk-s3'
+description: The S3 driver — presigned URLs + native multipart, works with any S3-compatible endpoint.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A `StorageDriver` over Amazon S3 and any S3-compatible service (MinIO, Cloudflare R2, Backblaze B2, …). It's a POJO that receives an `S3Client` — your app owns the client, region, and credentials.
+
+```ts
+import { S3Driver } from '@dudousxd/nestjs-media-disk-s3';
+import { S3Client } from '@aws-sdk/client-s3';
+
+new S3Driver({
+  client: new S3Client({ region: 'us-east-1' }),
+  bucket: 'app-uploads',
+  keyPrefix: 'uploads',           // optional — prepended to every key
+  publicBaseUrl: 'https://cdn…',  // optional — enables url() (e.g. a CloudFront domain)
+});
+```
+
+## Capabilities
+
+```ts
+{ presign: true, multipart: true, publicUrls: !!publicBaseUrl }
+```
+
+- `temporaryUrl(path, ttl)` returns a signed GET URL (via `@aws-sdk/s3-request-presigner`).
+- `url(path)` returns `${publicBaseUrl}/${key}` when set, else throws.
+- `presign + multipart` are what [`uploadMode: 'auto'`](/docs/media/concepts/uploads) reads to choose the **direct** (presigned multipart) upload path.
+
+## S3-compatible endpoints
+
+Point the client at any compatible service:
+
+```ts
+new S3Client({
+  region: 'auto',
+  endpoint: 'https://<account>.r2.cloudflarestorage.com',
+  forcePathStyle: true,           // MinIO and some others need this
+  credentials: { accessKeyId, secretAccessKey },
+});
+```
+
+## Verified against real S3
+
+<Callout type="info">
+The driver's behavior is validated by the shared conformance suite running against a real **MinIO** server (testcontainers) — not just mocks — so `put/get/stream/copy/move/size/delete` and error semantics match a real backend. See [`-testing`](/docs/media/packages/testing).
+</Callout>
+
+## Peer dependencies
+
+`@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner` (v3), plus `@dudousxd/nestjs-media-core`.

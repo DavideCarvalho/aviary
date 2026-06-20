@@ -1,0 +1,56 @@
+---
+title: '@dudousxd/nestjs-media-core'
+description: The framework-agnostic heart — SPIs, the storage facade, the media-library, the upload engine, and diagnostics. No NestJS dependency.
+---
+
+`@dudousxd/nestjs-media-core` is the dependency-light core every other package builds on. It has no NestJS dependency, so the contracts and engines are usable from any TypeScript runtime; the [umbrella package](/docs/media/packages/nestjs) only adds DI wiring.
+
+## What's inside
+
+**The three SPIs** — the contracts disks, stores, and image engines implement:
+
+```ts
+interface StorageDriver { /* put/get/stream/url/temporaryUrl/exists/size/delete/copy/move + capabilities */ }
+interface MediaStore { save/find/listByOwner/delete/nextOrder }
+interface ImageProcessor { convert(input, preset): Promise<ConversionResult> }
+```
+
+**`StorageManager`** — the named-disk registry behind `media.disk(name)`.
+
+**`MediaLibrary`** — the camada-2 orchestrator: `attach / list / delete / url / ensureConversion`, collections, MIME validation, conversion generation, and diagnostics emission.
+
+**The upload engine** — `ResumableUploadManager` plus the framework-agnostic `TusUploadHandler` (request → response, no web framework).
+
+**`resolveUploadMode`** — the `auto | proxy | direct` decision from a driver's capabilities.
+
+**Diagnostics** — `publishMedia` + the `nestjs:media:*` envelope.
+
+**Errors + helpers** — the typed error classes (with stable `code`s) and `collectStream`.
+
+## Using it directly
+
+You rarely import core in app code — you use the [umbrella module](/docs/media/packages/nestjs). But everything is exported for non-Nest hosts or custom wiring:
+
+```ts
+import {
+  StorageManager,
+  MediaLibrary,
+  resolveUploadMode,
+  collectStream,
+  FileNotFoundError,
+} from '@dudousxd/nestjs-media-core';
+
+const storage = new StorageManager({ default: 'local', disks: { local } });
+const library = new MediaLibrary({ storage, store, collections, imageProcessor });
+await library.attach({ ownerType: 'Post', ownerId: '1', collection: 'gallery', fileName, mimeType, contents });
+```
+
+## Subpath for raw storage
+
+Consumers that only want the filesystem facade import it through the umbrella's subpath (which re-exports core's storage surface) rather than depending on core directly:
+
+```ts
+import { StorageManager, type StorageDriver } from '@dudousxd/nestjs-media/storage';
+```
+
+See [Concepts → The two layers](/docs/media/concepts/two-layers) for the full storage and media-library APIs.

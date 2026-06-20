@@ -83,7 +83,7 @@ Without this, `PATCH` bodies won't be Buffers and chunks won't assemble. This is
 
 ### Upload from the browser
 
-The [React package](/docs/media/packages/colas) and the [codegen client](/docs/media/packages/colas) both ship `uploadMedia()` — it POSTs to create the upload, PATCHes chunks with offset tracking, resumes on failure, and reports progress:
+The [React package](/docs/media/packages/react) and the [codegen client](/docs/media/packages/codegen) both ship `uploadMedia()` — it POSTs to create the upload, PATCHes chunks with offset tracking, resumes on failure, and reports progress:
 
 ```ts
 import { uploadMedia } from '@dudousxd/nestjs-media-client';

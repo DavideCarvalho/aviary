@@ -1,0 +1,56 @@
+---
+title: Writing a custom store
+description: Implement the MediaStore contract for any persistence backend, verified by the shared conformance suite.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The four bundled [ORM stores](/docs/media/concepts/persistence) cover the common cases, but the contract is small — back media records with anything (a different ORM, a document store, a service API) by implementing five methods.
+
+## The contract
+
+```ts
+import type { MediaRecord, MediaStore } from '@dudousxd/nestjs-media-core';
+
+export class MyMediaStore implements MediaStore {
+  constructor(private readonly db: MyDb) {}
+
+  async save(record: MediaRecord): Promise<MediaRecord> { /* upsert by id */ return record; }
+  async find(id: string): Promise<MediaRecord | null> { /* … */ }
+  async listByOwner(ownerType: string, ownerId: string, collection?: string): Promise<MediaRecord[]> {
+    /* filter by owner (+ collection if given), ORDER BY order ASC */
+  }
+  async delete(id: string): Promise<void> { /* idempotent */ }
+  async nextOrder(ownerType: string, ownerId: string, collection: string): Promise<number> {
+    /* MAX(order)+1 in the collection, or 0 */
+  }
+}
+```
+
+## Semantics that matter
+
+- **`save` is an upsert** — `MediaLibrary` calls it both to create and to update (when a conversion is added). Key on `id`.
+- **`listByOwner` is ordered** — return records sorted by `order` ascending; with no `collection`, return all of the owner's collections.
+- **`delete` is idempotent** — deleting a missing id is a no-op, not an error.
+- **`nextOrder` returns the append position** — `0` for an empty collection.
+
+<Callout type="warn">
+These four behaviors are exactly what the conformance suite checks — they're the assumptions the media-library relies on.
+</Callout>
+
+## Verify it
+
+```ts title="my-store.spec.ts"
+import { runMediaStoreConformance } from '@dudousxd/nestjs-media-testing';
+import { MyMediaStore } from './my-store';
+
+runMediaStoreConformance('MyMediaStore', () => new MyMediaStore(makeFreshDb()));
+```
+
+Pass the suite and your store drops into `MediaModule` unchanged:
+
+```ts
+MediaModule.forRoot({ default: 's3', disks: { s3 }, store: new MyMediaStore(db) });
+```
+
+For a real backend, also run it as a `*.db.spec.ts` against a container (the way the ORM stores are validated on Postgres). See [`-testing`](/docs/media/packages/testing) and [Persistence](/docs/media/concepts/persistence).

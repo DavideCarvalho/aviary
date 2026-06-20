@@ -1,0 +1,34 @@
+---
+title: '@dudousxd/nestjs-media-image-sharp'
+description: The default ImageProcessor, backed by sharp.
+---
+
+The default image engine for [conversions](/docs/media/concepts/conversions), implementing the `ImageProcessor` SPI on top of [sharp](https://sharp.pixelplumbing.com).
+
+```ts
+import { SharpImageProcessor } from '@dudousxd/nestjs-media-image-sharp';
+
+MediaModule.forRoot({
+  // …
+  imageProcessor: new SharpImageProcessor(),
+  collections: [{ name: 'gallery', conversions: [{ name: 'thumb', width: 200 }] }],
+});
+```
+
+## What it supports
+
+Each [`ConversionPreset`](/docs/media/reference/configuration) maps to a sharp pipeline:
+
+- **resize** via `width` / `height` with `fit` (`cover` · `contain` · `fill` · `inside` · `outside`)
+- **format** conversion to `webp` (default) · `jpeg` · `png` · `avif`
+- **quality** control
+
+It returns the encoded buffer plus the output `format` and `contentType`, which the library writes next to the original and records on the `MediaRecord`.
+
+## Swapping engines
+
+The processor is just an SPI — `ImageProcessor.convert(input, preset)`. Provide your own implementation (ImageMagick, a remote transform service, a GPU pipeline) to `MediaModule`'s `imageProcessor` option; nothing else changes. See [Conversions → Pluggable engine](/docs/media/concepts/conversions).
+
+## Peer dependencies
+
+`sharp` (^0.33) and `@dudousxd/nestjs-media-core`. sharp ships prebuilt binaries for common platforms; for unusual targets see sharp's install docs.

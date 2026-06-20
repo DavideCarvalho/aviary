@@ -1,0 +1,55 @@
+---
+title: '@dudousxd/nestjs-media-database-prisma'
+description: Prisma media store — consumer-managed schema, structural client typing.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A `MediaStore` backed by Prisma. The adapter **never imports `@prisma/client`** — Prisma's schema is consumer-managed, so you own the `Media` model and migrations, and pass your generated `PrismaClient`.
+
+```ts
+import { PrismaMediaStore } from '@dudousxd/nestjs-media-database-prisma';
+
+MediaModule.forRoot({ default: 's3', disks: { s3 }, store: new PrismaMediaStore(prisma) });
+```
+
+## Add the model
+
+Add a `Media` model to your `schema.prisma` (map `order` → a `position` column):
+
+```prisma
+model Media {
+  id               String   @id
+  ownerType        String
+  ownerId          String
+  collection       String
+  name             String
+  fileName         String
+  mimeType         String
+  size             Int
+  disk             String
+  path             String
+  order            Int      @map("position")
+  customProperties Json
+  conversions      Json
+  createdAt        DateTime
+  updatedAt        DateTime
+
+  @@index([ownerType, ownerId, collection])
+  @@map("media")
+}
+```
+
+Then `prisma migrate` as usual — the adapter does no schema management.
+
+## Structural typing
+
+The store depends on a structural `PrismaClientLike` interface (just the `media` delegate methods it calls), not the concrete generated client.
+
+<Callout type="info" title="Validated against a real client">
+The structural contract is verified by an integration suite that **generates a real Prisma client** and runs the store against real Postgres (testcontainers) — confirming a genuine `PrismaClient` is assignable, not just an interface that looks right on paper.
+</Callout>
+
+## Peer dependencies
+
+`@dudousxd/nestjs-media-core` only — you bring your own `@prisma/client`. See [Concepts → Persistence](/docs/media/concepts/persistence).

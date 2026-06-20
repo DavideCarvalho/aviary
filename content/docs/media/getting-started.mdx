@@ -91,7 +91,7 @@ export class AppModule {}
 `MediaModule` is `@Global()` — import it once and inject `MediaService` anywhere. Prefer `forRoot` (static config) when your disks don't need other providers; reach for `forRootAsync` when a disk needs an injected client or DataSource, as above.
 </Callout>
 
-The `TypeOrmMediaStore` creates the `media` table on first use by default (non-destructive — see [ORM stores](/docs/media/packages/orm-stores)). Nothing else to migrate to get started.
+The `TypeOrmMediaStore` creates the `media` table on first use by default (non-destructive — see [Persistence](/docs/media/concepts/persistence)). Nothing else to migrate to get started.
 
 </Step>
 

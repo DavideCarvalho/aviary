@@ -1,0 +1,42 @@
+---
+title: '@dudousxd/nestjs-media-codegen'
+description: Codegen extension that emits a typed media client next to your generated api.ts.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The client-generation cola. A `CodegenExtension` that emits a `media-client.ts` alongside your generated `api.ts`, so the front-end gets typed `uploadMedia()` + `mediaUrl()` with no hand-written upload code.
+
+```ts
+import { mediaCodegenExtension } from '@dudousxd/nestjs-media-codegen';
+
+// in your nestjs-codegen config:
+export default {
+  // …
+  extensions: [mediaCodegenExtension({ basePath: '/media/uploads' })],
+};
+```
+
+## What it emits
+
+A thin binding over the runtime [`-client`](/docs/media/packages/client): the generated file bakes in your tus `basePath` and re-exports `uploadMedia` + `mediaUrl`.
+
+```ts title="media-client.ts (generated)"
+import { uploadMedia as base, mediaUrl } from '@dudousxd/nestjs-media-client';
+const BASE_PATH = '/media/uploads';
+export function uploadMedia(data, options) { return base(data, { basePath: BASE_PATH, ...options }); }
+export { mediaUrl };
+```
+
+<Callout type="info" title="No duplicated protocol">
+The emitted file does **not** inline the tus protocol — it re-exports the single runtime client. So the generated client and the React hook share one implementation; a protocol change never drifts between them. Your app installs `@dudousxd/nestjs-media-client` (the binding imports it).
+</Callout>
+
+## Options
+
+- `basePath` — the tus mount the client uploads to (default `/media/uploads`).
+- `fileName` — the emitted file name (default `media-client.ts`).
+
+## Peer dependencies
+
+`@dudousxd/nestjs-codegen` (^0.5) — the extension is registered in its config. See [Codegen](/docs/media/codegen) for the generator itself.

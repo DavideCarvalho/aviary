@@ -1,0 +1,72 @@
+---
+title: '@dudousxd/nestjs-media'
+description: The umbrella package — MediaModule, MediaService, the tus controller, and the /storage subpath.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`@dudousxd/nestjs-media` is the package you import in a Nest app. It wires [core](/docs/media/packages/core) into NestJS DI and exposes everything through one service.
+
+## `MediaModule`
+
+`forRoot` / `forRootAsync` register a `@Global()` module. It always provides the storage layer; pass `store` for the media-library, `uploadSessions` for resumable uploads, and `tus` to mount the HTTP controller. See [Reference → Configuration](/docs/media/reference/configuration) for every option.
+
+```ts
+MediaModule.forRoot({
+  default: 'local',
+  disks: { local },
+  store,                 // → media.library
+  uploadSessions,        // → media.uploads
+  tus: { disk: 'local' },// → mounts MediaUploadController
+});
+```
+
+## `MediaService`
+
+The single injectable surface:
+
+```ts
+class MediaService {
+  disk(name?: string): StorageDriver;    // camada 1
+  get library(): MediaLibrary;           // camada 2 (throws if no store)
+  get uploads(): ResumableUploadManager; // resumable (throws if no uploadSessions)
+}
+```
+
+```ts
+@Injectable()
+export class Files {
+  constructor(private readonly media: MediaService) {}
+  save = (p: string, b: Buffer) => this.media.disk('s3').put(p, b);
+}
+```
+
+## tus controller
+
+When `tus` is configured, `MediaUploadController` is mounted at `media/uploads`, implementing the tus protocol over the [resumable engine](/docs/media/concepts/uploads). Remember the raw-body parser:
+
+```ts
+app.use('/media/uploads', express.raw({ type: 'application/offset+octet-stream' }));
+```
+
+## The `/storage` subpath
+
+For consumers that want only the filesystem facade, without the media-library layer:
+
+```ts
+import { StorageManager, type StorageDriver } from '@dudousxd/nestjs-media/storage';
+```
+
+## Injection tokens
+
+```ts
+import { MEDIA_STORAGE, MEDIA_LIBRARY, MEDIA_UPLOADS, MEDIA_TUS } from '@dudousxd/nestjs-media';
+```
+
+<Callout type="info">
+Inject `MediaService` for normal use; reach for the tokens only when you need the raw `StorageManager`/`MediaLibrary`/`ResumableUploadManager` (e.g. wiring a custom controller).
+</Callout>
+
+## Peer dependencies
+
+`@nestjs/common` and `@nestjs/core` (v10 or v11), `reflect-metadata`, and `@dudousxd/nestjs-media-core`. Disks, stores, and the image engine are separate installs.

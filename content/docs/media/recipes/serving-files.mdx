@@ -1,0 +1,58 @@
+---
+title: Serving files
+description: Public URLs, signed temporary URLs, and streaming files through a controller.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Three ways to get bytes back to a client, depending on whether the file is public, private, or proxied through your app.
+
+## Public URLs
+
+If the disk has a public base (CloudFront/CDN for S3, a static base for local), `url()` returns a stable address you can hand straight to the browser:
+
+```ts
+const src = await media.library.url(mediaId);           // original
+const thumb = await media.library.url(mediaId, 'thumb'); // a conversion
+```
+
+For raw storage: `media.disk('s3').url('path/to/file.png')`.
+
+## Signed, expiring URLs
+
+For private files, hand out a short-lived signed URL instead — no proxying, but access expires:
+
+```ts
+const link = await media.disk('s3').temporaryUrl(`invoices/${id}.pdf`, 300); // 5 minutes
+```
+
+<Callout type="warn">
+`temporaryUrl` needs a presign-capable disk (S3). The local disk doesn't sign — proxy those through a controller (below) or put a CDN with signed URLs in front.
+</Callout>
+
+## Streaming through a controller
+
+When you need auth checks, range support, or the disk can't sign, stream the bytes through Nest:
+
+```ts title="files.controller.ts"
+import { Controller, Get, Param, StreamableFile, Res } from '@nestjs/common';
+import type { Response } from 'express';
+import { MediaService } from '@dudousxd/nestjs-media';
+
+@Controller('media')
+export class FilesController {
+  constructor(private readonly media: MediaService) {}
+
+  @Get(':id/raw')
+  async raw(@Param('id') id: string, @Res({ passthrough: true }) res: Response) {
+    const record = (await this.media.library.list('Post', '...', '...')).find((m) => m.id === id);
+    // …authorize here…
+    res.set({ 'Content-Type': record!.mimeType });
+    return new StreamableFile(await this.media.disk(record!.disk).stream(record!.path));
+  }
+}
+```
+
+<Callout type="info">
+Prefer `stream` over `get` for serving — it pipes without loading the whole file into memory, which matters for video and large documents.
+</Callout>

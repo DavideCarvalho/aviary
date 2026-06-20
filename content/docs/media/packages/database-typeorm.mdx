@@ -1,0 +1,45 @@
+---
+title: '@dudousxd/nestjs-media-database-typeorm'
+description: TypeORM media store with non-destructive auto-schema.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A `MediaStore` backed by TypeORM. A POJO that receives your `DataSource` — no `@Injectable`, no internal token — so you plug it into `MediaModule` through `forRootAsync`.
+
+```ts
+import { TypeOrmMediaStore, ensureMediaSchema } from '@dudousxd/nestjs-media-database-typeorm';
+
+MediaModule.forRootAsync({
+  inject: [getDataSourceToken()],
+  useFactory: (ds) => ({ default: 's3', disks: { s3 }, store: new TypeOrmMediaStore(ds) }),
+});
+```
+
+## Auto-schema
+
+`new TypeOrmMediaStore(ds)` creates the `media` table on first use, **non-destructively**: it creates the table if missing and adds any missing columns, but never drops, alters types, or renames. Opt out to manage it yourself:
+
+```ts
+new TypeOrmMediaStore(ds, { autoCreateSchema: false }); // you own migrations
+await ensureMediaSchema(ds);                             // or call it explicitly at boot
+```
+
+The entity is declared via `EntitySchema` (not decorators), so the package carries no decorator-metadata build requirement, and `order` maps to a `position` column to avoid the reserved word.
+
+<Callout type="info" title="Portable timestamps">
+Timestamps are stored as ISO strings (`varchar`) rather than a dialect-specific date type — so the same schema works on **sqlite, mysql, and postgres** alike. This is verified by an integration suite running the store against real Postgres (testcontainers).
+</Callout>
+
+## Named connections
+
+Pass any `DataSource` — a secondary/named connection works the same way:
+
+```ts
+inject: [getDataSourceToken('media')],
+useFactory: (ds) => ({ /* … */ store: new TypeOrmMediaStore(ds) }),
+```
+
+## Peer dependencies
+
+`typeorm` (^0.3) and `@dudousxd/nestjs-media-core`. See [Concepts → Persistence](/docs/media/concepts/persistence) for the shared store contract.

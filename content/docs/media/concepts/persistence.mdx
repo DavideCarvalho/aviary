@@ -1,0 +1,56 @@
+---
+title: Persistence
+description: The MediaStore contract, how the media table is shaped, and the non-destructive auto-schema convention shared across ORM adapters.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The media-library layer keeps file metadata in a `media` table. *How* that table is managed is deliberately consistent across every ORM adapter — this page is the shared model.
+
+## The `MediaStore` contract
+
+Every store implements the same small interface:
+
+```ts
+interface MediaStore {
+  save(record: MediaRecord): Promise<MediaRecord>;
+  find(id: string): Promise<MediaRecord | null>;
+  listByOwner(ownerType: string, ownerId: string, collection?: string): Promise<MediaRecord[]>;
+  delete(id: string): Promise<void>;
+  nextOrder(ownerType: string, ownerId: string, collection: string): Promise<number>;
+}
+```
+
+`listByOwner` returns records ordered by `order` ascending; `nextOrder` returns the next append position in a collection. That's the whole surface the `MediaLibrary` needs — which is why a [custom store](/docs/media/recipes/custom-store) is easy.
+
+## Adapters are POJOs
+
+Following the ecosystem's persistence convention, no adapter is a NestJS provider and none cracks open a connection itself. Each is a **plain object that receives your ORM handle** in its constructor:
+
+```ts
+new TypeOrmMediaStore(dataSource);
+new MikroOrmMediaStore(orm.em);
+new DrizzleMediaStore(db);
+new PrismaMediaStore(prisma);
+```
+
+You wire them through `MediaModule.forRootAsync`, injecting whatever connection you already manage — default or named. The library never owns your database lifecycle.
+
+## Non-destructive auto-schema
+
+Where the ORM allows it, the table is created on first use without you running a migration — but **never destructively**:
+
+| Adapter | Auto-schema |
+|---|---|
+| [TypeORM](/docs/media/packages/database-typeorm) | `ensureMediaSchema` — create table + add missing columns; never drop/alter. `autoCreateSchema: false` to opt out |
+| [MikroORM](/docs/media/packages/database-mikro-orm) | `updateSchema({ safe: true })` — same guarantees, native |
+| [Drizzle](/docs/media/packages/database-drizzle) | migration-first (drizzle-kit); `createMediaTable` helper for dev/test |
+| [Prisma](/docs/media/packages/database-prisma) | consumer-managed — you own the schema + migrations |
+
+<Callout type="warn" title="Forward-compatible columns">
+Any column added after v1 is nullable or has a default, so an `ADD COLUMN` on a populated table never fails. Auto-schema only ever *adds* — it will not change a column you've customized.
+</Callout>
+
+## Portability
+
+The `order` property maps to a `position` column everywhere (avoiding the reserved word), and `customProperties` / `conversions` are JSON columns. Timestamps in the TypeORM adapter are stored as ISO strings so one schema spans sqlite, mysql, and postgres. The behavior of all four adapters is pinned by the shared `runMediaStoreConformance` suite — in-memory, sqlite, and real Postgres (testcontainers) — so they're genuinely interchangeable.

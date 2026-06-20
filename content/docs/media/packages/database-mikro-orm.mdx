@@ -1,0 +1,31 @@
+---
+title: '@dudousxd/nestjs-media-database-mikro-orm'
+description: MikroORM media store with safe auto-schema.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A `MediaStore` backed by MikroORM. The store is a POJO that receives an `EntityManager`; each operation runs on a `fork()` to avoid cross-request identity-map bleed.
+
+```ts
+import { MikroOrmMediaStore, ensureMediaSchema } from '@dudousxd/nestjs-media-database-mikro-orm';
+
+await ensureMediaSchema(orm);                  // orm.schema.updateSchema({ safe: true })
+const store = new MikroOrmMediaStore(orm.em);
+
+MediaModule.forRoot({ default: 's3', disks: { s3 }, store });
+```
+
+## Auto-schema
+
+MikroORM gives non-destructive create + add-column for free via `updateSchema({ safe: true })` — `ensureMediaSchema(orm)` is a thin wrapper over it. Run it at boot, or manage the schema with MikroORM migrations and skip it.
+
+The entity is an `EntitySchema` with `order` mapped to a `position` column. JSON columns carry `customProperties` and `conversions`.
+
+<Callout type="info">
+Verified by an integration suite running the store against real Postgres (testcontainers), in addition to the in-memory and sqlite unit runs.
+</Callout>
+
+## Peer dependencies
+
+`@mikro-orm/core` (^6) and `@dudousxd/nestjs-media-core` — plus your driver package (`@mikro-orm/postgresql`, `@mikro-orm/mysql`, `@mikro-orm/better-sqlite`, …). See [Concepts → Persistence](/docs/media/concepts/persistence).

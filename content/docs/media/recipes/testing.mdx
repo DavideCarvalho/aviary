@@ -1,0 +1,68 @@
+---
+title: Testing your media code
+description: Unit-test services that use MediaService with in-memory doubles — no filesystem, DB, or containers.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Testing code that uploads and attaches files shouldn't need S3 or a database. `@dudousxd/nestjs-media-testing` ships in-memory doubles you wire into `MediaModule` exactly like the real thing.
+
+## Wire in-memory everything
+
+```ts title="photos.service.spec.ts"
+import { Test } from '@nestjs/testing';
+import { MediaModule, MediaService } from '@dudousxd/nestjs-media';
+import { InMemoryDriver, InMemoryMediaStore } from '@dudousxd/nestjs-media-testing';
+import { PhotosService } from './photos.service';
+
+let media: MediaService;
+let photos: PhotosService;
+
+beforeEach(async () => {
+  const mod = await Test.createTestingModule({
+    imports: [
+      MediaModule.forRoot({
+        default: 'mem',
+        disks: { mem: new InMemoryDriver() },
+        store: new InMemoryMediaStore(),
+        collections: [{ name: 'gallery' }],
+      }),
+    ],
+    providers: [PhotosService],
+  }).compile();
+
+  media = mod.get(MediaService);
+  photos = mod.get(PhotosService);
+});
+```
+
+## Assert behavior, not infrastructure
+
+```ts
+it('attaches and serves a gallery image', async () => {
+  const rec = await photos.upload('42', { buffer: Buffer.from('img'), mimetype: 'image/png', originalname: 'a.png' });
+
+  // it landed on the disk:
+  expect(await media.disk('mem').exists(rec.path)).toBe(true);
+  // and is listed against the entity:
+  const list = await media.library.list('Post', '42', 'gallery');
+  expect(list).toHaveLength(1);
+});
+```
+
+## Deterministic conversions
+
+Pass a fake `ImageProcessor` to assert conversion wiring without running sharp:
+
+```ts
+const processor = { convert: vi.fn(async () => ({ data: Buffer.from('x'), format: 'webp', contentType: 'image/webp' })) };
+MediaModule.forRoot({ /* … */ imageProcessor: processor, collections: [{ name: 'gallery', conversions: [{ name: 'thumb', width: 100 }] }] });
+```
+
+## Resumable uploads
+
+`InMemoryUploadSessionStore` lets you exercise the [resumable engine](/docs/media/concepts/uploads) (`media.uploads`) end to end in memory.
+
+<Callout type="info">
+The same package exports the [conformance suites](/docs/media/packages/testing) — use those to test custom [drivers](/docs/media/recipes/custom-driver) and [stores](/docs/media/recipes/custom-store).
+</Callout>

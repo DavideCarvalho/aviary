@@ -1,0 +1,49 @@
+---
+title: '@dudousxd/nestjs-media-testing'
+description: In-memory driver/store/session + reusable conformance suites.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Test doubles and contract suites. Use it to test your own code against fast in-memory implementations, and to verify custom drivers/stores behave exactly like the built-ins.
+
+## In-memory doubles
+
+```ts
+import {
+  InMemoryDriver,
+  InMemoryMediaStore,
+  InMemoryUploadSessionStore,
+} from '@dudousxd/nestjs-media-testing';
+
+MediaModule.forRoot({
+  default: 'mem',
+  disks: { mem: new InMemoryDriver() },
+  store: new InMemoryMediaStore(),
+  uploadSessions: new InMemoryUploadSessionStore(),
+});
+```
+
+Fast, dependency-free, and isolated per instance — ideal for unit tests of services that use `MediaService`, with no filesystem, database, or container.
+
+## Conformance suites
+
+The same contracts every built-in driver and store is verified against, exported for your custom implementations:
+
+```ts
+import {
+  runStorageDriverConformance,
+  runMediaStoreConformance,
+} from '@dudousxd/nestjs-media-testing';
+
+runStorageDriverConformance('MyDriver', () => new MyDriver(/* … */));
+runMediaStoreConformance('MyStore', () => new MyStore(/* … */));
+```
+
+Each registers a `describe` block exercising the full behavioral contract — round-trips, `FileNotFoundError` semantics, idempotent delete, ordering, `nextOrder`, and more. If your driver or store passes, it drops into the library unchanged.
+
+<Callout type="info">
+This is how the built-ins stay honest: `disk-s3` runs the storage suite against MinIO; the four ORM stores all run the store suite (in-memory, sqlite, and real Postgres). Your custom backend gets the same guarantee for free.
+</Callout>
+
+See [Recipes → Custom driver](/docs/media/recipes/custom-driver) and [Custom store](/docs/media/recipes/custom-store).

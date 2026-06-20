@@ -1,0 +1,27 @@
+---
+title: '@dudousxd/nestjs-media-database-drizzle'
+description: Drizzle media store (sqlite), migration-first.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A `MediaStore` backed by Drizzle ORM. The store is a POJO that receives your drizzle `db` handle.
+
+```ts
+import { DrizzleMediaStore, createMediaTable, mediaTable } from '@dudousxd/nestjs-media-database-drizzle';
+
+createMediaTable(db);   // dev/test helper — see below
+MediaModule.forRoot({ default: 's3', disks: { s3 }, store: new DrizzleMediaStore(db) });
+```
+
+## Migration-first
+
+Drizzle is migration-first by design — there's no runtime auto-schema. In production you manage the table with **drizzle-kit** using the exported `mediaTable` schema; `createMediaTable(db)` is a convenience for tests and quick dev setups that issues the `CREATE TABLE IF NOT EXISTS`.
+
+<Callout type="info" title="sqlite-first by design">
+Drizzle's schema is dialect-specific (`sqliteTable` vs `pgTable` vs `mysqlTable`), so this adapter ships the **sqlite/libSQL** schema — matching the ecosystem's other Drizzle adapters (e.g. `durable-store-drizzle`). For Postgres/MySQL, define the equivalent table with that dialect's drizzle core and pass it; the store's query logic (insert/onConflictDoUpdate/select/orderBy) is the same.
+</Callout>
+
+## Peer dependencies
+
+`drizzle-orm` (^0.38) and `@dudousxd/nestjs-media-core`, plus a driver (`better-sqlite3`, `libsql`, …). See [Concepts → Persistence](/docs/media/concepts/persistence).

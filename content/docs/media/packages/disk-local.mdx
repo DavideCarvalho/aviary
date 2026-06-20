@@ -1,0 +1,39 @@
+---
+title: '@dudousxd/nestjs-media-disk-local'
+description: The local filesystem driver, with a path-traversal guard.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A `StorageDriver` backed by the local filesystem — the natural default for development and single-node deployments.
+
+```ts
+import { LocalDriver } from '@dudousxd/nestjs-media-disk-local';
+
+new LocalDriver({
+  root: './storage',                       // base directory all paths resolve under
+  baseUrl: 'http://localhost:3000/files',  // optional — enables url()
+});
+```
+
+## Capabilities
+
+```ts
+{ presign: false, multipart: false, publicUrls: !!baseUrl }
+```
+
+- `url(path)` returns `${baseUrl}/${path}` when `baseUrl` is set, else throws `UnsupportedOperationError`. Serve `root` from that base (a static handler or reverse proxy).
+- `temporaryUrl` is unsupported — there's no signing on a bare filesystem. Use S3 (or a CDN in front) when you need expiring links.
+- Uploads to a local disk always take the [`proxy` path](/docs/media/concepts/uploads) (no presign/multipart) — which is exactly right for local/dev.
+
+## Path safety
+
+Every path is resolved under `root` with a traversal guard: absolute paths and `..` escapes are rejected before any filesystem call. Nested directories are created on `put` automatically.
+
+<Callout type="warn">
+The guard protects against path traversal in keys, but `root` itself should still be a dedicated directory — never point it at an app or system folder.
+</Callout>
+
+## When to use it
+
+Great for local dev, tests (alongside the in-memory driver), and small single-node apps where files live on the box or an attached volume. For horizontal scaling or signed URLs, pair or switch to [`disk-s3`](/docs/media/packages/disk-s3) — the application code doesn't change, only the disk registration.

@@ -1,0 +1,64 @@
+---
+title: Multiple disks
+description: Register several disks and route collections (or individual uploads) to the right one.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A real app often wants more than one disk — a fast public CDN bucket for images, a private bucket for documents, local disk in dev. media holds any number of named disks and lets you route per collection or per call.
+
+## Register them
+
+```ts
+MediaModule.forRoot({
+  default: 's3',
+  disks: {
+    s3: new S3Driver({ client: s3, bucket: 'public-assets', publicBaseUrl: 'https://cdn…' }),
+    private: new S3Driver({ client: s3, bucket: 'private-docs' }),
+    local: new LocalDriver({ root: './storage' }),
+  },
+  store,
+});
+```
+
+`default` is what `media.disk()` returns with no name, and the disk a collection uses unless it overrides.
+
+## Route by collection
+
+Pin a collection to a disk with the `disk` option:
+
+```ts
+collections: [
+  { name: 'gallery', disk: 's3' },        // public images → CDN bucket
+  { name: 'invoices', disk: 'private' },  // private docs → private bucket
+]
+```
+
+Now `attach` to `invoices` lands in the private bucket automatically; `gallery` goes to the public one.
+
+## Route per upload
+
+Override per call when you need to — the precedence is **per-call → collection → module default**:
+
+```ts
+await media.library.attach({
+  ownerType: 'Post', ownerId: '1', collection: 'gallery',
+  fileName, mimeType, contents,
+  disk: 'local', // this one upload goes local regardless of the collection's disk
+});
+```
+
+## Raw storage across disks
+
+The same naming works without the library:
+
+```ts
+await media.disk('private').put(`invoices/${id}.pdf`, pdf);
+await media.disk().put(`thumbs/${id}.webp`, webp); // the default disk
+```
+
+<Callout type="info">
+Conversions are written to the **same disk** as their original, so a private collection's variants stay private too.
+</Callout>
+
+Upload behavior also follows the disk: an S3 disk defaults to the [`direct`/presigned path](/docs/media/concepts/uploads), a local disk to `proxy` — each overridable via `uploadMode`.

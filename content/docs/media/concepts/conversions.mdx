@@ -78,6 +78,6 @@ interface ImageProcessor {
 }
 ```
 
-The default is [`@dudousxd/nestjs-media-image-sharp`](/docs/media/packages/storage-drivers)'s `SharpImageProcessor`. Pass your own to `MediaModule`'s `imageProcessor` option to swap engines (e.g. an ImageMagick wrapper, or a remote transform service). If a collection declares conversions but no processor is configured, requesting one throws `ImageProcessorMissingError`; requesting an undeclared preset throws `ConversionNotDefinedError`.
+The default is [`@dudousxd/nestjs-media-image-sharp`](/docs/media/packages/image-sharp)'s `SharpImageProcessor`. Pass your own to `MediaModule`'s `imageProcessor` option to swap engines (e.g. an ImageMagick wrapper, or a remote transform service). If a collection declares conversions but no processor is configured, requesting one throws `ImageProcessorMissingError`; requesting an undeclared preset throws `ConversionNotDefinedError`.
 
 Non-image files (PDFs, video, archives) are stored as-is — conversions only run when you ask for a declared preset, so a mixed collection is fine.

@@ -1,4 +1,20 @@
 {
   "title": "Packages",
-  "pages": ["index", "storage-drivers", "orm-stores", "colas"]
+  "pages": [
+    "index",
+    "core",
+    "nestjs",
+    "client",
+    "disk-local",
+    "disk-s3",
+    "image-sharp",
+    "database-typeorm",
+    "database-mikro-orm",
+    "database-drizzle",
+    "database-prisma",
+    "telescope",
+    "codegen",
+    "react",
+    "testing"
+  ]
 }

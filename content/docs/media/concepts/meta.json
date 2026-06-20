@@ -1,4 +1,4 @@
 {
   "title": "Concepts",
-  "pages": ["two-layers", "uploads", "conversions", "diagnostics"]
+  "pages": ["two-layers", "uploads", "conversions", "persistence", "diagnostics"]
 }

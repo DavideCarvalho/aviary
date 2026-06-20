@@ -1,0 +1,55 @@
+---
+title: '@dudousxd/nestjs-media-react'
+description: React hook + uploader component for resumable uploads.
+---
+
+The React cola. A `useMediaUpload` hook and a drop-in `<MediaUploader/>`, both built on the resumable [`-client`](/docs/media/packages/client) — progress, status, and resume handled for you.
+
+## `useMediaUpload`
+
+```tsx
+import { useMediaUpload } from '@dudousxd/nestjs-media-react';
+
+function Upload() {
+  const { upload, status, progress, location, error, reset } = useMediaUpload({
+    basePath: '/media/uploads',
+  });
+
+  return (
+    <input
+      type="file"
+      onChange={(e) => {
+        const f = e.target.files?.[0];
+        if (f) upload(f, { filename: f.name, contentType: f.type });
+      }}
+    />
+  );
+}
+```
+
+The hook returns `{ status: 'idle' | 'uploading' | 'done' | 'error', progress: 0..1, location, error, upload, reset }`.
+
+## `<MediaUploader/>`
+
+A minimal, unstyled component (a file input + a `<progress>`), easy to replace or wrap:
+
+```tsx
+import { MediaUploader } from '@dudousxd/nestjs-media-react';
+
+<MediaUploader
+  basePath="/media/uploads"
+  accept="image/*"
+  onUploaded={(location) => save(location)}
+  onError={(err) => toast(err.message)}
+/>
+```
+
+It's authored with `createElement` (no JSX runtime requirement) and ships unstyled on purpose — compose your own UI with the hook for anything richer.
+
+## Re-exports
+
+For convenience, the package re-exports `uploadMedia` and `mediaUrl` from [`-client`](/docs/media/packages/client), so a React app needs only this one install.
+
+## Peer dependencies
+
+`react` (^18 or ^19). The runtime client is a regular dependency, pulled in automatically.

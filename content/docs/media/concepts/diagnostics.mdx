@@ -30,7 +30,7 @@ Turn emission off with `emitDiagnostics: false` on the `MediaLibrary` options if
 
 ## 2. Telescope
 
-[`@dudousxd/nestjs-media-telescope`](/docs/media/packages/colas) ships a `MediaWatcher` that subscribes to those channels and records a `media` entry per event — so attaches, deletes, and conversions show up in the [Telescope](/docs/media/telescope) console next to your requests, queries, jobs, and mails, correlated under the same batch.
+[`@dudousxd/nestjs-media-telescope`](/docs/media/packages/telescope) ships a `MediaWatcher` that subscribes to those channels and records a `media` entry per event — so attaches, deletes, and conversions show up in the [Telescope](/docs/media/telescope) console next to your requests, queries, jobs, and mails, correlated under the same batch.
 
 ```ts
 import { MediaWatcher } from '@dudousxd/nestjs-media-telescope';
@@ -41,11 +41,11 @@ That's the entire integration: media emits, the watcher records. No changes to y
 
 ## 3. Codegen
 
-[`@dudousxd/nestjs-media-codegen`](/docs/media/packages/colas) contributes a typed media client to your generated output, so the front-end gets `uploadMedia()` + `mediaUrl()` with no hand-written upload protocol. The emitted file is a *thin binding* over the runtime client (it bakes in your tus base path and re-exports), which is the point of the next section. See [Codegen](/docs/media/codegen).
+[`@dudousxd/nestjs-media-codegen`](/docs/media/packages/codegen) contributes a typed media client to your generated output, so the front-end gets `uploadMedia()` + `mediaUrl()` with no hand-written upload protocol. The emitted file is a *thin binding* over the runtime client (it bakes in your tus base path and re-exports), which is the point of the next section. See [Codegen](/docs/media/codegen).
 
 ## 4. React
 
-[`@dudousxd/nestjs-media-react`](/docs/media/packages/colas) provides `useMediaUpload()` and `<MediaUploader/>`, built on the same resumable client — progress, status, and resume handled for you.
+[`@dudousxd/nestjs-media-react`](/docs/media/packages/react) provides `useMediaUpload()` and `<MediaUploader/>`, built on the same resumable client — progress, status, and resume handled for you.
 
 <Callout type="info" title="One protocol, many surfaces">
 The tus client lives exactly once, in `@dudousxd/nestjs-media-client`. The React hook wraps it; the codegen extension re-exports it. There is a single implementation of the wire protocol, so a protocol change is a one-file change — the front-end surfaces follow automatically.

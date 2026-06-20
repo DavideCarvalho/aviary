@@ -1,0 +1,54 @@
+---
+title: Consuming storage from another library
+description: How a sibling library (mail attachments, durable steps) uses the filesystem layer through the /storage subpath.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+This is the payoff of media *absorbing* storage instead of shipping a separate `nestjs-storage`: any library that needs a filesystem depends on media and imports the facade through the subpath — no media-library layer, no NestJS coupling.
+
+## The subpath
+
+```ts
+import { StorageManager, type StorageDriver } from '@dudousxd/nestjs-media/storage';
+```
+
+This re-exports the framework-agnostic storage surface from [core](/docs/media/packages/core): `StorageManager`, `StorageDriver`, the option types, and the error classes — nothing from the media-library or NestJS.
+
+## Example: mail attachments
+
+A mail channel that attaches files referenced by storage path:
+
+```ts
+import { StorageManager } from '@dudousxd/nestjs-media/storage';
+
+export class MailAttachments {
+  constructor(private readonly storage: StorageManager) {}
+
+  async resolve(refs: { disk?: string; path: string }[]) {
+    return Promise.all(
+      refs.map(async (ref) => ({
+        filename: ref.path.split('/').pop()!,
+        content: await this.storage.disk(ref.disk).stream(ref.path), // stream, don't buffer
+      })),
+    );
+  }
+}
+```
+
+The mail library doesn't know about collections, conversions, or the `media` table — it just needs `disk().stream()`. Wire it with the same `StorageManager` your app already configured (inject `MEDIA_STORAGE`).
+
+## Example: a durable workflow step
+
+```ts
+import { StorageManager } from '@dudousxd/nestjs-media/storage';
+
+async function archiveStep(storage: StorageManager, src: string) {
+  const bytes = await storage.disk('s3').get(src);
+  await storage.disk('cold').put(`archive/${src}`, bytes);
+}
+```
+
+<Callout type="info" title="Why this matters">
+One filesystem abstraction, many consumers. mail/durable depending on `@dudousxd/nestjs-media/storage` is intentional — there's a single storage implementation in the ecosystem, and the media library is just its largest consumer. See [The two layers](/docs/media/concepts/two-layers).
+</Callout>

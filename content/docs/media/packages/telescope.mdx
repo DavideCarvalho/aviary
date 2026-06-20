@@ -1,0 +1,27 @@
+---
+title: '@dudousxd/nestjs-media-telescope'
+description: Telescope watcher that surfaces media events in the observability console.
+---
+
+The observability cola. A `MediaWatcher` subscribes to the [`nestjs:media:*` diagnostics channels](/docs/media/concepts/diagnostics) and records a `media` entry per `attach` / `delete` / `conversion` — so file activity shows up in the [Telescope](/docs/media/telescope) console alongside your requests, queries, jobs, and mails, correlated under the same batch.
+
+```ts
+import { MediaWatcher } from '@dudousxd/nestjs-media-telescope';
+
+// register it in your telescope watcher list
+TelescopeModule.forRoot({
+  watchers: [/* … */ new MediaWatcher()],
+});
+```
+
+## Zero coupling
+
+The watcher is the *only* link between media and Telescope, and it's one-directional: media emits to a channel, the watcher listens. Media has no dependency on Telescope, and you can drop the watcher without touching any media code. Call `watcher.dispose()` to detach the channel subscriptions (e.g. on module destroy).
+
+## What you see
+
+Each entry carries the event payload — id, owner, collection, disk, path, size, mime — so you can answer "what did this request upload, and where did it land?" without grepping logs. Conversions appear as their own entries, so a slow first-thumbnail request is visible.
+
+## Peer dependencies
+
+`@dudousxd/nestjs-telescope` (^1) and `@dudousxd/nestjs-media-core`. See [Diagnostics & the colas](/docs/media/concepts/diagnostics) for the wider picture.
