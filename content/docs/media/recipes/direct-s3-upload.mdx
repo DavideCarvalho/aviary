@@ -76,15 +76,28 @@ import { MediaUploader } from '@dudousxd/nestjs-media-react';
 
 ## Attach the finished upload
 
-The upload's `location` ends in the session id; the bytes are already at the `keyFor` path on the disk. Record it against your entity:
+The upload's `location` ends in the session id; the bytes are already at the `keyFor` path on the disk. The client POSTs the finished upload's details to your API, which records it against the entity:
 
-```ts
-// after the client reports `location`, e.g. POST it to your API:
-await media.library.attach({
-  ownerType: 'Post', ownerId: postId, collection: 'gallery',
-  fileName, mimeType, disk: 's3',
-  contents: await media.disk('s3').stream(uploadedKey), // re-key into the library layout
-});
+```ts title="posts.controller.ts"
+import { Body, Controller, Param, Post } from '@nestjs/common';
+import { MediaService } from '@dudousxd/nestjs-media';
+
+@Controller('posts/:id/photos')
+export class PostPhotosController {
+  constructor(private readonly media: MediaService) {}
+
+  @Post('finalize')
+  finalize(
+    @Param('id') postId: string,
+    @Body() body: { uploadedKey: string; fileName: string; mimeType: string },
+  ) {
+    return this.media.library.attach({
+      ownerType: 'Post', ownerId: postId, collection: 'gallery',
+      fileName: body.fileName, mimeType: body.mimeType, disk: 's3',
+      contents: this.media.disk('s3').stream(body.uploadedKey), // re-key into the library layout
+    });
+  }
+}
 ```
 
 </Step>
