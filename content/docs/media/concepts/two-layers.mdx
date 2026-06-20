@@ -1,0 +1,80 @@
+---
+title: The two layers
+description: Storage (camada 1) is a disk-agnostic filesystem; media-library (camada 2) attaches files to entities on top of it.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The package is two layers stacked in one module. You can use the bottom layer alone.
+
+## Camada 1 — Storage
+
+A `StorageManager` holds named disks; each disk is a `StorageDriver`:
+
+```ts
+const disk = media.disk('s3');           // or media.disk() for the default
+await disk.put('a/b.png', buffer, { contentType: 'image/png' });
+await disk.get('a/b.png');               // Buffer
+await disk.stream('a/b.png');            // Readable
+await disk.url('a/b.png');               // public URL (if the disk has one)
+await disk.temporaryUrl('a/b.png', 300); // signed, 5-min URL (presign-capable disks)
+await disk.exists('a/b.png');
+await disk.delete('a/b.png');
+await disk.copy(from, to); await disk.move(from, to); await disk.size(path);
+```
+
+Every driver advertises what it can do:
+
+```ts
+disk.capabilities; // { presign: boolean, multipart: boolean, publicUrls: boolean }
+```
+
+<Callout type="info" title="Raw-storage consumers">
+Other libraries (mail attachments, durable large-file steps) that just need a filesystem import the storage facade directly via the subpath, without pulling in the media-library layer:
+
+```ts
+import { StorageManager, type StorageDriver } from '@dudousxd/nestjs-media/storage';
+```
+</Callout>
+
+## Camada 2 — Media-library
+
+`MediaLibrary` (exposed as `media.library`) attaches files to **owning entities** in named **collections**, spatie-style. It writes the bytes through a disk and persists a `MediaRecord` through a `MediaStore`.
+
+```ts
+const record = await media.library.attach({
+  ownerType: 'Post',
+  ownerId: '42',
+  collection: 'gallery',
+  fileName: 'photo.png',
+  mimeType: 'image/png',
+  contents: buffer,            // Buffer | Readable
+  // optional: name, size, customProperties, disk
+});
+
+await media.library.list('Post', '42', 'gallery'); // ordered MediaRecord[]
+await media.library.url(record.id);                  // url to the original
+await media.library.delete(record.id);               // removes record + bytes + conversions
+```
+
+### Collections
+
+Collections are declared at module registration and control behavior:
+
+```ts
+collections: [
+  // single-file: attaching replaces the previous file (record + bytes)
+  { name: 'avatar', single: true, acceptsMimeTypes: ['image/png', 'image/jpeg'] },
+  // multi-file with a target disk override and conversions
+  { name: 'gallery', disk: 's3', conversions: [{ name: 'thumb', width: 200 }] },
+]
+```
+
+| Option | Effect |
+|---|---|
+| `single` | Attaching replaces any existing media in the collection |
+| `disk` | Target disk for this collection (else the default disk) |
+| `acceptsMimeTypes` | Allow-list; other types are rejected with `MimeNotAllowedError` |
+| `conversions` | Image presets available for this collection (see [Conversions](/docs/media/concepts/conversions)) |
+
+The `media` table is polymorphic (`ownerType`/`ownerId`/`collection`/`order`/`customProperties`/`conversions`/disk/path/…) and is managed by your chosen [ORM store](/docs/media/packages/orm-stores).

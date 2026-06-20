@@ -1,0 +1,27 @@
+---
+title: Overview
+description: The full nestjs-media package set — core, the NestJS module, disks, ORM stores, the image engine, and the ecosystem colas.
+---
+
+Everything ships under the `@dudousxd/nestjs-media*` scope. Install only what you use.
+
+| Package | Role |
+|---|---|
+| `@dudousxd/nestjs-media-core` | `StorageDriver`/`MediaStore`/`ImageProcessor` SPIs, `StorageManager`, `MediaLibrary`, `uploadMode`, diagnostics, resumable-upload engine, tus handler |
+| `@dudousxd/nestjs-media` | NestJS `MediaModule` + `MediaService` + tus controller (and the `/storage` subpath) |
+| `@dudousxd/nestjs-media-client` | framework-agnostic browser client — `uploadMedia` (tus) + `mediaUrl` |
+| `@dudousxd/nestjs-media-disk-local` | local filesystem driver |
+| `@dudousxd/nestjs-media-disk-s3` | S3 driver (presign + native multipart) |
+| `@dudousxd/nestjs-media-database-typeorm` | TypeORM media store (non-destructive auto-schema) |
+| `@dudousxd/nestjs-media-database-mikro-orm` | MikroORM media store (safe auto-schema) |
+| `@dudousxd/nestjs-media-database-drizzle` | Drizzle media store (sqlite, migration-first) |
+| `@dudousxd/nestjs-media-database-prisma` | Prisma media store (consumer-managed schema) |
+| `@dudousxd/nestjs-media-image-sharp` | sharp-backed `ImageProcessor` |
+| `@dudousxd/nestjs-media-telescope` | Telescope watcher consuming `nestjs:media:*` |
+| `@dudousxd/nestjs-media-codegen` | Codegen extension emitting a typed media client |
+| `@dudousxd/nestjs-media-react` | `useMediaUpload` hook + `MediaUploader` component |
+| `@dudousxd/nestjs-media-testing` | in-memory driver/store/upload-session + conformance suites |
+
+- [Storage drivers & image engine](/docs/media/packages/storage-drivers)
+- [ORM stores](/docs/media/packages/orm-stores)
+- [Ecosystem colas](/docs/media/packages/colas)

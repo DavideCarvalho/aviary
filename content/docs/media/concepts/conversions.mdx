@@ -1,0 +1,60 @@
+---
+title: Conversions
+description: Image conversions generated lazily on first access or eagerly on upload, via a pluggable processor (sharp by default).
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Conversions are named, resized/reformatted variants of an image, declared per collection.
+
+## Presets
+
+```ts
+collections: [
+  {
+    name: 'gallery',
+    conversions: [
+      { name: 'thumb', width: 200, fit: 'cover' },
+      { name: 'og', width: 1200, height: 630, format: 'webp', quality: 80, eager: true },
+    ],
+  },
+]
+```
+
+| Field | Meaning |
+|---|---|
+| `width` / `height` | Target dimensions (either or both) |
+| `fit` | `cover` (default) · `contain` · `fill` · `inside` · `outside` |
+| `format` | `webp` (default) · `jpeg` · `png` · `avif` |
+| `quality` | Encoder quality |
+| `eager` | Generate on upload instead of on first access |
+
+## Lazy (default)
+
+A conversion is generated the first time its URL is requested, then cached on the disk:
+
+```ts
+await media.library.url(mediaId, 'thumb'); // generates + caches on first call, cheap thereafter
+```
+
+Nothing is computed for variants nobody asks for.
+
+## Eager (opt-in)
+
+Mark a preset `eager` and it is generated synchronously during `attach` — handy for variants you know you'll need immediately (e.g. an OG image).
+
+<Callout type="info" title="Background dispatch is a later phase">
+Eager conversions run synchronously today (the baseline). A durable/bullmq dispatcher — so eager generation rides the workflow engine's replay + dead-letter — is on the roadmap.
+</Callout>
+
+## Pluggable engine
+
+The processor is an SPI:
+
+```ts
+interface ImageProcessor {
+  convert(input: Buffer, preset: ConversionPreset): Promise<ConversionResult>;
+}
+```
+
+The default implementation is [`@dudousxd/nestjs-media-image-sharp`](/docs/media/packages/storage-drivers) (`SharpImageProcessor`). Pass your own to `MediaModule`'s `imageProcessor` option to swap engines. Non-image files are stored as-is — no conversions are attempted.

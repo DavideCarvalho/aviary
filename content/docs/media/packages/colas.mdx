@@ -1,0 +1,52 @@
+---
+title: Ecosystem colas
+description: Telescope watcher, codegen client, and the React hook + uploader.
+---
+
+These packages plug media into the shared ecosystem glue. See [Diagnostics & the colas](/docs/media/concepts/diagnostics) for the big picture.
+
+## Telescope — `@dudousxd/nestjs-media-telescope`
+
+```ts
+import { MediaWatcher } from '@dudousxd/nestjs-media-telescope';
+// add new MediaWatcher() to your telescope watcher list
+```
+
+Subscribes to `nestjs:media:*` and records a `media` entry per attach/delete/conversion in the [Telescope](/docs/media/telescope) console. Depends on `@dudousxd/nestjs-telescope`.
+
+## Codegen — `@dudousxd/nestjs-media-codegen`
+
+```ts
+import { mediaCodegenExtension } from '@dudousxd/nestjs-media-codegen';
+
+// in your codegen config's extensions:
+mediaCodegenExtension({ basePath: '/media/uploads' });
+```
+
+Emits a `media-client.ts` next to the generated `api.ts` — a thin binding over `@dudousxd/nestjs-media-client` that bakes in your tus base path, exposing `uploadMedia()` + `mediaUrl()`. Depends on `@dudousxd/nestjs-codegen`. See [Codegen](/docs/media/codegen).
+
+## React — `@dudousxd/nestjs-media-react`
+
+```tsx
+import { useMediaUpload, MediaUploader } from '@dudousxd/nestjs-media-react';
+
+function Avatar() {
+  const { upload, status, progress } = useMediaUpload({ basePath: '/media/uploads' });
+  // upload(file, { filename, contentType }) → resumable, with progress 0..1
+}
+
+// or drop in the component:
+<MediaUploader basePath="/media/uploads" onUploaded={(location) => /* … */} />
+```
+
+Both wrap the same resumable tus client (`uploadMedia`) — chunking, offset tracking, and resume are handled. The hook exposes `{ status, progress, location, error, upload, reset }`.
+
+## Runtime client — `@dudousxd/nestjs-media-client`
+
+The framework-agnostic core the React hook and codegen output share. Use it directly in any browser app:
+
+```ts
+import { uploadMedia, mediaUrl } from '@dudousxd/nestjs-media-client';
+
+const { location } = await uploadMedia(file, { filename: file.name, contentType: file.type });
+```

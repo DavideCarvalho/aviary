@@ -54,6 +54,17 @@ export const sources = [
     migrated: true,
   },
   {
+    slug: 'media',
+    name: 'Media',
+    description: "Filesystem + media-library in one package — disks, resumable uploads, attachments, conversions.",
+    icon: 'Image',
+    repo: 'DavideCarvalho/nestjs-media',
+    ref: 'main',
+    path: 'website/content/docs',
+    repoDir: 'nestjs-media',
+    migrated: true,
+  },
+  {
     slug: 'notifications',
     name: 'Notifications',
     description: "Laravel-style notifications — one notification, many channels.",

@@ -1,0 +1,37 @@
+---
+title: Single-file avatar
+description: A single-file collection that replaces the previous image on each upload.
+---
+
+Declare a `single` collection — each `attach` replaces the prior file (record + bytes).
+
+```ts
+collections: [
+  { name: 'avatar', single: true, acceptsMimeTypes: ['image/png', 'image/jpeg'] },
+]
+```
+
+```ts
+@Injectable()
+export class UsersService {
+  constructor(private readonly media: MediaService) {}
+
+  async setAvatar(userId: string, file: { buffer: Buffer; mimetype: string; originalname: string }) {
+    return this.media.library.attach({
+      ownerType: 'User',
+      ownerId: userId,
+      collection: 'avatar',
+      fileName: file.originalname,
+      mimeType: file.mimetype,
+      contents: file.buffer,
+    });
+  }
+
+  async avatarUrl(userId: string) {
+    const [avatar] = await this.media.library.list('User', userId, 'avatar');
+    return avatar ? this.media.library.url(avatar.id) : null;
+  }
+}
+```
+
+A disallowed MIME type throws `MimeNotAllowedError`; uploading a second avatar deletes the first automatically.

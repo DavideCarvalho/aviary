@@ -1,0 +1,64 @@
+---
+title: Uploads & multipart
+description: Resumable proxy uploads (tus) vs direct presigned uploads, and the uploadMode that picks between them.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Large uploads come in two shapes, and the library does both — with the choice always overridable.
+
+## The two paths
+
+- **`proxy`** — bytes flow through your NestJS backend in chunks via a real **tus 1.0.0** server. Resumable: a dropped connection continues from the last offset. Works on any disk, and lets you inspect bytes (virus-scan, transform). 
+- **`direct`** — the backend only orchestrates; the client uploads chunks straight to the disk using **presigned S3 multipart**. The backend never sees the bytes — best at scale.
+
+## `uploadMode`
+
+`resolveUploadMode` decides per upload, using the driver's `capabilities`:
+
+```ts
+type UploadMode = 'auto' | 'proxy' | 'direct';
+```
+
+- `auto` (default) → `direct` when the driver is presign/multipart-capable (S3), else `proxy` (local).
+- `proxy` → always allowed.
+- `direct` → throws on a driver that can't presign.
+
+Resolution is **most-specific-wins**: per-call → per-disk → global.
+
+<Callout type="info" title="Override is always available">
+Even on an S3 disk that *could* go direct, you can force `proxy` (e.g. to virus-scan or transform on the way in) — or force `direct` elsewhere. The driver capability sets the default; you keep the final say.
+</Callout>
+
+## Resumable (tus) server
+
+Enable the proxy path by passing an upload session store, and mount the tus controller with `tus`:
+
+```ts
+import { InMemoryUploadSessionStore } from '@dudousxd/nestjs-media-testing';
+
+MediaModule.forRoot({
+  default: 'local',
+  disks: { local },
+  uploadSessions: new InMemoryUploadSessionStore(), // or your own UploadSessionStore
+  tus: { disk: 'local', basePath: '/media/uploads', maxSize: 100 * 1024 * 1024 },
+});
+```
+
+This mounts `MediaUploadController` implementing the tus creation + termination protocol (`OPTIONS/POST/HEAD/PATCH/DELETE`) at `media/uploads`. Add a raw-body parser for the tus content type:
+
+```ts
+app.use('/media/uploads', express.raw({ type: 'application/offset+octet-stream' }));
+```
+
+<Callout type="warn">
+The handler assembles chunks into the final object on completion. Register the raw-body middleware or `PATCH` bodies won't arrive as Buffers.
+</Callout>
+
+### From the browser
+
+The [React package](/docs/media/packages/colas) and the [codegen client](/docs/media/packages/colas) both ship a `uploadMedia()` that speaks this protocol — chunking, offset tracking, and resume are handled for you.
+
+## The engine
+
+Under both the HTTP handler and the React client sits `ResumableUploadManager` (framework-agnostic): `createUpload → writeChunk(offset) → status → complete`. Each chunk is written as a part on the target disk so resume needs no in-memory buffering; `complete` assembles the parts into the final object. Reach it directly via `media.uploads` when you want to drive uploads yourself.

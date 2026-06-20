@@ -1,0 +1,40 @@
+---
+title: Diagnostics & the colas
+description: Media emits to nestjs:media:* diagnostics channels with zero coupling; Telescope, Codegen, and React plug in from there.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Media is wired into the same four "colas" (glue points) every `@dudousxd/nestjs-*` library shares.
+
+## 1. Diagnostics channels
+
+`MediaLibrary` publishes to `node:diagnostics_channel` with the standard ecosystem envelope — zero coupling, no-op when nobody is subscribed:
+
+```ts
+// channel: nestjs:media:<event>
+{ ts: number, lib: 'media', event: 'attach' | 'delete' | 'conversion', payload: {...} }
+```
+
+Disable with `emitDiagnostics: false` on the `MediaLibrary` options. See [Diagnostics](/docs/media/diagnostics) for the cross-ecosystem convention.
+
+## 2. Telescope
+
+[`@dudousxd/nestjs-media-telescope`](/docs/media/packages/colas) ships a `MediaWatcher` that subscribes to those channels and records a `media` entry per event — so attaches, deletes, and conversions show up in the [Telescope](/docs/media/telescope) console next to your requests, queries, and jobs.
+
+```ts
+import { MediaWatcher } from '@dudousxd/nestjs-media-telescope';
+// register MediaWatcher in your telescope watcher list
+```
+
+## 3. Codegen
+
+[`@dudousxd/nestjs-media-codegen`](/docs/media/packages/colas) contributes a typed media client to your generated output (a thin binding over the runtime client), so the front-end gets `uploadMedia()` + `mediaUrl()` with no hand-written protocol code. See [Codegen](/docs/media/codegen).
+
+## 4. React
+
+[`@dudousxd/nestjs-media-react`](/docs/media/packages/colas) provides `useMediaUpload()` and `<MediaUploader/>`, built on the same resumable client.
+
+<Callout type="info" title="One protocol, many surfaces">
+The tus client lives once in `@dudousxd/nestjs-media-client`; the React hook wraps it and the codegen extension re-exports it. There is a single implementation of the wire protocol.
+</Callout>

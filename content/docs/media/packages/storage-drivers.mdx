@@ -1,0 +1,54 @@
+---
+title: Storage drivers & image engine
+description: The local and S3 disks, the in-memory test disk, and the sharp image processor.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Disks implement the `StorageDriver` contract and are passed to `MediaModule`'s `disks` map.
+
+## Local — `@dudousxd/nestjs-media-disk-local`
+
+```ts
+import { LocalDriver } from '@dudousxd/nestjs-media-disk-local';
+
+new LocalDriver({
+  root: './storage',                         // base directory
+  baseUrl: 'http://localhost:3000/files',    // enables url(); omit for no public URLs
+});
+```
+
+`capabilities = { presign: false, multipart: false, publicUrls: !!baseUrl }`. Paths are resolved under `root` with a traversal guard — absolute paths and `..` escapes are rejected. `temporaryUrl` is unsupported (use a presign-capable disk).
+
+## S3 — `@dudousxd/nestjs-media-disk-s3`
+
+A POJO that receives an `S3Client` (the app owns the client + credentials):
+
+```ts
+import { S3Driver } from '@dudousxd/nestjs-media-disk-s3';
+import { S3Client } from '@aws-sdk/client-s3';
+
+new S3Driver({
+  client: new S3Client({ region: 'us-east-1' }),
+  bucket: 'app-uploads',
+  keyPrefix: 'uploads',           // optional, prepended to every key
+  publicBaseUrl: 'https://cdn…',  // optional, enables url()
+});
+```
+
+`capabilities = { presign: true, multipart: true, publicUrls: !!publicBaseUrl }`. `temporaryUrl` returns a signed GET URL; `presign + multipart` are what `uploadMode: 'auto'` reads to pick the `direct` path. Works with any S3-compatible endpoint (MinIO, R2, …) via the client's `endpoint`/`forcePathStyle`.
+
+## Image engine — `@dudousxd/nestjs-media-image-sharp`
+
+```ts
+import { SharpImageProcessor } from '@dudousxd/nestjs-media-image-sharp';
+// pass to MediaModule's imageProcessor option
+```
+
+Implements `ImageProcessor` with resize (`fit`), format (`webp`/`jpeg`/`png`/`avif`), and `quality`. See [Conversions](/docs/media/concepts/conversions).
+
+## Testing — `@dudousxd/nestjs-media-testing`
+
+<Callout type="info">
+Ships an `InMemoryDriver`, `InMemoryMediaStore`, and `InMemoryUploadSessionStore`, plus reusable **conformance suites** (`runStorageDriverConformance`, `runMediaStoreConformance`) — the same contracts every real driver/store is verified against. Use them to test your own custom drivers or stores.
+</Callout>

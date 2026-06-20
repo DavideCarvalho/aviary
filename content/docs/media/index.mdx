@@ -1,0 +1,29 @@
+---
+title: Media
+description: Filesystem and media-library for NestJS in one package — the Laravel/spatie feel for files. Disk-agnostic storage, resumable uploads, entity attachments, and image conversions, all wired into the ecosystem's diagnostics, codegen, and React colas.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+**`@dudousxd/nestjs-media`** brings the Laravel + spatie/media-library experience to NestJS, in a single package. It **absorbs the filesystem abstraction** — there is no separate `nestjs-storage`. Libraries that only need raw file access depend on this and import `@dudousxd/nestjs-media/storage`.
+
+<Callout type="info" title="Two layers, one package">
+**Camada 1 — Storage:** a disk-agnostic `put / get / url / temporaryUrl / stream / delete` API over local, S3, or in-memory disks.
+
+**Camada 2 — Media-library:** attach files to your entities in named collections, with image conversions — built on top of the storage layer.
+</Callout>
+
+## What you get
+
+- **Disks**: `local` and `s3` (presign + native multipart), plus an in-memory disk for tests — all behind one `StorageDriver` contract with a shared conformance suite.
+- **Resumable uploads**: the `proxy` path is a real [tus 1.0.0](https://tus.io) server (chunked, resumable through a dropped connection); the `direct` path uses presigned S3 multipart. An overridable `uploadMode` (`auto | proxy | direct`) decides which, resolved **global → per-disk → per-call**.
+- **Media-library**: spatie-style collections (single-file or multi), ordering, MIME validation, custom properties, and `attach / list / delete / url`.
+- **Image conversions**: a pluggable `ImageProcessor` (sharp by default), generated **lazily** on first access (and cached) or **eagerly** on upload.
+- **Four ORM stores**: TypeORM, MikroORM, Drizzle, Prisma — POJO adapters that all satisfy the same `MediaStore` contract, with non-destructive auto-schema where the ORM allows.
+- **Ecosystem colas**: `nestjs:media:*` diagnostics channels, a [Telescope](/docs/media/telescope) watcher, a codegen-emitted typed client, and a React `useMediaUpload` hook + `<MediaUploader/>`.
+
+## How it fits the ecosystem
+
+Media is plugged into the same four "colas" every `@dudousxd/nestjs-*` library shares — it emits to [diagnostics](/docs/media/diagnostics) channels that [Telescope](/docs/media/telescope) consumes, contributes a typed client through [Codegen](/docs/media/codegen), and ships a `-react` family package. See [Concepts → Diagnostics](/docs/media/concepts/diagnostics) for the wiring.
+
+Continue to [Getting Started](/docs/media/getting-started).

@@ -1,0 +1,46 @@
+---
+title: Gallery with thumbnails
+description: A multi-file collection with lazy + eager image conversions.
+---
+
+```ts
+collections: [
+  {
+    name: 'gallery',
+    conversions: [
+      { name: 'thumb', width: 200 },                          // lazy
+      { name: 'og', width: 1200, height: 630, eager: true },  // generated on upload
+    ],
+  },
+]
+```
+
+```ts
+@Injectable()
+export class GalleryService {
+  constructor(private readonly media: MediaService) {}
+
+  add(postId: string, file: { buffer: Buffer; mimetype: string; originalname: string }) {
+    return this.media.library.attach({
+      ownerType: 'Post',
+      ownerId: postId,
+      collection: 'gallery',
+      fileName: file.originalname,
+      mimeType: file.mimetype,
+      contents: file.buffer,
+    });
+  }
+
+  async render(postId: string) {
+    const media = await this.media.library.list('Post', postId, 'gallery');
+    return Promise.all(
+      media.map(async (m) => ({
+        full: await this.media.library.url(m.id),
+        thumb: await this.media.library.url(m.id, 'thumb'), // generated + cached on first call
+      })),
+    );
+  }
+}
+```
+
+`list` returns records ordered by `order`. The `og` variant is ready immediately after upload; `thumb` is produced on first request and cached thereafter.

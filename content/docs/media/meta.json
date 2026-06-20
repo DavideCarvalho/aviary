@@ -1,0 +1,13 @@
+{
+  "title": "Media",
+  "pages": [
+    "index",
+    "getting-started",
+    "concepts",
+    "packages",
+    "recipes"
+  ],
+  "root": true,
+  "description": "Filesystem + media-library in one package — disks, resumable uploads, attachments, conversions.",
+  "icon": "Image"
+}

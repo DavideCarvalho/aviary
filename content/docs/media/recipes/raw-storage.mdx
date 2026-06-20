@@ -1,0 +1,37 @@
+---
+title: Raw storage (no entities)
+description: Use the filesystem layer alone — for other libraries or one-off files.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+You don't need the media-library layer to use the disks. Register `MediaModule` with just `disks` (no `store`) and use `media.disk(...)`:
+
+```ts
+MediaModule.forRoot({
+  default: 'local',
+  disks: { local: new LocalDriver({ root: './storage' }) },
+});
+```
+
+```ts
+@Injectable()
+export class ExportService {
+  constructor(private readonly media: MediaService) {}
+
+  async writeReport(id: string, csv: Buffer) {
+    await this.media.disk().put(`reports/${id}.csv`, csv, { contentType: 'text/csv' });
+    return this.media.disk().temporaryUrl(`reports/${id}.csv`, 300);
+  }
+}
+```
+
+<Callout type="info" title="Consuming from another library">
+Libraries (mail attachments, durable steps) import the facade through the subpath so they depend on the filesystem without the media-library layer:
+
+```ts
+import { StorageManager, type StorageDriver } from '@dudousxd/nestjs-media/storage';
+```
+</Callout>
+
+Calling `media.library` without a configured `store` throws a clear error — the two layers are independent.

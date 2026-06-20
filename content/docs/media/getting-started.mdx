@@ -1,0 +1,137 @@
+---
+title: Getting Started
+description: Install nestjs-media, wire MediaModule with a disk + store, and attach your first file.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+<Steps>
+
+<Step>
+
+## Install
+
+Pick the umbrella package plus the disks, store, and image engine you want.
+
+<Tabs items={['pnpm', 'npm', 'yarn']}>
+<Tab value="pnpm">
+```bash
+pnpm add @dudousxd/nestjs-media @dudousxd/nestjs-media-disk-s3 \
+  @dudousxd/nestjs-media-database-typeorm @dudousxd/nestjs-media-image-sharp
+```
+</Tab>
+<Tab value="npm">
+```bash
+npm i @dudousxd/nestjs-media @dudousxd/nestjs-media-disk-s3 \
+  @dudousxd/nestjs-media-database-typeorm @dudousxd/nestjs-media-image-sharp
+```
+</Tab>
+<Tab value="yarn">
+```bash
+yarn add @dudousxd/nestjs-media @dudousxd/nestjs-media-disk-s3 \
+  @dudousxd/nestjs-media-database-typeorm @dudousxd/nestjs-media-image-sharp
+```
+</Tab>
+</Tabs>
+
+</Step>
+
+<Step>
+
+## Register the module
+
+`MediaModule.forRoot` wires the **storage** layer (disks) and, when you pass a `store`, the **media-library** layer too.
+
+```ts title="app.module.ts"
+import { Module } from '@nestjs/common';
+import { MediaModule } from '@dudousxd/nestjs-media';
+import { LocalDriver } from '@dudousxd/nestjs-media-disk-local';
+import { S3Driver } from '@dudousxd/nestjs-media-disk-s3';
+import { TypeOrmMediaStore } from '@dudousxd/nestjs-media-database-typeorm';
+import { SharpImageProcessor } from '@dudousxd/nestjs-media-image-sharp';
+import { S3Client } from '@aws-sdk/client-s3';
+import { getDataSourceToken } from '@nestjs/typeorm';
+
+@Module({
+  imports: [
+    MediaModule.forRootAsync({
+      inject: [getDataSourceToken(), S3Client],
+      useFactory: (ds, s3: S3Client) => ({
+        default: 's3',
+        disks: {
+          s3: new S3Driver({ client: s3, bucket: 'app-uploads' }),
+          local: new LocalDriver({ root: './storage', baseUrl: 'http://localhost:3000/files' }),
+        },
+        store: new TypeOrmMediaStore(ds),
+        imageProcessor: new SharpImageProcessor(),
+        collections: [
+          { name: 'avatar', single: true, acceptsMimeTypes: ['image/png', 'image/jpeg'] },
+          {
+            name: 'gallery',
+            conversions: [
+              { name: 'thumb', width: 200 },
+              { name: 'og', width: 1200, height: 630, eager: true },
+            ],
+          },
+        ],
+      }),
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+<Callout type="info">
+`MediaModule` is `@Global()` — import it once and inject `MediaService` anywhere.
+</Callout>
+
+</Step>
+
+<Step>
+
+## Use it
+
+```ts title="photos.service.ts"
+import { Injectable } from '@nestjs/common';
+import { MediaService } from '@dudousxd/nestjs-media';
+
+@Injectable()
+export class PhotosService {
+  constructor(private readonly media: MediaService) {}
+
+  // Camada 2 — attach to an entity
+  upload(postId: string, file: { buffer: Buffer; mimetype: string; originalname: string }) {
+    return this.media.library.attach({
+      ownerType: 'Post',
+      ownerId: postId,
+      collection: 'gallery',
+      fileName: file.originalname,
+      mimeType: file.mimetype,
+      contents: file.buffer,
+    });
+  }
+
+  // Conversions are generated lazily on first request, then cached
+  thumbUrl(mediaId: string) {
+    return this.media.library.url(mediaId, 'thumb');
+  }
+
+  // Camada 1 — raw storage, no DB
+  putRaw(path: string, data: Buffer) {
+    return this.media.disk('s3').put(path, data);
+  }
+}
+```
+
+</Step>
+
+</Steps>
+
+## Next steps
+
+- [Concepts → The two layers](/docs/media/concepts/two-layers)
+- [Concepts → Uploads & multipart](/docs/media/concepts/uploads)
+- [Concepts → Conversions](/docs/media/concepts/conversions)
+- [Packages](/docs/media/packages) — every disk, store, and cola
