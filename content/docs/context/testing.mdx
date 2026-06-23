@@ -128,6 +128,16 @@ afterEach(() => {
   You only need `Context.resetConfig()` in suites that actually change the carrier / serialize / deserialize config. Tests that just build a fake store with `runWithContext` / `enterContext` do not touch the process-global config and need no reset.
 </Callout>
 
+A related one-shot guard: `Context.set()` called with no active context emits a `console.warn` **once per process** (see [Getting Started](/docs/context/getting-started#step-4--populate-the-user-and-tenant)). If a test deliberately exercises that out-of-context path and you want to assert the warning fires again in a later test, re-arm it with `Context.resetSetWarning()`:
+
+```ts
+import { Context } from '@dudousxd/nestjs-context';
+
+afterEach(() => {
+  Context.resetSetWarning(); // re-arm the one-shot out-of-context set warning
+});
+```
+
 ---
 
 ## Next steps

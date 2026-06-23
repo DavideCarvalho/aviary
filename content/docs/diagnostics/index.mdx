@@ -25,13 +25,16 @@ Every event flows over a channel named **`aviary:<lib>:<event>`** and carries a 
 
 ```ts
 interface DiagnosticEvent<TPayload = unknown> {
-  ts: number;        // Date.now() at publish time
-  lib: string;       // the <lib>, e.g. "authz"
-  event: string;     // the <event>, e.g. "decision"
-  traceId?: string;  // auto-filled from nestjs-context when present
-  payload: TPayload; // your library-defined data
+  ts: number;         // Date.now() at publish time
+  lib: string;        // the <lib>, e.g. "authz"
+  event: string;      // the <event>, e.g. "decision"
+  traceId?: string;   // auto-filled from nestjs-context when present
+  payload: TPayload;  // your library-defined data
+  durationMs?: number; // wall-clock duration of a timed operation, when known
 }
 ```
+
+`durationMs` is **optional** and only present when the emitter measured how long the operation took (see [Getting Started](/docs/diagnostics/getting-started#timing-an-operation)). Events that don't describe a timed operation omit it entirely, so the common envelope stays free of an `undefined`-valued key.
 
 ## Quickstart
 

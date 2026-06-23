@@ -56,6 +56,62 @@ By default `forRoot()` also **registers an HTTP middleware automatically** (`aut
   `forRoot()` is global, so you import it **once**. Feature modules do not need to import it again. If you have a non-HTTP entrypoint (GraphQL subscriptions, gRPC, a queue worker), see [Customization → non-HTTP entrypoints](/docs/context/customization#level-3--non-http-entrypoints).
 </Callout>
 
+### Async configuration with `forRootAsync`
+
+When the options depend on other providers — a `ConfigService`, a feature flag service, anything resolved through DI — use `ContextModule.forRootAsync()` instead. It mirrors the ecosystem convention (`nestjs-filter`, `nestjs-authz`): supply exactly one of `useFactory`, `useClass`, or `useExisting`, plus the modules whose providers you want to `inject`.
+
+```ts title="src/app.module.ts"
+import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ContextModule } from '@dudousxd/nestjs-context';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot(),
+    ContextModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        traceHeader: config.get('TRACE_HEADER', 'traceparent'),
+        carrier: ['traceId', 'tenantId', 'userRef'],
+      }),
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+The factory returns the **same** `ContextModuleOptions` that `forRoot()` accepts — the trace-id hook, `initialize`, the middleware options, the cross-process `carrier`, `baggage`, and `enrichers` are all honoured. If you prefer a class, implement `ContextModuleOptionsFactory` and pass it as `useClass`:
+
+```ts title="src/context-options.factory.ts"
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type {
+  ContextModuleOptions,
+  ContextModuleOptionsFactory,
+} from '@dudousxd/nestjs-context';
+
+@Injectable()
+export class ContextOptionsFactory implements ContextModuleOptionsFactory {
+  constructor(private readonly config: ConfigService) {}
+
+  createContextOptions(): ContextModuleOptions {
+    return { traceHeader: this.config.get('TRACE_HEADER', 'traceparent') };
+  }
+}
+```
+
+```ts title="src/app.module.ts"
+ContextModule.forRootAsync({
+  imports: [ConfigModule],
+  useClass: ContextOptionsFactory,
+});
+```
+
+<Callout type="info">
+  With `forRoot()` the cross-process / baggage / enricher config is pushed onto the module-level singleton synchronously at wiring time. With `forRootAsync()` the options do not exist until DI resolves the factory, so the singleton is configured slightly later — during `onModuleInit`, which Nest awaits before the app serves traffic. The end result is identical; it just happens once DI has produced your options.
+</Callout>
+
 ---
 
 ## Step 3 — Read the context anywhere
@@ -127,7 +183,7 @@ export class AuthGuard implements CanActivate {
 }
 ```
 
-`Context.set(key, value)` mutates the store that the middleware already entered. It is a no-op if there is no active context, and it is fully typed against `ContextStore`, so `Context.set('userRef', ...)` only accepts a `UserRef`.
+`Context.set(key, value)` mutates the store that the middleware already entered. It is fully typed against `ContextStore`, so `Context.set('userRef', ...)` only accepts a `UserRef`. Called with **no active context** it is a no-op (it never throws), but it emits a one-shot `console.warn` — a silently dropped `set` is a common footgun (e.g. an auth guard running on a route the middleware was excluded from), so the library makes the gap visible. The warning fires once per process; `Context.resetSetWarning()` re-arms it (primarily for tests).
 
 <Callout type="info">
   Why does the guard set the user instead of the middleware? Because authentication runs *after* the request context exists. The middleware enters the store at the very top of the pipeline; the guard fills in the principal once it has been verified. This split is intentional — see [The Store](/docs/context/the-store) for why the store carries a `userRef` rather than the full user object.
@@ -157,6 +213,47 @@ next(); // returns — but the context is still active for everything downstream
 <Callout type="warn">
   Use `Context.run()` when you own a clean callback boundary and want the context to disappear when the work finishes — for example, wrapping a single queue job. Use `Context.enterWith()` when there is no wrapping callback, as in middleware. The built-in HTTP middleware uses `enterWith` for exactly this reason. See [Cross-Process](/docs/context/cross-process) for `run`-based patterns.
 </Callout>
+
+---
+
+## Carrying the context across callbacks with `bind`
+
+`AsyncLocalStorage` follows the **async execution tree**, but a few JavaScript boundaries break out of it: a callback you register *now* but that runs *later* — `setTimeout` / `setInterval`, an `EventEmitter` listener, a job callback handed to a third-party library — runs detached from the context that registered it, so `Context.traceId()` inside that callback would return `undefined`.
+
+`Context.bind(fn)` snapshots whatever context is active **at bind time** and returns a wrapped function that re-enters that snapshot every time it is later invoked. Arguments, `this`, and the return value all pass through unchanged. It mirrors `AsyncResource.bind`.
+
+```ts title="src/notifications.service.ts"
+import { Injectable } from '@nestjs/common';
+import { EventEmitter } from 'node:events';
+import { Context } from '@dudousxd/nestjs-context';
+
+@Injectable()
+export class NotificationsService {
+  constructor(private readonly emitter: EventEmitter) {}
+
+  scheduleReminder(): void {
+    // Without bind, the timer callback runs with no active context.
+    setTimeout(
+      Context.bind(() => {
+        this.send(`reminder traceId=${Context.traceId()}`);
+      }),
+      1000,
+    );
+
+    // Same for listeners registered inside a request.
+    this.emitter.once(
+      'done',
+      Context.bind(() => this.send(`done traceId=${Context.traceId()}`)),
+    );
+  }
+
+  private send(message: string): void {
+    /* ... */
+  }
+}
+```
+
+If nothing is active when you call `bind`, it returns the function unchanged — so it is always safe to wrap, and the bound function simply runs with no active store.
 
 ---
 

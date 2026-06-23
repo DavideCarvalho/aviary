@@ -102,6 +102,93 @@ const engine = new WorkflowEngine({
 
 ---
 
+## Faithful `traceparent` propagation
+
+The W3C `traceparent` header is more than its trace id — it carries a **parent span-id** and a **trace-flags** byte (whose low bit is the *sampled* decision). When a request arrives with a `traceparent`, the middleware parses all three parts, and `nestjs-context` re-emits them faithfully so the downstream `traceparent` genuinely *continues* the incoming trace instead of fabricating a new one.
+
+Concretely:
+
+- The middleware seeds the trace id from the inbound `traceparent` and **keeps the upstream span-id and trace-flags** on the store (as `ContextStore.traceparent`). This is captured at request start.
+- `toTraceparent(traceId, upstream?)` takes an optional `ParsedTraceparent`. When you pass the captured upstream, the **upstream span-id becomes the re-emitted parent-id** and the **upstream trace-flags are propagated verbatim** — so an incoming `…-00` (not sampled) round-trips as `…-00` and is not silently flipped to sampled.
+
+```ts title="src/outbound.service.ts"
+import { Injectable } from '@nestjs/common';
+import { Context, toTraceparent } from '@dudousxd/nestjs-context';
+
+@Injectable()
+export class OutboundService {
+  /** A faithful downstream traceparent for an outgoing call. */
+  private traceparentHeader(): string {
+    const store = Context.get();
+    // Pass the captured upstream so the sampled flag + parent span-id continue.
+    return toTraceparent(store!.traceId, store?.traceparent);
+  }
+
+  async callDownstream(url: string): Promise<Response> {
+    return fetch(url, { headers: { traceparent: this.traceparentHeader() } });
+  }
+}
+```
+
+With **no** upstream (a genuinely new trace — there was no inbound `traceparent`), `toTraceparent(traceId)` mints a random parent-id and defaults the flags to `01` (sampled) so downstream collectors keep the span.
+
+<Callout type="info">
+  `ContextStore.traceparent` is **process-local on purpose** — it is *not* part of the default cross-process carrier. It is the upstream's span context, useful only for re-emitting an HTTP `traceparent` from *this* process; shipping it across a queue/durable boundary would propagate a stale parent. The cross-boundary path carries `traceId` (plus `tenantId` / `userRef`), and the durable hook above re-wraps that trace id on the other side.
+
+  Use `parseTraceparent(headers)` if you want to capture an upstream span context yourself outside the middleware, and `extractTraceparent(headers)` when you only need the trace id.
+</Callout>
+
+---
+
+## W3C baggage interop
+
+The bespoke `ContextCarrier` is ideal when *you* own both ends of the boundary. But sometimes you want the context to ride a **standards-compliant header** that any W3C-baggage-aware peer understands — an OTel SDK, an API gateway, a service in another language. For that, `nestjs-context` reads and writes the W3C [`baggage`](https://www.w3.org/TR/baggage/) header.
+
+`Context.toBaggage()` builds a `baggage` header value from the active context (or `undefined` when there is no context or no mappable field). By default it maps `tenantId` and `userRef` (the `userRef` as a compact `type:id` token):
+
+```ts title="src/outbound.service.ts"
+import { Injectable } from '@nestjs/common';
+import { Context, toTraceparent } from '@dudousxd/nestjs-context';
+
+@Injectable()
+export class OutboundService {
+  async callPeer(url: string): Promise<Response> {
+    const headers: Record<string, string> = {
+      traceparent: toTraceparent(Context.get()!.traceId, Context.get()?.traceparent),
+    };
+    const baggage = Context.toBaggage();
+    if (baggage) {
+      headers.baggage = baggage; // e.g. "tenantId=t1,userRef=user%3A42"
+    }
+    return fetch(url, { headers });
+  }
+}
+```
+
+On the receiving side, `Context.fromBaggage(header, fn, opts?)` is the symmetric counterpart of `deserialize` — it decodes the `baggage` header, builds a store, and runs `fn` inside it. Because baggage carries **no trace id**, the `traceId` invariant is satisfied from an optional `traceparent` (passed in `opts`) when supplied and valid, else a freshly generated id — mirroring how the middleware seeds:
+
+```ts title="src/peer.consumer.ts"
+import { Injectable } from '@nestjs/common';
+import { Context } from '@dudousxd/nestjs-context';
+
+@Injectable()
+export class PeerConsumer {
+  handle(headers: Record<string, string | undefined>, work: () => unknown) {
+    return Context.fromBaggage(headers.baggage, work, {
+      traceparent: headers.traceparent,
+    });
+  }
+}
+```
+
+`fromBaggage` is **tolerant**: a malformed or absent `baggage` header simply yields a context with those fields unset rather than throwing. Malformed members (stray commas, missing `=`, percent-encoding that does not decode) are skipped.
+
+<Callout type="info">
+  Baggage is **complementary** to the bespoke carrier, not a replacement — choosing one does not change the other. Tune which fields ride baggage, namespace the keys (e.g. `acme.tenant`), or disable a field entirely via the `baggage` option on `forRoot` — see [Customization → baggage keys](/docs/context/customization#baggage-keys).
+</Callout>
+
+---
+
 ## The snapshot caveat
 
 There is one behavior you must internalize before building long-running workflows on top of this.

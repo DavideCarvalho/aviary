@@ -64,11 +64,38 @@ export class BillingService {
 }
 ```
 
+## Timing an operation
+
+If the event describes something that took measurable time — an outbound call, a query, a job run — stamp the wall-clock duration onto it with `opts.durationMs`. `emit` copies it onto the envelope as `durationMs`, letting downstream consumers build **duration histograms** instead of only counting events:
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { emit } from '@dudousxd/nestjs-diagnostics';
+
+@Injectable()
+export class AiService {
+  constructor(private readonly client: ChatClient) {}
+
+  async chat(prompt: string) {
+    const start = performance.now();
+    const reply = await this.client.complete(prompt);
+    emit('ai', 'chat-request', { model: 'gpt-4o', tokens: reply.tokens }, {
+      durationMs: performance.now() - start,
+    });
+    return reply;
+  }
+}
+```
+
+<Callout type="info" title="Optional by design">
+`durationMs` is set on the envelope **only when you pass it** — omit it for events that aren't tied to a timed operation, and the key won't appear at all. There's no need to send `0` or a placeholder.
+</Callout>
+
 ## API surface
 
 | Export | Description |
 | --- | --- |
-| `emit(lib, event, payload, opts?)` | Build + publish a `DiagnosticEvent` on `aviary:<lib>:<event>` (only when subscribed). |
+| `emit(lib, event, payload, opts?)` | Build + publish a `DiagnosticEvent` on `aviary:<lib>:<event>` (only when subscribed). `opts` accepts `traceId`, `durationMs`, and `sample`. |
 | `channelName(lib, event)` | The `aviary:<lib>:<event>` string. |
 | `getChannel(lib, event)` | The memoized `diagnostics_channel` for a pair (also registers its name). |
 | `CHANNEL_PREFIX` | `'aviary'`. |

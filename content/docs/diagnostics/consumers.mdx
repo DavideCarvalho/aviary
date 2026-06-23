@@ -46,7 +46,7 @@ TelescopeModule.forRoot({
 });
 ```
 
-Each event lands tagged `lib:<lib>` / `event:<event>`, with `content` = the payload and the envelope's `traceId` for correlation.
+Each event lands tagged `lib:<lib>` / `event:<event>`, with `content` = the payload and the envelope's `traceId` for correlation. When an emitter stamped a [`durationMs`](/docs/diagnostics/getting-started#timing-an-operation) onto the event, the watcher forwards it to the recorder — so the [Telescope OTel exporter](/docs/telescope) can feed it into a duration histogram instead of only a counter.
 
 ## OpenTelemetry
 
@@ -66,6 +66,8 @@ export class OtelDiagnosticsBridge implements OnModuleInit, OnModuleDestroy {
         'aviary.lib': e.lib,
         'aviary.event': e.event,
         'aviary.trace_id': e.traceId ?? '',
+        // present only on timed events — feed it into a histogram, not just an attribute
+        ...(e.durationMs !== undefined && { 'aviary.duration_ms': e.durationMs }),
         ...flatten(e.payload), // your own payload → attribute mapping
       });
     });
@@ -144,6 +146,46 @@ export class DenialAlerter implements OnModuleInit, OnModuleDestroy {
 ```
 
 This is the lowest-overhead way to react to a specific ecosystem event — a denial alert, a metric counter, a webhook.
+
+## Across processes (Redis relay)
+
+The diagnostics bus is in-process: a subscriber only sees events emitted in **its own** Node process. When you run multiple processes — an API pod and a background worker, several replicas — and want a subscriber in one to react to events emitted in another, put the optional **`@dudousxd/nestjs-diagnostics-redis`** relay in front of the bus. It forwards selected local `aviary:<lib>:<event>` channels onto Redis pub/sub and re-emits Redis-received events back onto the local bus, so every subscriber on this page — `observeAll`, a single-channel handler, Telescope — fires across processes. The diagnostics core stays untouched; this is entirely opt-in.
+
+```bash
+pnpm add @dudousxd/nestjs-diagnostics-redis @dudousxd/nestjs-diagnostics ioredis
+```
+
+Supply a publisher and a **separate** subscriber connection (a subscribed ioredis connection can't publish, so use `redis.duplicate()`). Prefer `forRootAsync` so the relay's clients come from the same DI container as the rest of your app — inject your existing Redis provider and build the options in a factory:
+
+```ts title="app.module.ts"
+import type Redis from 'ioredis';
+import { Module } from '@nestjs/common';
+import { DiagnosticsRedisModule } from '@dudousxd/nestjs-diagnostics-redis';
+import { REDIS, RedisModule } from './redis.module'; // your app's Redis provider
+
+@Module({
+  imports: [
+    DiagnosticsRedisModule.forRootAsync({
+      imports: [RedisModule],          // modules whose providers the factory injects
+      inject: [REDIS],                 // tokens passed to useFactory, in order
+      useFactory: (redis: Redis) => ({
+        pub: redis,
+        sub: redis.duplicate(),
+        libs: ['durable', 'notifications'], // forward all events of these libs
+      }),
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+`forRootAsync({ imports?, inject?, useFactory })` mirrors the usual Nest convention: `imports` makes other modules' exported providers available, `inject` lists the tokens handed to `useFactory` (in order), and `useFactory` returns the relay options (`pub`, `sub`, and a channel selection — `libs`, `channels`, or `all`). The factory may be async.
+
+<Callout type="info" title="Already holding the connections?">
+The static `forRoot({ pub, sub, libs })` takes pre-built clients directly. Reach for `forRootAsync` whenever your Redis client itself lives in DI — it keeps the relay on the same connection lifecycle as everything else, instead of a top-level `new Redis(...)`.
+</Callout>
+
+The relay never opens or closes your Redis connections — you own their lifecycle — and it's loop-safe (a process skips its own echoes, so two pods never ping-pong). Note that **payloads cross the boundary as JSON**: class instances arrive as plain objects and `Date` as an ISO string, so cross-process handlers should read fields, not behavior.
 
 ## In tests
 

@@ -10,10 +10,12 @@ import { Callout } from 'fumadocs-ui/components/callout';
 | Level | What you change | How | Default |
 |-------|-----------------|-----|---------|
 | **1** | Add your own fields | module augmentation | — |
-| **2** | Populate fields / trace id | `initialize` / `traceId` in `forRoot` | `traceparent` header → random |
+| **2** | Populate / derive fields / trace id | `initialize` / `traceId` / `enrichers` in `forRoot` | `traceparent` header → random |
 | **3** | Non-HTTP entrypoints | `autoMiddleware: false` + `Context.run` | middleware on `*` |
-| **4** | What survives cross-process | `carrier: [...]` / `serialize` override | `traceId` + `tenantId` + `userRef` |
+| **4** | What survives cross-process | `carrier: [...]` / `serialize` override / `baggage` | `traceId` + `tenantId` + `userRef` |
 | **5** | Swap the accessor libs read | override the `CONTEXT_ACCESSOR` token | default accessor |
+
+Every option below is accepted by both `ContextModule.forRoot()` and the async `ContextModule.forRootAsync()` (see [Getting Started → async configuration](/docs/context/getting-started#async-configuration-with-forrootasync)); the examples use `forRoot()` for brevity.
 
 ---
 
@@ -61,6 +63,7 @@ The available population options on `ContextModuleOptions`:
 - **`traceHeader?: string`** — the header to read the inbound trace id from. Defaults to the W3C `traceparent`. When the header is absent or malformed, a fresh trace id is generated.
 - **`traceId?: (req) => string`** — a full override of trace-id production. When provided, its return value wins over `traceHeader` and the random fallback.
 - **`initialize?: (req) => Partial<ContextStore>`** — a bag of fields merged into the initial store. Ideal for pre-populating `tenantId` and your custom fields.
+- **`enrichers?: ContextEnricher[]`** — functions that run *after* the store is assembled to populate derived fields. Covered in [Enrichers](#enrichers--derive-fields-from-the-assembled-store) below.
 
 The `req` passed to these hooks is structural (`{ headers?, [key]: unknown }`), so the same hooks work on Express, Fastify, or any other adapter — the library never depends on a concrete request type.
 
@@ -81,6 +84,52 @@ The consequence: the **resolved `traceId` and `requestId` always win**. A stray 
   <br />— An **empty-string** `x-request-id` (`''`) is treated as **absent** — it will not overwrite a `requestId` you set in `initialize()`.
   <br />— If `initialize()` returns a `requestId` and there is **no** `x-request-id` header, the value from `initialize()` persists. So `initialize()` is the right place to set a `requestId` fallback.
 </Callout>
+
+### Enrichers — derive fields from the assembled store
+
+`initialize()` runs *before* the store exists, so it can only see the request. **Enrichers** run *after* the middleware has entered the context, so they see the fully-assembled store (trace id, the `initialize()` bag, the request id) **and** the request, and use it to populate **derived** fields — a `displayName` from a `tenantId`, a region from a header.
+
+An enricher is a function `(store, req?) => Partial<ContextStore> | undefined`. It can either return a partial to merge, or mutate the passed `store` in place and return nothing:
+
+```ts title="src/app.module.ts"
+import { ContextModule } from '@dudousxd/nestjs-context';
+
+ContextModule.forRoot({
+  enrichers: [
+    // Return a partial to merge…
+    (store) => ({ region: regionForTenant(store.tenantId) }),
+    // …or mutate the store directly.
+    (store, req) => {
+      store.locale = parseAcceptLanguage(req);
+    },
+  ],
+});
+```
+
+<Callout type="info">
+  Enrichers are **isolated**: an enricher that throws neither breaks the request nor the other enrichers — the error is swallowed. They run from the middleware's own options (so they work whether or not the singleton was configured), and `forRoot` also pushes them onto the singleton, so non-HTTP entrypoints can run them explicitly with `Context.runEnrichers(req?)` after a `Context.run` / `Context.enterWith`.
+</Callout>
+
+Both the derived fields above (`region`, `locale`) are Level 1 custom fields — declare them with module augmentation first.
+
+### `Context.lazy` — derive on first access instead
+
+Eager enrichers compute on **every** request, whether or not anything reads the result. For a value that is expensive or rarely needed, prefer the on-demand counterpart: `Context.lazy(key, factory)` computes the field on **first access** and memoizes it onto the active store, so subsequent reads in the same request are free.
+
+```ts title="src/profile.service.ts"
+import { Injectable } from '@nestjs/common';
+import { Context } from '@dudousxd/nestjs-context';
+
+@Injectable()
+export class ProfileService {
+  displayName(): string | undefined {
+    // Computed once per request, only when something asks for it.
+    return Context.lazy('displayName', (store) => lookupName(store.userRef));
+  }
+}
+```
+
+If the field is already present on the store, the factory is not called; outside any context `lazy` returns `undefined` (there is nowhere to cache).
 
 ---
 
@@ -169,6 +218,21 @@ import { Context } from '@dudousxd/nestjs-context';
 // In a test or multi-app harness, between apps:
 Context.resetConfig();
 ```
+
+### Baggage keys
+
+Alongside the bespoke carrier, the context can ride a standards-compliant W3C `baggage` header via `Context.toBaggage()` / `Context.fromBaggage()` (see [Cross-Process → baggage interop](/docs/context/cross-process#w3c-baggage-interop)). The `baggage` option controls how store fields map onto baggage keys. By default `tenantId` and `userRef` map to keys of the same name; set a custom key to namespace it, or `false` to never propagate that field over baggage:
+
+```ts
+ContextModule.forRoot({
+  baggage: {
+    tenantId: 'acme.tenant', // namespace the key
+    userRef: false,          // never send the principal over baggage
+  },
+});
+```
+
+This mapping is independent of the bespoke carrier above — changing `baggage` does not touch `carrier` / `serialize` / `deserialize`, and vice versa.
 
 ---
 

@@ -17,6 +17,7 @@ interface ContextStore {
   requestId?: string;
   userRef?: UserRef;
   tenantId?: string;
+  traceparent?: ParsedTraceparent;
 }
 
 interface UserRef {
@@ -25,12 +26,13 @@ interface UserRef {
 }
 ```
 
-Four fields, and only one of them is required:
+The fields, and only one of them is required:
 
 - **`traceId`** — a correlation id for the request. Always present (see [the invariant below](#the-traceid-invariant)). Used by telescope and durable to correlate logs, spans, and workflows.
 - **`requestId`** — an optional inbound request id, captured from the `x-request-id` header when present. Distinct from the trace id: the trace id correlates a *distributed* operation, while the request id identifies *this one HTTP request*.
 - **`userRef`** — an optional reference to the acting principal, as `{ type, id }`. Set by your auth layer.
 - **`tenantId`** — the optional active tenant. Read by the filter library to scope queries.
+- **`traceparent`** — the parsed upstream `traceparent` (span-id + trace-flags), captured at request start so a re-emitted downstream `traceparent` faithfully continues the distributed trace. **Process-local on purpose** — intentionally *not* part of the default cross-process carrier. See [Cross-Process → faithful traceparent](/docs/context/cross-process#faithful-traceparent-propagation).
 
 You read these through the `Context` accessors rather than poking at the object directly:
 
@@ -82,13 +84,21 @@ The reason is correlation. Telescope and durable use the trace id as the join ke
 The trace id follows the [W3C Trace Context](https://www.w3.org/TR/trace-context/) shape: a 32-hex-character id. The package exports helpers for working with it directly:
 
 ```ts
-import { extractTraceparent, randomTraceId, toTraceparent } from '@dudousxd/nestjs-context';
+import {
+  extractTraceparent,
+  parseTraceparent,
+  randomTraceId,
+  toTraceparent,
+} from '@dudousxd/nestjs-context';
 
 extractTraceparent(req.headers);          // pull the trace-id out of a `traceparent` header
 extractTraceparent(req.headers, 'x-b3');  // ...or a custom header
+parseTraceparent(req.headers);            // { traceId, parentId?, flags? } — the full upstream span context
 randomTraceId();                          // '4bf92f3577b34da6a3ce929d0e0e4736'
-toTraceparent(Context.traceId()!);        // '00-<traceId>-<spanId>-01' to send downstream
+toTraceparent(Context.traceId()!);        // '00-<traceId>-<spanId>-01' — a fresh downstream traceparent
 ```
+
+When you pass the captured upstream as the second argument — `toTraceparent(traceId, Context.get()?.traceparent)` — the re-emitted header continues the incoming trace faithfully (propagating the parent span-id and the upstream *sampled* flag) instead of minting a new one. See [Cross-Process → faithful traceparent](/docs/context/cross-process#faithful-traceparent-propagation).
 
 ---
 
