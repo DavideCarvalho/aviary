@@ -52,6 +52,10 @@ When `tus` is configured, `MediaUploadController` is mounted at `media/uploads`,
 app.use('/media/uploads', express.raw({ type: 'application/offset+octet-stream' }));
 ```
 
+<Callout type="warn" title="The upload controllers are unguarded">
+`MediaUploadController` (tus) and `MediaDirectUploadController` (mounted when `direct` is configured) carry **no authentication or authorization guard**. Anyone able to reach `media/uploads` / `media/uploads/direct` can drive uploads. Add your own guard (a global `APP_GUARD` or a guard/middleware scoped to `media/uploads`) to protect them.
+</Callout>
+
 ## The `/storage` subpath
 
 For consumers that want only the filesystem facade, without the media-library layer:

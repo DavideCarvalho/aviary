@@ -18,7 +18,7 @@ Understanding the difference between these two is the key to using authz correct
 
 ## The context path and `CONTEXT_ACCESSOR`
 
-When no user is passed explicitly, the gate resolves one from an optional **context accessor** — injected via `@Optional() @Inject('CONTEXT_ACCESSOR')`, the well-known token that [`@dudousxd/nestjs-context`](/docs/context) exports.
+When no user is passed explicitly, the gate resolves one from an optional **context accessor** — injected via `@Optional() @Inject(CONTEXT_ACCESSOR)`, the well-known token that [`@dudousxd/nestjs-context`](/docs/context) exports.
 
 The accessor is consumed **structurally**. authz never imports nestjs-context (it's an optional peer); it only relies on the shape:
 
