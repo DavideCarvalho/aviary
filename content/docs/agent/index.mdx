@@ -1,0 +1,47 @@
+---
+title: Agent
+description: A governed, durable-backed AI agent for NestJS — chat, tool-calling, role/persona governance, token quota, cost tracking, and human-in-the-loop approval, with each turn running as a replay-safe durable workflow and wired into the ecosystem's durable, telescope, and diagnostics glue.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+**`@dudousxd/nestjs-agent`** brings an in-app AI assistant to NestJS the way Laravel brings
+batteries-included features to PHP. Every app that builds a copilot rewrites the same machinery:
+the agentic loop (model → tools → model), a tool registry, RBAC per tool, token quota, cost
+tracking, audit, human approval for destructive actions, and resumable streaming. All of that is
+**mechanism** — the library. Your **domain** (which tables, which tenant column, which roles) stays
+policy you supply.
+
+<Callout type="info" title="The turn is a durable workflow">
+Each agent turn runs as a `@dudousxd/nestjs-durable` workflow: every model and tool call is a
+checkpointed step, so a crash mid-turn replays from cache. Human-in-the-loop approval is a durable
+**signal** — the run suspends in the state store instead of holding a connection, and resumes when a
+human approves. Live tokens flow on a separate data plane (a `TokenStreamSink`) so streaming and
+durability compose instead of fighting.
+</Callout>
+
+## What you get
+
+- **Tool framework** — `@AiTool({ kind: 'read' | 'action' })` classes, auto-discovered. `action`
+  tools never auto-execute; the run pauses for approval.
+- **Governance out of the box** — RBAC per tool, personas (system prompt + tool allow-list), daily
+  token quota, cost tracking against versioned pricing, and an audit trail of every tool call.
+- **Streaming** — SSE with resume; reconnect replays the buffered tokens.
+- **Durable or inline** — `DurableAgentRunner` (default headline) or an in-process fallback behind
+  one `AgentRunner` SPI.
+- **The data satellite** — `@dudousxd/nestjs-agent-data` packages governed, read-only SQL
+  (AST-validated, RBAC + tenant scoping) as an opt-in tool.
+
+## The four glue points
+
+- **Diagnostics** — emits `aviary:agent:*` (`run.started`, `message`, `tool-call`, `run.finished`).
+- **Telescope** — `@dudousxd/nestjs-agent-telescope` adds an "Agent" tab; runs also appear in the
+  durable "Workflows" tab for free.
+- **Codegen** — a `-codegen` extension injects `api.agent.*` into the unified client.
+- **Module convention** — `forRoot` / `forRootAsync` / `forFeature` and `Symbol.for` capabilities.
+
+<Callout type="warn" title="Status">
+Early development (wip). Core, the NestJS module (inline + durable runners), MikroORM persistence,
+the telescope extension, and a runnable end-to-end demo exist today; `-data`, `-react`, `-codegen`,
+`-client`, and additional ORM stores are scaffolded as follow-ups.
+</Callout>

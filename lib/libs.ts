@@ -1,6 +1,7 @@
 import {
   Activity,
   Bell,
+  Bot,
   Boxes,
   Braces,
   Filter,
@@ -35,6 +36,17 @@ export interface AviaryLib {
 }
 
 export const libs: AviaryLib[] = [
+  {
+    slug: 'agent',
+    pkg: 'nestjs-agent',
+    name: 'Agent',
+    blurb: 'A governed, durable-backed AI agent — chat + tool-calling + RBAC + quota + cost + human-in-the-loop, with each turn a replay-safe durable workflow.',
+    bird: 'Magpie',
+    icon: Bot,
+    iconName: 'Bot',
+    packages: 9,
+    stage: 'wip',
+  },
   {
     slug: 'authz',
     pkg: 'nestjs-authz',
