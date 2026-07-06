@@ -6,6 +6,7 @@ import type { MDXComponents } from "mdx/types";
 import { ReplayDiagram } from "@/components/replay-diagram";
 import { Screenshot } from "@/components/screenshot";
 import { TenancyDiagram } from "@/components/tenancy-diagram";
+import { TenantFlow } from "@/components/tenant-flow";
 
 export function getMDXComponents(components?: MDXComponents) {
   return {
@@ -19,6 +20,7 @@ export function getMDXComponents(components?: MDXComponents) {
     ReplayDiagram,
     Screenshot,
     TenancyDiagram,
+    TenantFlow,
     ...components,
   } satisfies MDXComponents;
 }
