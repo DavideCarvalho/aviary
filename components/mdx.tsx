@@ -3,6 +3,7 @@ import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import { TypeTable } from "fumadocs-ui/components/type-table";
 import defaultMdxComponents from "fumadocs-ui/mdx";
 import type { MDXComponents } from "mdx/types";
+import { ReplayDiagram } from "@/components/replay-diagram";
 import { Screenshot } from "@/components/screenshot";
 import { TenancyDiagram } from "@/components/tenancy-diagram";
 
@@ -15,6 +16,7 @@ export function getMDXComponents(components?: MDXComponents) {
     Step,
     Steps,
     TypeTable,
+    ReplayDiagram,
     Screenshot,
     TenancyDiagram,
     ...components,
