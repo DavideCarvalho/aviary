@@ -1,0 +1,259 @@
+---
+title: Governed SQL
+description: Give the model read-only SQL access without handing it the database — AST-validated single SELECTs, a fail-closed table allowlist, per-tenant rewriting, and a row cap, all before your runner touches the DB.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`@dudousxd/nestjs-agent-data` ships one tool — `executeSql` — that lets the model answer questions
+about your real data by writing SQL, without ever giving it a connection. The model proposes a query;
+the library validates, gates, rewrites, and caps it; only then does **your** injected runner execute
+it against a read-only pool. The **mechanism** (the four guardrail layers) is the library; the
+**policy** (which tables, which tenant column, which roles) is what you supply.
+
+<Callout type="warn" title="The model writes SQL — it never holds the database">
+Treat model-authored SQL as hostile input. The package opens no connection of its own: it hands your
+`runner` a string only after it has proven the string is a single `SELECT`, every referenced table is
+readable by the caller's roles, and each tenant-scoped table is constrained to the caller's tenant.
+Point `runner` at a **read-only** pool with a least-privilege DB user as your final backstop — the
+guardrails are defense-in-depth, not a substitute for read-only credentials.
+</Callout>
+
+---
+
+## The guardrail pipeline
+
+Every call runs the same ordered pipeline. Each layer fails closed — a query that any layer can't
+prove safe is rejected, and the error message goes back to the model so it can re-plan.
+
+| # | Layer | Component | Fails closed by |
+|---|-------|-----------|-----------------|
+| 1 | Parse & shape | `SqlValidator` | Rejecting anything that isn't exactly one `SELECT` — no INSERT/UPDATE/DELETE/DDL, no multi-statement strings, no unparseable input |
+| 2 | Table access | `GroupTableAccessPolicy` | Denying any referenced table the caller's roles can't read — an unclassified table, unknown role, or empty role set is denied |
+| 3 | Tenant scope | `TenantScopeRewriter` | AND-ing `tenantColumn = '<tenantRef>'` into every scoped table; rejecting cross-tenant predicates and shapes it can't statically verify |
+| 4 | Row cap | `injectLimit` | Wrapping any un-`LIMIT`ed query in a bounding subquery; a ~256KB result payload is truncated on top |
+
+The order matters: shape is proven before table names are trusted, table access is proven before the
+query is rewritten, and the tenant rewrite happens before the `LIMIT` wrap — so the cap always applies
+to the final, scoped statement your runner receives.
+
+---
+
+## Building the tool
+
+`createExecuteSqlTool` assembles the pipeline and returns a `{ spec, handler }` pair — a `ToolSpec` (a
+`read`-kind tool named `executeSql`) and its `ToolHandler`. You supply three things: the `runner`, a
+`tableAccess` policy, and an optional `tenantScope`.
+
+```ts
+import {
+  createExecuteSqlTool,
+  GroupTableAccessPolicy,
+  TenantScopeRewriter,
+} from '@dudousxd/nestjs-agent-data';
+
+const { spec, handler } = createExecuteSqlTool({
+  runner: { run: (sql) => readOnlyPool.query(sql) }, // you supply the pool
+  tableAccess: new GroupTableAccessPolicy({
+    roleGroups: {
+      ADMIN: ['orders', 'catalog'],
+      SUPPORT: ['orders'],
+    },
+    tablesByGroup: {
+      orders: ['orders', 'order_items'],
+      catalog: ['products', 'product_*'],
+    },
+  }),
+  tenantScope: new TenantScopeRewriter({
+    tenantColumn: 'tenant_id',
+    scopedTables: ['orders', 'order_items'],
+  }),
+  // maxRows: 100,          // default row cap when the query has no LIMIT
+  // validator: myValidator // defaults to a fresh SqlValidator
+});
+```
+
+The `ExecuteSqlDeps` options in full:
+
+| Option | Type | Default | Purpose |
+|--------|------|---------|---------|
+| `runner` | `{ run(sql): Promise<Record<string, unknown>[]> }` | — | Your read-only pool. The package never opens a connection. |
+| `tableAccess` | `TableAccessPolicy` | — | Coarse table-level allowlist, checked for every referenced table. |
+| `tenantScope` | `TenantScopeRewriter` | — (optional) | Per-row tenant constraint applied before the query runs. |
+| `validator` | `SqlValidator` | fresh instance | The single-SELECT AST validator. |
+| `maxRows` | `number` | `100` | Row cap injected when the query carries no `LIMIT`. |
+
+---
+
+## Layer 1 — single-SELECT AST validation
+
+The `SqlValidator` parses the statement with the MySQL dialect and asserts it is exactly one `SELECT`.
+Writes and code paths — `INSERT`, `UPDATE`, `DELETE`, `REPLACE`, DDL (`CREATE`/`DROP`/`ALTER`/…),
+`CALL`, `SET`, `GRANT`, `USE`, and friends — are categorically rejected, as is any multi-statement
+string or input that fails to parse. On success it returns the distinct base tables the query touches,
+walking CTEs, subqueries, and joins so nothing hides from Layer 2.
+
+```sql
+-- accepted: one SELECT
+SELECT id, total FROM orders WHERE status = 'open';
+
+-- rejected: not a SELECT        → "DELETE is not allowed; only SELECT statements are accepted"
+DELETE FROM orders WHERE id = 1;
+
+-- rejected: statement smuggling → "Only a single statement is allowed"
+SELECT 1; DROP TABLE orders;
+```
+
+Rejections throw `SqlValidationError`; the handler surfaces `.message` to the model so it re-plans
+rather than seeing an opaque failure.
+
+---
+
+## Layer 2 — fail-closed table access
+
+`GroupTableAccessPolicy` is a two-level, data-driven allowlist: every table is classified into a
+**group** (`tablesByGroup`), and every **role** lists the groups it may read (`roleGroups`). A table is
+readable only if its group appears in at least one of the caller's roles' group lists. Table patterns
+are exact names or `prefix_*` globs (e.g. `product_*`).
+
+It is **fail-closed by contract**: an unclassified table, an unknown role, or an empty role set is
+denied. A table you forget to classify never leaks by default — it simply becomes unreadable until you
+add it to a group.
+
+```ts
+new GroupTableAccessPolicy({
+  roleGroups: { SUPPORT: ['orders'] },        // SUPPORT sees only the orders group
+  tablesByGroup: { orders: ['orders', 'order_items'] },
+});
+// canAccess(['SUPPORT'], 'orders')      → true
+// canAccess(['SUPPORT'], 'products')    → false (products is in no readable group)
+// canAccess([], 'orders')               → false (empty role set)
+```
+
+The handler checks the referenced tables from Layer 1 against `canAccess(roles, table)` for each one.
+If any is forbidden it throws before the query is ever rewritten or run, naming the offending tables
+and the caller's roles.
+
+<Callout type="info">
+`GroupTableAccessPolicy` implements the `TableAccessPolicy` interface (`canAccess(roles, table)`). If
+the group model doesn't fit — say you drive access off a database or an external service — implement
+that one method yourself and pass it as `tableAccess`.
+</Callout>
+
+---
+
+## Layer 3 — tenant scoping
+
+`TenantScopeRewriter` rewrites an accepted `SELECT` so every reference to a scoped table is constrained
+to a single tenant: `tenantColumn = '<tenantRef>'` is AND-ed into the `WHERE` for each scoped table in
+the `FROM`. The `tenantRef` comes from the tool context (`ctx.tenantRef`), which the agent derives from
+the caller's identity — the model never chooses it.
+
+- A query that already carries a matching tenant predicate is left as-is; one that targets a
+  **different** tenant is rejected — no cross-tenant reads.
+- `tenantRef === undefined` is the **privileged path**: the SQL passes through unchanged (use it for
+  operators who legitimately query across tenants).
+- Scoped mode fails closed on shapes it can't statically verify — CTEs (`WITH`), `UNION`/`INTERSECT`/
+  `EXCEPT`, and subqueries in `FROM` are rejected with a message asking the model to rephrase, because
+  it can't guarantee every tenant-bearing source is constrained.
+
+```ts
+new TenantScopeRewriter({ tenantColumn: 'tenant_id', scopedTables: ['orders'] });
+```
+
+```sql
+-- model wrote:
+SELECT id, total FROM orders WHERE status = 'open';
+
+-- runner receives (tenantRef = 'acme'):
+SELECT id, total FROM orders WHERE status = 'open' AND orders.tenant_id = 'acme';
+```
+
+<Callout type="warn">
+Only tables listed in `scopedTables` are constrained. A tenant-bearing table you forget to list is
+**not** scoped — this layer is an allow-by-omission list, the mirror of Layer 2. Audit `scopedTables`
+against every table that carries a tenant key.
+</Callout>
+
+---
+
+## Layer 4 — row cap and payload guard
+
+`injectLimit` guarantees a bounded result. If the query already has a `LIMIT` it is untouched;
+otherwise it is wrapped in `SELECT * FROM (<sql>) AS subq LIMIT <maxRows>` (default `100`), which
+preserves any inner `ORDER BY` / `GROUP BY` / `UNION`. On top of the row cap, the handler truncates the
+serialized result once it would exceed ~256KB, keeping the prefix rows and flagging `truncated: true`
+so a single tool result can't blow the model's context.
+
+```ts
+// ExecuteSqlResult
+{ rows: [...], rowCount: 100, sql: '/* the final, scoped, limited SQL */', truncated?: true }
+```
+
+---
+
+## Registering the tool with the agent
+
+`createExecuteSqlTool` returns a plain `{ spec, handler }` rather than an `@AiTool` class, so register
+it against the shared `ToolRegistry` at bootstrap. Inject the `AGENT_TOOL_REGISTRY` token and call
+`register(spec, handler)` — the tool then appears to the model exactly like any decorated tool.
+
+```ts
+// src/tools/governed-sql.provider.ts
+import { Inject, Injectable, type OnApplicationBootstrap } from '@nestjs/common';
+import { AGENT_TOOL_REGISTRY, type ToolRegistry } from '@dudousxd/nestjs-agent-core';
+import {
+  createExecuteSqlTool,
+  GroupTableAccessPolicy,
+  TenantScopeRewriter,
+} from '@dudousxd/nestjs-agent-data';
+import { ReadOnlyPool } from '../db/read-only-pool.js';
+
+@Injectable()
+export class GovernedSqlTool implements OnApplicationBootstrap {
+  constructor(
+    @Inject(AGENT_TOOL_REGISTRY) private readonly registry: ToolRegistry,
+    private readonly pool: ReadOnlyPool,
+  ) {}
+
+  onApplicationBootstrap(): void {
+    const { spec, handler } = createExecuteSqlTool({
+      runner: { run: (sql) => this.pool.query(sql) },
+      tableAccess: new GroupTableAccessPolicy({
+        roleGroups: { ADMIN: ['orders', 'catalog'], SUPPORT: ['orders'] },
+        tablesByGroup: {
+          orders: ['orders', 'order_items'],
+          catalog: ['products', 'product_*'],
+        },
+      }),
+      tenantScope: new TenantScopeRewriter({
+        tenantColumn: 'tenant_id',
+        scopedTables: ['orders', 'order_items'],
+      }),
+    });
+    this.registry.register(spec, handler);
+  }
+}
+```
+
+```ts
+// src/app.module.ts
+@Module({
+  imports: [AgentModule.forRoot({ /* model, store, actorResolver, … */ })],
+  providers: [ReadOnlyPool, GovernedSqlTool],
+})
+export class AppModule {}
+```
+
+Because `executeSql` is a `read`-kind tool, it auto-executes — no human-in-the-loop step. Its power is
+bounded entirely by the four guardrails plus your read-only credentials, so a read tool is the right
+kind. The `roles` and `tenantRef` it enforces come from the request's [actor](/docs/agent/guides/identity-and-authorization);
+if you omit `tenantScope`, be sure your `tableAccess` policy alone is enough isolation.
+
+---
+
+## Related
+
+- [Tools](/docs/agent/guides/tools) — the `@AiTool` surface, `read` vs `action`, and the handler context
+- [Identity & Authorization](/docs/agent/guides/identity-and-authorization) — where `ctx.actor.roles` and `ctx.tenantRef` come from
+- [Getting Started](/docs/agent/getting-started) — install, register the module, stream your first turn

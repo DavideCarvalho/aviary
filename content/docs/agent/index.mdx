@@ -4,6 +4,7 @@ description: A governed, durable-backed AI agent for NestJS — chat, tool-calli
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
+import { Cards, Card } from 'fumadocs-ui/components/card';
 
 **`@dudousxd/nestjs-agent`** brings an in-app AI assistant to NestJS the way Laravel brings
 batteries-included features to PHP. Every app that builds a copilot rewrites the same machinery:
@@ -25,23 +26,48 @@ durability compose instead of fighting.
 - **Tool framework** — `@AiTool({ kind: 'read' | 'action' })` classes, auto-discovered. `action`
   tools never auto-execute; the run pauses for approval.
 - **Governance out of the box** — RBAC per tool, personas (system prompt + tool allow-list), daily
-  token quota, cost tracking against versioned pricing, and an audit trail of every tool call.
+  token quota, and an audit trail of every tool call.
+- **Cost accounting** — a usage ledger per turn, rolled up into spend per model / per actor / over
+  time. A gateway's real reported cost wins; otherwise a **cache-aware** estimate against a versioned
+  pricing table (prompt cache-write / cache-read priced at their own rates).
+- **A governance console** — `@dudousxd/nestjs-agent-dashboard` mounts a standalone AI-gateway
+  console (bundled React SPA + NestJS module) at its own route, no Telescope required.
 - **Streaming** — SSE with resume; reconnect replays the buffered tokens.
 - **Durable or inline** — `DurableAgentRunner` (default headline) or an in-process fallback behind
   one `AgentRunner` SPI.
+- **Multi-agent** — an orchestrator delegates to named sub-agents via a synthesized `ask_<name>`
+  tool; each delegation is a durable child run.
 - **The data satellite** — `@dudousxd/nestjs-agent-data` packages governed, read-only SQL
   (AST-validated, RBAC + tenant scoping) as an opt-in tool.
+- **A React frontend** — `@dudousxd/nestjs-agent-react`'s `useAgentChat` (Vercel AI SDK v6) plus
+  styling-agnostic chat components and an optional markdown renderer.
 
 ## The four glue points
 
-- **Diagnostics** — emits `aviary:agent:*` (`run.started`, `message`, `tool-call`, `run.finished`).
-- **Telescope** — `@dudousxd/nestjs-agent-telescope` adds an "Agent" tab; runs also appear in the
-  durable "Workflows" tab for free.
-- **Codegen** — a `-codegen` extension injects `api.agent.*` into the unified client.
+- **Diagnostics** — emits `aviary:agent:*` (`run.started`, `message`, `tool-call`, `delegated`,
+  `quota.exceeded`, `run.finished`) on Node's `diagnostics_channel`.
+- **Telescope** — `@dudousxd/nestjs-agent-telescope` adds an "Agent" tab with the governance
+  sections; runs also appear in the durable "Workflows" tab for free.
+- **Codegen** — a `@dudousxd/nestjs-agent-codegen` extension injects `api.agent.*` into the unified
+  typed client.
 - **Module convention** — `forRoot` / `forRootAsync` / `forFeature` and `Symbol.for` capabilities.
 
 <Callout type="warn" title="Status">
-Early development (wip). Core, the NestJS module (inline + durable runners), MikroORM persistence,
-the telescope extension, and a runnable end-to-end demo exist today; `-data`, `-react`, `-codegen`,
-`-client`, and additional ORM stores are scaffolded as follow-ups.
+Early development (`0.x`). The full family ships today — core, the NestJS module (inline + durable
+runners), MikroORM and Drizzle persistence, the governance read-model, the standalone dashboard, the
+telescope extension, governed SQL (`-data`), the React frontend (`-react`), codegen, and a runnable
+fully-offline end-to-end demo. The package surface and SPIs are still stabilizing.
 </Callout>
+
+## Where to go next
+
+<Cards>
+  <Card title="Getting Started" href="/docs/agent/getting-started" description="Install, declare a tool, register the module, and stream your first turn." />
+  <Card title="Tools" href="/docs/agent/guides/tools" description="@AiTool classes, read vs. action, the handler signature, and the tool context." />
+  <Card title="Identity & Authorization" href="/docs/agent/guides/identity-and-authorization" description="ActorResolver, role vs. ability gates, and there being no insecure default." />
+  <Card title="Human-in-the-loop & Durability" href="/docs/agent/guides/human-in-the-loop-and-durability" description="Action approval as a durable signal — the run suspends and resumes across restarts." />
+  <Card title="Multi-agent" href="/docs/agent/guides/multi-agent" description="Orchestrators delegating to named sub-agents via a synthesized ask_<name> tool." />
+  <Card title="Cost & Governance" href="/docs/agent/guides/cost-and-governance" description="The usage ledger, reported-cost-wins, cache-aware pricing, and the console." />
+  <Card title="Persistence" href="/docs/agent/guides/persistence" description="The AgentStore SPI on MikroORM or Drizzle — threads, messages, usage, pricing." />
+  <Card title="Frontend" href="/docs/agent/guides/frontend" description="useAgentChat, styling-agnostic components, and the markdown renderer." />
+</Cards>

@@ -1,0 +1,13 @@
+{
+  "title": "Guides",
+  "pages": [
+    "tools",
+    "identity-and-authorization",
+    "human-in-the-loop-and-durability",
+    "multi-agent",
+    "cost-and-governance",
+    "persistence",
+    "frontend",
+    "governed-sql"
+  ]
+}

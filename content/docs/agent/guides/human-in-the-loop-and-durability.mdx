@@ -1,0 +1,141 @@
+---
+title: Human-in-the-loop & Durability
+description: Action tools pause for a human decision — and under the durable runner that pause is a real durable signal, so the run suspends in the state store and resumes on approval, surviving restarts.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Some tools are safe to run on the model's say-so; some are not. A `read` tool auto-executes. An
+`action` tool never does — the loop **pauses** for an explicit approve/reject. How that pause is
+implemented is the difference between the inline runner and the durable runner, but the wire
+protocol your frontend speaks is identical either way.
+
+---
+
+## The approval flow
+
+Declare a tool `kind: 'action'` and it becomes gated:
+
+```ts
+@AiTool({
+  name: 'purgeCache',
+  kind: 'action', // never auto-executes — the run pauses here
+  description: 'Purge a cache key.',
+  input: z.object({ key: z.string() }),
+})
+export class PurgeCacheTool implements ToolHandler<{ key: string }> {
+  async execute(input: { key: string }) {
+    await this.cache.purge(input.key);
+    return { purged: input.key };
+  }
+}
+```
+
+When the model calls `purgeCache`, the loop stops before `execute` and waits. A human resolves it
+through the REST endpoints:
+
+```bash
+# approve
+curl -X POST http://localhost:3000/agent/tool-call/approve \
+  -H 'content-type: application/json' \
+  -H 'x-actor-id: u1' -H 'x-actor-role: ADMIN' \
+  -d '{ "runId": "...", "toolCallId": "..." }'
+
+# reject (with an optional reason the model sees)
+curl -X POST http://localhost:3000/agent/tool-call/reject \
+  -H 'content-type: application/json' \
+  -H 'x-actor-id: u1' -H 'x-actor-role: ADMIN' \
+  -d '{ "runId": "...", "toolCallId": "...", "reason": "not now" }'
+```
+
+On approval the tool executes and the turn continues; on rejection the loop resumes with the
+rejection (and any reason) fed back to the model, which adapts instead of running the action.
+
+<Callout type="info" title="The frontend wraps this">
+`useAgentChat` surfaces pending approvals and exposes approve/reject callbacks, so a UI renders an
+"Approve?" prompt inline in the conversation. See [Frontend](/docs/agent/guides/frontend).
+</Callout>
+
+---
+
+## Two runners, one protocol
+
+The same pause is backed two ways, chosen by the `durable` flag on `AgentModule.forRoot`:
+
+| | Inline runner (default) | Durable runner (`durable: true`) |
+|---|---|---|
+| The pause | an in-process runner holds the turn open | a real durable **suspend** — the run is checkpointed to the state store |
+| Surviving a restart | no — the pending turn is lost | yes — the run resumes from cache on approval |
+| Requires | nothing extra | `AgentDurableModule` + a configured `DurableModule` |
+| Wire protocol | identical | identical |
+
+Because the protocol is identical, you can develop against the inline runner and flip to durable in
+production without touching your frontend or your tools.
+
+---
+
+## Under the durable runner
+
+With `durable: true`, each agent turn runs as a `@dudousxd/nestjs-durable` workflow (the
+`agent.run` workflow). Every model call and every tool call is a **checkpointed step** — so a crash
+mid-turn replays from cache rather than re-charging the model or re-running a side effect.
+
+```ts
+AgentModule.forRoot({
+  model: myModelProvider,
+  store: myAgentStore,
+  actorResolver: new HeaderActorResolver(),
+  durable: true, // each turn is the durable `agent.run` workflow
+  // ...
+});
+```
+
+The human-in-the-loop pause becomes a durable **signal**: on the approval boundary the run suspends
+into the state store (via the durable `waitForSignal` primitive) instead of holding a connection
+open. An approve/reject POST delivers the signal and the run resumes — minutes or restarts later —
+replay-safe.
+
+<Callout type="warn" title="Streaming and durability compose, they don't fight">
+Live tokens don't go through the durable checkpoint path — they flow on a separate data plane (a
+`TokenStreamSink`). So you get resumable, replay-safe orchestration *and* token-by-token streaming
+at once, rather than trading one for the other.
+</Callout>
+
+---
+
+## Resuming a stream
+
+Durability also covers the transport. A dropped SSE connection reconnects and replays the buffered
+tokens for the in-flight run:
+
+```bash
+# resume an in-flight run's stream
+curl -N http://localhost:3000/agent/chat/$RUN_ID/stream \
+  -H 'x-actor-id: u1' -H 'x-actor-role: ADMIN'
+```
+
+A run can also be cancelled:
+
+```bash
+curl -X POST http://localhost:3000/agent/chat/$RUN_ID/cancel \
+  -H 'content-type: application/json' \
+  -H 'x-actor-id: u1' -H 'x-actor-role: ADMIN'
+```
+
+---
+
+## Observability
+
+Every stage of a run is announced on Node's `diagnostics_channel` under `aviary:agent:*`
+(`run.started`, `message`, `tool-call`, `delegated`, `quota.exceeded`, `run.finished`). The
+telescope extension consumes them for the "Agent" tab; under the durable runner, runs also appear in
+the durable "Workflows" tab for free. See [Cost & Governance](/docs/agent/guides/cost-and-governance).
+
+---
+
+## Related
+
+- [Tools](/docs/agent/guides/tools) — declaring `read` vs `action` tools
+- [Multi-agent](/docs/agent/guides/multi-agent) — a delegated sub-agent is a durable child run
+- [Frontend](/docs/agent/guides/frontend) — rendering the approve/reject prompt in the UI
+- [Cost & Governance](/docs/agent/guides/cost-and-governance) — the diagnostics events and run history

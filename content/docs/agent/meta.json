@@ -1,6 +1,6 @@
 {
   "title": "Agent",
-  "pages": ["index"],
+  "pages": ["index", "getting-started", "guides"],
   "root": true,
   "description": "A governed, durable-backed AI agent — chat + tools + RBAC + quota + HITL, each turn a durable workflow.",
   "icon": "Bot"

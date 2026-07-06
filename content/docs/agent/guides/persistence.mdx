@@ -1,0 +1,220 @@
+---
+title: Persistence
+description: The AgentStore SPI — threads, messages, tool calls, and a token-usage ledger — behind one ORM-portable interface, wired on MikroORM or Drizzle.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+Persistence is the write half of the agent: every turn creates or continues a **thread**, appends
+**messages**, records each **tool call**, and writes a row to a **token-usage ledger**. All of that
+goes through one interface — the `AgentStore` SPI — so the agent loop never knows which ORM (or
+database) is underneath. The library ships two adapters that implement the exact same SPI: MikroORM
+and Drizzle. Pick one, wire it, and the agent reads it through a DI token.
+
+---
+
+## The `AgentStore` SPI
+
+`AgentStore` (from `@dudousxd/nestjs-agent-core`) is ORM-agnostic — refs are string ids, and an
+adapter is free to back them with real relations. It covers five concerns across five tables:
+
+| Concern | Table | SPI methods |
+|---|---|---|
+| Threads | `agent_thread` | `createThread`, `getThread`, `listThreads`, `softDeleteThread`, `forkThread`, `setTitle`, `setActiveStream` |
+| Messages | `agent_message` | `appendMessage`, `truncateFrom` |
+| Tool calls | `agent_tool_call` | `recordToolCall`, `updateToolCall` |
+| Token usage (ledger) | `agent_token_usage` | `recordUsage`, `quotaToday` |
+| Model pricing | `agent_model_pricing` | — (read by the governance read-model) |
+
+```ts
+// the shape both adapters implement
+export interface AgentStore {
+  createThread(input: CreateThreadInput): Promise<ThreadSummary>;
+  getThread(threadId: string): Promise<ThreadDetail | null>;
+  listThreads(actorRef: string, limit?: number): Promise<ThreadSummary[]>;
+  softDeleteThread(threadId: string): Promise<void>;
+  forkThread(threadId: string, fromMessageId: string): Promise<ThreadSummary>;
+  appendMessage(input: AppendMessageInput): Promise<StoredMessage>;
+  recordToolCall(input: RecordToolCallInput): Promise<void>;
+  recordUsage(input: RecordUsageInput): Promise<void>;
+  quotaToday(actorRef: string, day: string): Promise<{ usedTokens: number }>;
+  // …setTitle, setActiveStream, truncateFrom, updateToolCall
+}
+```
+
+Each usage row carries the cache-aware token counts (`inputTokens`, `outputTokens`,
+`cacheWriteTokens`, `cacheReadTokens`) and an optional provider-reported `costUsd` — the raw material
+the [Cost & Governance](/docs/agent/guides/cost-and-governance) read-model rolls up.
+
+---
+
+## Two tokens, bound together
+
+An adapter binds **two** DI tokens — the write side and the read side — so wiring one module gives
+you both persistence and analytics:
+
+| Token | Bound to | Consumed by |
+|---|---|---|
+| `AGENT_STORE` | the store (`MikroOrmAgentStore` / `DrizzleAgentStore`) | the agent module — every turn reads it |
+| `AGENT_GOVERNANCE_QUERIES` | the read-model (`…GovernanceQueries`) | the dashboard & Telescope surfaces |
+
+Both are `Symbol.for(...)` tokens from `@dudousxd/nestjs-agent-core` (global-registry symbols, so DI
+survives pnpm's dual ESM/CJS copies). `AgentModule.forRoot({ … })` resolves the store from
+`AGENT_STORE` — you don't pass it in when a store module is imported.
+
+<Callout type="info" title="One import, read + write">
+Importing a store module binds `AGENT_GOVERNANCE_QUERIES` as well as `AGENT_STORE`. That's why the
+governance console and Telescope tab "just work" once persistence is wired — they read the same
+adapter's read-model. See [Cost & Governance](/docs/agent/guides/cost-and-governance).
+</Callout>
+
+---
+
+## Wiring an adapter
+
+The same SPI, two ORMs. MikroORM registers entities and leans on MikroORM migrations; Drizzle takes
+an already-opened db handle that the host owns.
+
+<Tabs items={['MikroORM', 'Drizzle']}>
+<Tab value="MikroORM">
+
+```bash
+pnpm add @dudousxd/nestjs-agent-store-mikro-orm @mikro-orm/core @mikro-orm/nestjs
+```
+
+`MikroOrmAgentStoreModule.forFeature()` registers the five agent entities (`EntitySchema`) and binds
+both tokens. It needs a `MikroOrmModule.forRoot(...)` in scope for the `EntityManager`.
+
+```ts
+import { MikroOrmModule } from '@mikro-orm/nestjs';
+import { MikroOrmAgentStoreModule } from '@dudousxd/nestjs-agent-store-mikro-orm';
+import { AgentModule } from '@dudousxd/nestjs-agent';
+
+@Module({
+  imports: [
+    MikroOrmModule.forRoot(/* your config */),
+    MikroOrmAgentStoreModule.forFeature(), // registers entities + binds AGENT_STORE (+ queries)
+    AgentModule.forRoot({
+      model: myModelProvider,
+      // no `store` — the agent reads it from AGENT_STORE
+      defaultRoles: ['ADMIN'],
+      actorResolver: new HeaderActorResolver(),
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+Create the tables with your normal MikroORM migrations. For a quick start (or a shared, multi-owner
+DB), the exported `ensureAgentSchema` helper runs a non-destructive `schema.update({ safe: true })` —
+create + add-column only, never a drop or alter:
+
+```ts
+import { ensureAgentSchema } from '@dudousxd/nestjs-agent-store-mikro-orm';
+
+await ensureAgentSchema(orm); // safe: true by default
+```
+
+The entity set is exported too: `AGENT_ENTITIES` (stamped with `utf8mb4_unicode_ci` for MySQL
+parity) and `agentEntities({ collation })` if you need to omit the collation for SQLite.
+
+</Tab>
+<Tab value="Drizzle">
+
+```bash
+pnpm add @dudousxd/nestjs-agent-store-drizzle drizzle-orm
+```
+
+The host app opens the connection and hands `DrizzleAgentStoreModule.forRoot({ db })` an
+already-opened Drizzle handle — the module never opens one itself. Any SQLite-dialect driver works
+(better-sqlite3, libsql, D1, …).
+
+```ts
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import {
+  DrizzleAgentStoreModule,
+  agentSchema,
+  ensureAgentSchema,
+} from '@dudousxd/nestjs-agent-store-drizzle';
+import { AgentModule } from '@dudousxd/nestjs-agent';
+
+const db = drizzle(new Database('app.db'), { schema: agentSchema });
+await ensureAgentSchema(db); // idempotent CREATE TABLE IF NOT EXISTS — or run your own migrations
+
+@Module({
+  imports: [
+    DrizzleAgentStoreModule.forRoot({ db }), // binds AGENT_STORE + AGENT_GOVERNANCE_QUERIES
+    AgentModule.forRoot({
+      model: myModelProvider,
+      defaultRoles: ['ADMIN'],
+      actorResolver: new HeaderActorResolver(),
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+The package ships `agentSchema` (the Drizzle tables), `ensureAgentSchema` (the
+`CREATE TABLE IF NOT EXISTS` helper), `DrizzleAgentStore`, and `DrizzleGovernanceQueries`.
+
+<Callout type="warn" title="ensureAgentSchema is a quick start, not a migration story">
+`ensureAgentSchema` never drops or alters an existing column, so it can't evolve a table once it
+exists. For production, prefer drizzle-kit migrations over the helper — treat `ensureAgentSchema` as
+the "stand it up with no migration files" path (tests, demos, first boot).
+</Callout>
+
+</Tab>
+</Tabs>
+
+---
+
+## Choosing an adapter
+
+Both implement the identical SPI, so the agent behaves the same either way — the choice is about the
+rest of your stack.
+
+| | MikroORM | Drizzle |
+|---|---|---|
+| Import | `MikroOrmAgentStoreModule.forFeature()` | `DrizzleAgentStoreModule.forRoot({ db })` |
+| Connection | MikroORM owns it (`forRoot`) | host owns it, passes `db` in |
+| Schema | MikroORM migrations (or `ensureAgentSchema`) | drizzle-kit migrations (or `ensureAgentSchema`) |
+| Dialects | whatever your MikroORM driver supports | SQLite-dialect (better-sqlite3, libsql, D1, …) |
+| Binds | `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` | `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` |
+
+Reach for the adapter that matches the ORM already in your app. The SPI is the portability guarantee:
+if you migrate ORMs later, only the store module import changes — the agent, the tools, and the
+governance surfaces are untouched.
+
+---
+
+## In-memory store for tests
+
+For offline tests and demos, `@dudousxd/nestjs-agent-testing` ships an `InMemoryAgentStore` (plus
+`InMemoryGovernanceQueries`, an `InMemoryQuotaStore`, `InMemoryTokenStreamSink`, and a deterministic
+fake model). No database, no migrations — the whole loop (auto-executing reads, a suspending action
+tool, multi-agent delegation) runs with zero infrastructure.
+
+```ts
+import { InMemoryAgentStore } from '@dudousxd/nestjs-agent-testing';
+
+AgentModule.forRoot({
+  model: fakeModel,
+  store: new InMemoryAgentStore(), // pass it directly instead of importing a store module
+  defaultRoles: ['ADMIN'],
+  actorResolver: new HeaderActorResolver(),
+});
+```
+
+The repo's `examples/agent-demo` is a runnable proof built entirely on these in-memory pieces — see
+[Getting Started](/docs/agent/getting-started) for the `pnpm --filter agent-demo demo` command.
+
+---
+
+## Related
+
+- [Getting Started](/docs/agent/getting-started) — install, declare a tool, and stream your first turn
+- [Cost & Governance](/docs/agent/guides/cost-and-governance) — the usage ledger, `AGENT_GOVERNANCE_QUERIES`, and the console
+- [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability) — when a suspended run is checkpointed to the store
+- [Identity & Authorization](/docs/agent/guides/identity-and-authorization) — the actor whose ref keys every thread and usage row

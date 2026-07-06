@@ -1,0 +1,193 @@
+---
+title: Cost & Governance
+description: The usage ledger and read-model — spend per model and actor, a gateway's reported cost preferred over a cache-aware estimate, daily quota, and the console that surfaces it all.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+Every turn writes a row to a usage ledger. A **read-model** rolls those rows up into spend per
+model, spend per actor, a usage trend over time, and recent tool-call / thread activity — the
+numbers behind the [governance console](#surfacing-it). Cost is resolved **per row**, and the model
+is honest about what it knows: a gateway's real reported cost wins; otherwise it estimates, and the
+estimate accounts for prompt caching.
+
+---
+
+## The ledger
+
+Each model turn appends an `agent_token_usage` row: the actor, thread, model id, purpose, the token
+counts, and — when a gateway reported it — the real dollar cost. This is the raw material; you never
+write to it directly, the loop does. Aggregation happens in the read-model, in-process, so the
+day-bucketing stays engine-portable across MikroORM and Drizzle.
+
+---
+
+## Cost per row: reported wins, else estimate
+
+```text
+costUsd = COALESCE(reportedCostUsd, cache-aware token estimate)
+```
+
+Cost is computed **per usage row and then summed** — never once on an aggregate — so a
+gateway-priced turn and a token-estimated turn can sit side by side in the same rollup and each be
+correct.
+
+### A gateway's reported cost wins
+
+A gateway knows the real spend of a turn. When it reports one, the model provider surfaces it on the
+turn result and it is stored verbatim:
+
+| Provider | Where the real cost comes from |
+|---|---|
+| Vercel AI Gateway | `providerMetadata.gateway.cost` |
+| OpenRouter | `total_cost` |
+| Direct (Anthropic / OpenAI / Bedrock) | *only tokens reported* → falls through to the estimate |
+
+Your `ModelProvider` sets `costUsd` on the `ModelTurnResult` when it has it; the loop persists it to
+the nullable `cost_usd` column, and the read-model uses it verbatim. Preferring the report per row
+is why prompt-cache pricing skew never reaches numbers a gateway already priced.
+
+```ts
+// inside your ModelProvider.runTurn — pass the gateway's number straight through
+return {
+  text,
+  toolCalls,
+  usage: { inputTokens, outputTokens },
+  costUsd: providerMetadata?.gateway?.cost, // undefined for direct providers — that's fine
+};
+```
+
+### The fallback estimate is cache-aware
+
+When no gateway priced the turn, the estimate runs against the **current** pricing row for the model
+(`AgentModelPricing` where `isCurrent`). Prompt caching makes a naive `inputTokens × inputPrice`
+wrong — cache writes cost a premium, cache reads a fraction — so the estimate splits the input side:
+
+```text
+estimate =
+    uncachedInput × inputPricePer1m
+  + cacheWrite    × cacheWritePricePer1m   (falls back to inputPricePer1m)
+  + cacheRead     × cacheReadPricePer1m    (falls back to inputPricePer1m)
+  + output        × outputPricePer1m
+```
+
+`MessageUsage` carries the split, and the counts are **subsets** of `inputTokens`
+(`uncachedInput = inputTokens − cacheWrite − cacheRead`):
+
+```ts
+interface MessageUsage {
+  inputTokens: number;  // the whole input side, cached and uncached alike
+  outputTokens: number;
+  cacheWriteTokens?: number; // subset of inputTokens — billed at a premium
+  cacheReadTokens?: number;  // subset of inputTokens — billed at a discount
+  reasoningTokens?: number;  // subset of outputTokens — observability only (output-rate)
+}
+```
+
+<Callout type="info" title="Backward compatible by construction">
+Because the cache counts are subsets of `inputTokens`, token totals and quota never change when a
+breakdown is present. And because the cache rates are nullable, a pricing table with no cache data
+reduces **exactly** to the old `input×inputPrice + output×outputPrice`. Reasoning tokens ride along
+for observability but are billed at the output rate, so they don't move the estimate.
+</Callout>
+
+---
+
+## The pricing table
+
+Prices are versioned rows keyed by model, with the live one flagged `isCurrent`. Add the nullable
+cache rates to make the fallback precise for prompt-cached models:
+
+```ts
+// one current row per model
+{
+  modelId: 'claude-sonnet-4-6',
+  inputPricePer1m: 3,
+  outputPricePer1m: 15,
+  cacheWritePricePer1m: 3.75, // ~1.25× input
+  cacheReadPricePer1m: 0.3,   // ~0.1× input
+  effectiveFrom: new Date('2026-06-01T00:00:00Z'),
+  isCurrent: true,
+}
+```
+
+Supersede a price by inserting a new `isCurrent: true` row and clearing the flag on the old one; the
+read-model always joins to the current row, and historical rows are ignored.
+
+---
+
+## The read-model
+
+`AgentGovernanceQueries` is the read/analytics half of the store SPI (the write half is
+`AgentStore`). The store adapters bind it to the `AGENT_GOVERNANCE_QUERIES` token, so the surfaces
+just inject it:
+
+| Method | Returns |
+|---|---|
+| `spendByModel(range)` | requests / input+output tokens / cost, per model |
+| `spendByActor(range)` | requests / total tokens / cost, per actor |
+| `usageTrend(range)` | total tokens + cost bucketed by day |
+| `recentToolCalls(limit)` | latest tool calls with status + thread |
+| `recentThreads(limit)` | latest threads with message count + tokens |
+
+For unit tests and the offline demo, `@dudousxd/nestjs-agent-testing` ships an
+`InMemoryGovernanceQueries` with an optional pricing map (default empty → zero cost, tokens still
+counted).
+
+---
+
+## Daily quota
+
+Governance isn't only cost. A per-actor daily token quota blocks a turn before it runs when the
+actor is over budget; the loop emits an `aviary:agent:quota.exceeded` diagnostics event and the
+`GET /agent/quota/today` endpoint reports the actor's usage. Quota counts total tokens
+(`inputTokens + outputTokens`), unaffected by the cache split.
+
+---
+
+## Surfacing it
+
+Both surfaces read the same `AGENT_GOVERNANCE_QUERIES` read-model and tail live tool-call / quota
+signals off the `aviary:agent:*` diagnostics channel — pick either or both.
+
+<Tabs items={['Standalone dashboard', 'Telescope tab']}>
+  <Tab value="Standalone dashboard">
+    A bundled React SPA served by a NestJS module, mounted at its own route, **no Telescope required**:
+
+    ```ts
+    import { AgentDashboardModule } from '@dudousxd/nestjs-agent-dashboard';
+
+    @Module({ imports: [AgentDashboardModule.forRoot({ basePath: '/ai-gateway' })] })
+    export class AppModule {}
+    ```
+
+    The in-process analog of a hosted AI-gateway dashboard — spend per model/actor, usage trend, and
+    live activity — at `/ai-gateway`.
+  </Tab>
+  <Tab value="Telescope tab">
+    Already running `@dudousxd/nestjs-telescope`? Add the extension to get the same governance
+    sections as an "Agent" tab (agent runs also show up in the durable "Workflows" tab for free):
+
+    ```ts
+    import { AgentTelescopeModule } from '@dudousxd/nestjs-agent-telescope';
+
+    @Module({ imports: [AgentTelescopeModule.forRoot()] })
+    export class AppModule {}
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="info" title="Any consumer can subscribe">
+The read-model and the diagnostics channel are public. Beyond the shipped surfaces, your app can
+query `AGENT_GOVERNANCE_QUERIES` for its own billing export, or subscribe to `aviary:agent:*` for
+alerts and metrics — the library instruments nothing in your code.
+</Callout>
+
+---
+
+## Related
+
+- [Persistence](/docs/agent/guides/persistence) — the stores that bind `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES`
+- [Identity & Authorization](/docs/agent/guides/identity-and-authorization) — the actor every cost row is attributed to
+- [Tools](/docs/agent/guides/tools) — every tool call is audited in the ledger

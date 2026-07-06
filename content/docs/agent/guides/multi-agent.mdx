@@ -1,0 +1,214 @@
+---
+title: Multi-agent
+description: Register named agents with forFeature, let an orchestrator delegate to sub-agents via delegatesTo, and run each delegation as a durable child run.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A single agent answers with its own prompt and tools. A **multi-agent** setup splits that into
+named specialists — an *orchestrator* that coordinates, and *sub-agents* it delegates to. You
+register each one with `AgentModule.forFeature`, declare which agents an orchestrator may call via
+`delegatesTo`, and the library does the wiring: it synthesizes an `ask_<name>` tool per edge, and
+when the model calls it the loop runs the sub-agent as a durable child run (or a nested in-process
+loop when you're not durable).
+
+The **mechanism** is the library; the roster — which agents exist, what each one is for, who may
+call whom — is policy you supply.
+
+---
+
+## Register named agents
+
+`forFeature` takes an array of `AgentDefinition`s and registers them in the agent registry. The
+default agent from `forRoot` still exists; these are *additional* named agents. Import the feature
+module anywhere alongside `AgentModule.forRoot`.
+
+```ts
+// src/app.module.ts
+import { Module } from '@nestjs/common';
+import { AgentModule, HeaderActorResolver } from '@dudousxd/nestjs-agent';
+import { GetWeatherTool } from './tools/get-weather.tool.js';
+
+@Module({
+  imports: [
+    AgentModule.forRoot({
+      model: myModelProvider,
+      store: myAgentStore,
+      defaultRoles: ['ADMIN'],
+      actorResolver: new HeaderActorResolver(),
+      // durable: true,   // makes each delegation a durable child run — see below
+    }),
+    AgentModule.forFeature([
+      {
+        name: 'ops-orchestrator',
+        systemPrompt:
+          'You coordinate specialists. Delegate weather questions to weather-analyst.',
+        delegatesTo: ['weather-analyst'],
+      },
+      {
+        name: 'weather-analyst',
+        systemPrompt: 'You answer weather questions.',
+        tools: ['getWeather'],
+      },
+    ]),
+  ],
+  providers: [GetWeatherTool],
+})
+export class AppModule {}
+```
+
+The orchestrator has no `tools` of its own — its only capability is delegation. The specialist has
+no `delegatesTo` — it's a leaf that answers with `getWeather`. Nothing stops an agent from having
+both.
+
+<Callout type="info" title="forFeature is additive">
+Call `forFeature` as many times as you like (per feature module), or pass every definition in one
+array. Each call registers its definitions into the same shared `AgentRegistry`, so a later module's
+orchestrator can `delegatesTo` an agent registered by an earlier one.
+</Callout>
+
+---
+
+## The synthesized `ask_<name>` tool
+
+Every entry in a `delegatesTo` list becomes a real `agent`-kind tool in the registry. The name is
+`ask_` + the target with non-alphanumeric runs collapsed to `_`:
+
+| `delegatesTo` entry | Synthesized tool | Input schema |
+|---|---|---|
+| `weather-analyst` | `ask_weather_analyst` | `{ task: string }` |
+| `billing.ops` | `ask_billing_ops` | `{ task: string }` |
+
+The tool's description is generated for the model — `Delegate a task to the "weather-analyst" agent
+and get its answer.` — and, when the target's `systemPrompt` is a flat string, that prompt is
+appended so the orchestrator's model knows what the specialist is *for*. (A `PromptBuilder` prompt is
+per-request and would stringify to source, so it's skipped.)
+
+The orchestrator's effective tool allow-list is its own `tools` **plus** these synthesized delegate
+tools:
+
+```ts
+// effective allow-list for ops-orchestrator:
+['ask_weather_analyst']            // tools: [] + delegatesTo → [ask_weather_analyst]
+// for an agent with both:
+['refundOrder', 'ask_billing_ops'] // tools: ['refundOrder'] + delegatesTo: ['billing.ops']
+```
+
+<Callout type="info" title="You never write the delegate tool">
+There is no `@AiTool` for delegation. The discovery service synthesizes one `agent`-kind entry per
+edge at startup and logs `registered N AI tool(s) and M delegate tool(s)`. The handler is never
+called — delegation is resolved at the loop level, not by a tool handler.
+</Callout>
+
+---
+
+## Target an agent per request
+
+A turn runs against exactly one agent. Pick it with the `agent` field in the chat body; omit it and
+the module's default agent runs.
+
+```bash
+curl -N http://localhost:3000/agent/chat \
+  -H 'content-type: application/json' \
+  -H 'x-actor-id: u1' -H 'x-actor-role: ADMIN' \
+  -d '{ "message": "What is the weather in Lisbon?", "agent": "ops-orchestrator" }'
+```
+
+```json
+{ "message": "…", "threadId": "…", "agent": "ops-orchestrator", "persona": "…" }
+```
+
+The orchestrator's model sees `ask_weather_analyst`, calls it with `{ "task": "weather in Lisbon" }`,
+the loop runs `weather-analyst` (which calls `getWeather`), and its answer flows back to the
+orchestrator as the tool result — which then streams the final reply. From the client's point of
+view it's one turn on one thread; the delegation happens inside the loop.
+
+---
+
+## What each agent gets
+
+Model, store, sink, and governance are shared from `forRoot`. Everything on the `AgentDefinition`
+is per-agent and overrides the shared defaults for that agent's turns:
+
+| Field | Type | Effect |
+|---|---|---|
+| `name` | `string` | The identifier used in `agent` (body) and `delegatesTo`. Required. |
+| `systemPrompt` | `string \| PromptBuilder` | This agent's base prompt. A string is also surfaced in the `ask_` tool's description. |
+| `tools` | `string[]` | Allow-list of tool names this agent may use (a subset of all registered tools). |
+| `delegatesTo` | `string[]` | Other agents this agent may call; each becomes an `ask_<name>` tool. |
+| `modelId` | `string` | Accounting/label override for this agent's turns. |
+| `personas` | `Persona[]` | Per-agent persona catalog. |
+| `defaultPersona` | `string` | Persona used when the request names none. |
+| `maxSteps` | `number` | Tool-calling step cap for this agent's loop (default `8`). |
+
+So each agent runs its **own system prompt, its own model label, and its own tool allow-list** —
+and that allow-list is further **intersected with the active persona's** `allowedTools` and with the
+actor's role/ability gate on each tool. An agent can only reach tools it lists *and* the persona
+allows *and* the caller is authorized for.
+
+<Callout type="info" title="Delegation respects the roster, not the actor's ambition">
+A sub-agent can't be reached unless some orchestrator lists it in `delegatesTo`, and it can only use
+the tools *it* declares — not the orchestrator's. Scoping a specialist down to one tool is how you
+keep a broad orchestrator from smuggling capability into a narrow task.
+</Callout>
+
+---
+
+## Delegation is a child run
+
+When the model calls an `ask_<name>` tool, the loop handles it directly (not via a handler) because
+the execution mode differs by runner:
+
+- **`durable: true`** — the sub-agent runs as a **durable child run**. The durable runner maps it to
+  `ctx.child`, a ctx-level suspend point, so a sub-agent that pauses on a human-in-the-loop `action`
+  tool suspends and resumes just like a top-level run — replay-safe, surviving restarts.
+- **inline (no durable)** — the sub-agent runs as a **nested in-process loop**, awaited to
+  completion before the orchestrator's turn continues.
+
+Either way the sub-agent's result comes back as `{ text }` and is persisted as the delegate tool's
+output. A tool that needs to spawn a sub-agent itself can do so through the loop context:
+
+```ts
+async execute(input: { topic: string }, ctx: AiToolCtx) {
+  // ctx.runAgent runs another registered agent with delegation-aware execution
+  const { text } = await ctx.runAgent!('weather-analyst', input.topic);
+  return { summary: text };
+}
+```
+
+<Callout type="warn" title="Wire durability before you rely on it">
+The durable child run needs `durable: true` plus `AgentDurableModule` and a configured
+`DurableModule`. Without them the loop still delegates — as a nested in-process loop — but a
+sub-agent's HITL pause is held open in memory, not checkpointed. See
+[Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability).
+</Callout>
+
+---
+
+## Observing delegation
+
+Every delegation emits an `aviary:agent:delegated` diagnostics event on Node's
+`diagnostics_channel`, carrying who called whom:
+
+```ts
+interface AgentDelegated {
+  runId: string;
+  fromAgent?: string; // omitted when the orchestrator is the default agent
+  toAgent: string;
+}
+```
+
+`@dudousxd/nestjs-agent-telescope` consumes it for the Agent dashboard tab; any app can subscribe to
+build an orchestration graph, count delegations per specialist, or alert on a runaway fan-out — the
+library instruments nothing in your code. See
+[Cost & Governance](/docs/agent/guides/cost-and-governance) for the rest of the `aviary:agent:*`
+channel.
+
+---
+
+## Related
+
+- [Tools](/docs/agent/guides/tools) — the `@AiTool` surface a specialist delegates *to*, `read` vs `action`, and the handler context
+- [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability) — why a durable child run makes a sub-agent's approval pause replay-safe
+- [Identity & Authorization](/docs/agent/guides/identity-and-authorization) — the role/ability gate every delegated tool is still checked against
+- [Cost & Governance](/docs/agent/guides/cost-and-governance) — the `aviary:agent:*` diagnostics channel and the governance console

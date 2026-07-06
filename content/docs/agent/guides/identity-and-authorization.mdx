@@ -1,0 +1,265 @@
+---
+title: Identity & Authorization
+description: How the agent learns who is calling (ActorResolver, with no insecure default) and decides — per tool, server-side — whether they may run it (roles vs abilities).
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+Two questions gate every turn: **who is calling**, and **may they run this tool**. The agent answers
+the first with an `ActorResolver` you configure — it never fabricates a caller — and the second with a
+per-tool policy that is always decided server-side. Identity is a seam you own; authorization is a
+set-intersection (or a delegated ability check) the loop runs before any handler executes.
+
+---
+
+## Identity: the actor comes from you
+
+Every request resolves to an **actor** — the principal driving the turn:
+
+```ts
+interface Actor {
+  id: string;
+  roles?: string[];   // authorization intersects these against a tool's `roles`
+  tenantRef?: string; // your tenant handle, threaded through tools and governed SQL
+}
+```
+
+The agent obtains it through the `ActorResolver` SPI. This is the identity seam: the agent **never**
+invents a caller.
+
+```ts
+interface ActorResolver {
+  resolve(req: unknown): Actor | Promise<Actor>;
+}
+```
+
+`req` is the raw transport request (an Express `Request` in a NestJS app), typed `unknown` so the core
+stays framework-agnostic. You configure exactly one resolver on `AgentModule.forRoot({ actorResolver })`.
+
+<Callout type="warn" title="There is no insecure default identity">
+Omit `actorResolver` and the module installs an `UnconfiguredActorResolver` that **throws on every
+request** — an identity is never derived from a default. This is deliberate: an agent that can act
+without a known caller is an agent that can act as anyone.
+</Callout>
+
+---
+
+## `HeaderActorResolver` — only behind a trusted gateway
+
+The shipped resolver reads the actor straight off request headers:
+
+| Header | Maps to | Notes |
+|---|---|---|
+| `x-actor-id` | `actor.id` | **Required** — absent (or empty) → throws, never fabricated |
+| `x-actor-role` | `actor.roles` | Comma-separated, trimmed; absent → `roles: []` (no tools) |
+| `x-tenant-ref` | `actor.tenantRef` | Optional; only attached when present |
+
+```ts
+import { AgentModule, HeaderActorResolver } from '@dudousxd/nestjs-agent';
+
+AgentModule.forRoot({
+  model: myModelProvider,
+  store: myAgentStore,
+  defaultRoles: ['ADMIN'],
+  actorResolver: new HeaderActorResolver(),
+});
+```
+
+```bash
+curl -N http://localhost:3000/agent/chat \
+  -H 'content-type: application/json' \
+  -H 'x-actor-id: u1' -H 'x-actor-role: ADMIN,OPS' -H 'x-tenant-ref: acme' \
+  -d '{ "message": "purge the cache for key foo" }'
+```
+
+<Callout type="warn" title="Trusting client headers is only safe behind a gateway">
+`HeaderActorResolver` trusts whatever headers arrive. That is safe **only** when a gateway in front of
+your app strips these headers off the inbound request and re-sets them from an authenticated principal.
+Expose it to the open internet and any client can claim any `x-actor-id` and any role. Use it for demos,
+internal tools behind a mesh, or a gateway edge — never as your production identity source.
+</Callout>
+
+---
+
+## A production resolver over a verified session
+
+Real deployments implement `ActorResolver` over a principal your app has already verified — a session,
+a JWT, [`@dudousxd/nestjs-context`](https://github.com/DavideCarvalho/aviary). Because a resolver is an
+ordinary class, register it as a provider and inject whatever you need:
+
+```ts
+// src/agent/session-actor.resolver.ts
+import type { Actor, ActorResolver } from '@dudousxd/nestjs-agent-core';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import type { Request } from 'express';
+
+@Injectable()
+export class SessionActorResolver implements ActorResolver {
+  resolve(req: unknown): Actor {
+    // `req` is the Express request; your auth guard has already populated `req.user`.
+    const user = (req as Request & { user?: { sub: string; roles: string[]; org: string } }).user;
+    if (!user) {
+      // Never fabricate a caller — refuse the turn instead.
+      throw new UnauthorizedException('No authenticated principal on the request.');
+    }
+    return { id: user.sub, roles: user.roles, tenantRef: user.org };
+  }
+}
+```
+
+Wire it through the async factory so Nest can inject it:
+
+```ts
+// src/app.module.ts
+import { AgentModule } from '@dudousxd/nestjs-agent';
+import { SessionActorResolver } from './agent/session-actor.resolver.js';
+
+@Module({
+  imports: [
+    AgentModule.forRootAsync({
+      inject: [SessionActorResolver],
+      useFactory: (actorResolver: SessionActorResolver) => ({
+        model: myModelProvider,
+        store: myAgentStore,
+        defaultRoles: ['ADMIN'],
+        actorResolver,
+      }),
+    }),
+  ],
+  providers: [SessionActorResolver],
+})
+export class AppModule {}
+```
+
+<Callout type="info">
+The resolver's only job is to turn a verified principal into `{ id, roles?, tenantRef? }`. Do the
+authentication (verify the JWT, load the session) in your guard/middleware as usual; the resolver just
+reads the result. If it can't produce a trustworthy actor, it should throw — that fails the turn closed.
+</Callout>
+
+---
+
+## Authorization: one gate per tool
+
+Once the actor is known, the loop checks it against each tool **before** running the handler. A tool
+declares **one** of two gates:
+
+| Gate | Declared as | Decided by | Falls back to |
+|---|---|---|---|
+| **roles** | `@AiTool({ roles: ['ADMIN'] })` | Built-in set-intersection | Module `defaultRoles` when `roles` omitted |
+| **ability** | `@AiTool({ ability: 'cache.purge' })` | `@dudousxd/nestjs-agent-authz` Gate | The role policy when no `ability` present |
+
+Both live on the same `ToolSpec`, so neither is required and apps that don't use authz simply rely on
+`roles`.
+
+### The built-in role policy
+
+The default `RolesPolicy` is a plain set-intersection: the actor passes if **any** of its roles is in
+the tool's allowed set. Omit `roles` on the tool and it falls back to the module's `defaultRoles`.
+
+```ts
+// effectively:
+can(actor, tool) {
+  const allowed = tool.roles ?? defaultRoles; // defaultRoles defaults to ['ADMIN']
+  return (actor.roles ?? []).some((role) => allowed.includes(role));
+}
+```
+
+```ts
+import { AiTool, type ToolHandler } from '@dudousxd/nestjs-agent';
+import { z } from 'zod';
+
+@AiTool({
+  name: 'listOrders',
+  kind: 'read',
+  description: 'List recent orders.',
+  input: z.object({ limit: z.number().max(100) }),
+  roles: ['ADMIN', 'SUPPORT'], // ADMIN or SUPPORT may call it
+})
+export class ListOrdersTool implements ToolHandler<{ limit: number }> {
+  async execute(input: { limit: number }) {
+    /* ... */
+  }
+}
+```
+
+An actor with `roles: []` (e.g. a `HeaderActorResolver` request that sent no `x-actor-role`) intersects
+with nothing and can call no tools — the fail-closed default.
+
+---
+
+## Ability-gated tools (`-authz`)
+
+For anything richer than role names — policies, ownership, per-resource rules — delegate to
+[`@dudousxd/nestjs-authz`](https://github.com/DavideCarvalho/aviary). Add `AgentAuthzModule`, and a tool's
+`ability` is checked via `gate.forUser(actor).allows(ability)`:
+
+```ts
+import { AuthzModule } from '@dudousxd/nestjs-authz';
+import { AgentModule } from '@dudousxd/nestjs-agent';
+import { AgentAuthzModule } from '@dudousxd/nestjs-agent-authz';
+
+@Module({
+  imports: [
+    AuthzModule.forRoot(/* your abilities & policies */),
+    AgentModule.forRoot({ /* model, store, actorResolver, ... */ }),
+    AgentAuthzModule.forRoot(),
+  ],
+})
+export class AppModule {}
+```
+
+```ts
+@AiTool({
+  name: 'purgeCache',
+  kind: 'action', // an action tool: never auto-executes, waits for HITL approval
+  description: 'Purge a cache key.',
+  input: z.object({ key: z.string() }),
+  ability: 'cache.purge', // delegated to the authz Gate
+})
+export class PurgeCacheTool implements ToolHandler<{ key: string }> {
+  async execute(input: { key: string }) {
+    /* ... */
+  }
+}
+```
+
+Under the hood `AgentAuthzModule` binds an `AuthzRolesPolicy` as the agent's `RolesPolicy`:
+
+- Tool **declares an `ability`** → decision goes to the Gate: `gate.forUser({ id, roles }).allows(ability)`.
+- Tool **has no `ability`** → falls through to the built-in role policy (its `fallbackRoles` default to
+  ADMIN-only, overridable via `AgentAuthzModule.forRoot({ fallbackRoles })`).
+
+<Callout type="info" title="The actor is all authz needs">
+The Gate is handed `{ id, roles }` derived from the actor — exactly what authz's default role resolver
+reads. No host user entity is required, so a role-based ability resolves from the same `roles` the
+built-in policy uses.
+</Callout>
+
+<Callout type="warn" title="AgentAuthzModule does not import AuthzModule">
+It injects the `Gate` from your app's global `AuthzModule`. Register `AuthzModule.forRoot(...)` once at
+the root; otherwise the `Gate` provider is missing and DI fails at boot.
+</Callout>
+
+---
+
+## Why this is safe by construction
+
+- **Identity is never invented.** No resolver → every request throws. The header resolver throws on a
+  missing `x-actor-id`. A custom resolver should throw when it can't verify a principal. There is no
+  code path where the agent runs as an unknown or default caller.
+- **Authorization is server-side and per-tool.** The model can *ask* to call any tool it can see, but the
+  loop runs the policy check against the resolved actor before the handler executes. A prompt can't talk
+  its way past a role intersection or a Gate denial.
+- **Fail-closed defaults.** Empty roles intersect with nothing; an unset tool `roles` falls back to
+  `defaultRoles` (ADMIN-only out of the box), and an ability with no matching policy is denied.
+
+---
+
+## Related
+
+- [Tools](/docs/agent/guides/tools) — the `@AiTool` surface where `roles` / `ability` and `kind` are declared
+- [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability) — how an `action` tool suspends for approval
+- [Cost & Governance](/docs/agent/guides/cost-and-governance) — the per-actor usage ledger and the governance console
+- [Governed SQL](/docs/agent/guides/governed-sql) — using `actor.tenantRef` to scope read-only SQL

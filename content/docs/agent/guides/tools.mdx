@@ -1,0 +1,258 @@
+---
+title: Tools
+description: Declaring agent tools with @AiTool — the decorator surface, read vs action, the ToolHandler interface, and the per-invocation context.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+A tool is how the model reaches into your app. You declare one as an ordinary NestJS injectable
+decorated with `@AiTool`; at boot the agent discovers it, registers its schema, and offers it to
+the model. The decorator is the **contract** — name, input shape, who may call it, and whether it
+runs on its own; the class body is your **domain**.
+
+---
+
+## Declaring a tool
+
+`@AiTool` marks a provider class as a tool. The class implements `ToolHandler` — a single
+`execute(input, ctx)` method. The `input` schema is validated before `execute` runs, so `input` is
+already parsed and typed by the time you touch it.
+
+```ts
+// src/tools/get-weather.tool.ts
+import { AiTool, type ToolHandler, type AiToolCtx } from '@dudousxd/nestjs-agent';
+import { z } from 'zod';
+
+@AiTool({
+  name: 'getWeather',
+  kind: 'read', // auto-executes; see read vs action below
+  description: 'Current weather for a city.',
+  input: z.object({ city: z.string() }),
+})
+export class GetWeatherTool implements ToolHandler<{ city: string }> {
+  async execute(input: { city: string }, ctx: AiToolCtx) {
+    return { tempC: 21, summary: 'partly cloudy' };
+  }
+}
+```
+
+Then list it in the module that imports `AgentModule` — the same place you'd list any provider:
+
+```ts
+@Module({
+  imports: [AgentModule.forRoot({ /* … */ })],
+  providers: [GetWeatherTool],
+})
+export class AppModule {}
+```
+
+That's the whole registration story. `AiToolDiscoveryService` walks every provider at boot, reads
+the `@AiTool` metadata, and registers each into the shared `ToolRegistry`. There is no separate
+`tools: [...]` array to keep in sync — if it's a provider and it's decorated, it's a tool.
+
+---
+
+## Tools are ordinary injectables
+
+Because a tool is a normal provider, it can inject anything else in your app — a repository, an HTTP
+client, a queue, another service. Constructor DI works exactly as it does anywhere in NestJS.
+
+```ts
+@AiTool({
+  name: 'countOpenOrders',
+  kind: 'read',
+  description: 'How many orders are currently open for a customer.',
+  input: z.object({ customerId: z.string() }),
+})
+export class CountOpenOrdersTool implements ToolHandler<{ customerId: string }> {
+  constructor(private readonly orders: OrdersService) {}
+
+  async execute(input: { customerId: string }, ctx: AiToolCtx) {
+    return { count: await this.orders.countOpen(input.customerId) };
+  }
+}
+```
+
+<Callout type="info" title="Discovered, not registered by hand">
+You never wire a tool into a registry yourself. The agent instruments nothing in your code — it
+only reads `@AiTool` metadata off providers you already declared. A decorated class with no
+`execute()` method is skipped with a warning rather than silently offered to the model.
+</Callout>
+
+---
+
+## The decorator surface
+
+Every option lives on the `@AiTool({ … })` object.
+
+| Option | Type | Required | Description |
+|---|---|---|---|
+| `name` | `string` | yes | The tool name the model calls. Unique across the registry. |
+| `kind` | `'read' \| 'action'` | yes | `read` auto-executes; `action` pauses for approval. See below. |
+| `description` | `string` | yes | What the model reads to decide when to call it. Write it for the model. |
+| `input` | Standard Schema | yes | Zod, Valibot, or ArkType. Validated before `execute` runs. |
+| `roles` | `string[]` | no | Roles allowed to invoke. Omit to inherit the module's `defaultRoles`. |
+| `ability` | `string` | no | An authz ability checked by an ability-aware policy instead of `roles`. |
+
+<Callout type="info" title="Standard Schema, not just Zod">
+`input` is a [Standard Schema](https://standardschema.dev), so Zod, Valibot, and ArkType all work.
+The parsed, typed value is what lands in your handler's first argument — the `I` in
+`ToolHandler<I>`. Keep that generic in sync with the schema and `input` is fully typed inside
+`execute`.
+</Callout>
+
+There's a third kind, `agent`, but you never author it. The library synthesizes an `agent`-kind
+delegate tool for each `delegatesTo` edge in a multi-agent setup; the loop handles it directly and
+your handler is never called. See [Multi-agent](/docs/agent/guides/multi-agent).
+
+---
+
+## `read` vs `action` — the crucial distinction
+
+`kind` decides whether a tool runs on its own or waits for a human. This is the single most
+important field on the decorator.
+
+| `kind` | Behavior | Use for |
+|---|---|---|
+| `read` | **Auto-executes.** The loop calls `execute` as soon as the model asks, feeds the result back, and keeps streaming. | Lookups, queries, anything side-effect-free and safe to run unattended. |
+| `action` | **Never auto-executes.** The loop suspends and waits for an explicit approve/reject before `execute` is ever called. | Anything that mutates, spends, sends, or deletes. |
+
+```ts
+@AiTool({
+  name: 'purgeCache',
+  kind: 'action', // the run pauses here — execute() does not fire until approval
+  description: 'Purge a cache key.',
+  input: z.object({ key: z.string() }),
+})
+export class PurgeCacheTool implements ToolHandler<{ key: string }> {
+  constructor(private readonly cache: CacheService) {}
+
+  async execute(input: { key: string }, ctx: AiToolCtx) {
+    await this.cache.purge(input.key);
+    return { purged: input.key };
+  }
+}
+```
+
+When the model calls an `action` tool, the run pauses and surfaces a pending tool-call over the
+wire; a human hits `POST /agent/tool-call/approve` (or `/reject`) to continue. Under
+`durable: true` that pause is a real durable suspend — checkpointed to the state store and
+resumable across restarts. Either way, `execute` runs only after approval.
+
+<Callout type="warn" title="Pick the kind by side effects, not by convenience">
+`read` tools run without a human in the loop, so a tool that mutates or spends must be `action`.
+The gate is the `kind`, not the name — a `read` tool that quietly writes is a governance hole. The
+full approval and durability mechanics live in
+[Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability).
+</Callout>
+
+---
+
+## The `ToolHandler` interface
+
+The contract is one method:
+
+```ts
+export interface ToolHandler<I = unknown> {
+  execute(input: I, ctx: AiToolCtx): Promise<unknown>;
+}
+```
+
+- `input` — the parsed, schema-validated input (the `I` generic).
+- `ctx` — the per-invocation `AiToolCtx` (below).
+- return — anything JSON-serializable; it's fed back to the model as the tool result.
+
+Throwing from `execute` surfaces the error to the loop rather than crashing the turn — return a
+structured error shape if you want the model to reason about the failure.
+
+---
+
+## The tool context (`AiToolCtx`)
+
+The second argument gives you everything about the invocation without reaching for request-scoped
+globals. It's the same context whether the turn runs inline or as a durable workflow.
+
+| Field | Type | What it is |
+|---|---|---|
+| `actor` | `Actor` | The full caller — `{ id, roles?, tenantRef? }`. Your source of truth for scoping. |
+| `actorId` | `string` | The caller's id (shorthand for `actor.id`). |
+| `tenantRef` | `string?` | The caller's tenant, when the actor carries one. |
+| `threadId` | `string` | The conversation thread this turn belongs to. |
+| `runId` | `string` | This turn's run id. |
+| `requestId` | `string` | The originating request id. |
+| `persona` | `Persona?` | The active persona, if one was selected. |
+| `pageContext` | `PageContext?` | Host-supplied context about where the turn was started. |
+| `host` | `unknown?` | An optional host handle (e.g. an ORM `EntityManager`) the app threads through. |
+
+The actor is the load-bearing field: never derive scope from tool input, derive it from `ctx.actor`.
+
+```ts
+async execute(input: { customerId: string }, ctx: AiToolCtx) {
+  // Scope to the caller's tenant — from the context, not the input.
+  return this.orders.findOpen({
+    customerId: input.customerId,
+    tenantRef: ctx.actor.tenantRef,
+  });
+}
+```
+
+<Callout type="warn" title="Scope from the actor, never from the input">
+The model composes tool input from the conversation, so treating an input field as authority lets a
+prompt widen its own scope. Read `id` / `roles` / `tenantRef` off `ctx.actor` — the actor is
+resolved server-side by your `ActorResolver`, not by the model.
+</Callout>
+
+---
+
+## Authorization gates
+
+A tool declares **one** of two gates. Both are enforced by the loop before `execute` runs, so an
+unauthorized call never reaches your code.
+
+<Tabs items={['roles', 'ability']}>
+<Tab value="roles">
+Built-in role policy. The actor passes if any of its `roles` intersects the tool's. Omit `roles`
+and the tool inherits the module's `defaultRoles`.
+
+```ts
+@AiTool({
+  name: 'listUsers',
+  kind: 'read',
+  description: 'List users in the org.',
+  input: z.object({}),
+  roles: ['ADMIN', 'SUPPORT'],
+})
+export class ListUsersTool implements ToolHandler { /* … */ }
+```
+</Tab>
+<Tab value="ability">
+Delegated policy. With `AgentAuthzModule` wired, `ability` is checked via
+`gate.forUser(actor).allows(ability)` — your `@dudousxd/nestjs-authz` abilities decide. Tools
+without an `ability` fall back to the role policy, so non-authz apps are unaffected.
+
+```ts
+@AiTool({
+  name: 'purgeCache',
+  kind: 'action',
+  description: 'Purge a cache key.',
+  input: z.object({ key: z.string() }),
+  ability: 'cache.purge',
+})
+export class PurgeCacheTool implements ToolHandler { /* … */ }
+```
+</Tab>
+</Tabs>
+
+The full model — the `ActorResolver`, why there's no insecure default, and roles vs abilities — is
+in [Identity & Authorization](/docs/agent/guides/identity-and-authorization).
+
+---
+
+## Related
+
+- [Identity & Authorization](/docs/agent/guides/identity-and-authorization) — `ActorResolver`, the actor, roles vs abilities
+- [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability) — how an `action` tool suspends and resumes
+- [Multi-agent](/docs/agent/guides/multi-agent) — the synthesized `agent`-kind delegate tools
+- [Governed SQL](/docs/agent/guides/governed-sql) — a prebuilt read-only SQL tool
+- [Getting Started](/docs/agent/getting-started) — install, first tool, first turn
