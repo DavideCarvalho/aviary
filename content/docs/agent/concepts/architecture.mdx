@@ -20,7 +20,7 @@ an answer:
 
 | SPI | What it abstracts | Shipped implementation(s) |
 |---|---|---|
-| `ModelProvider` | Calling the LLM for one turn | `aiSdkModel(model)` (`-ai-sdk`, any Vercel AI SDK v6 `LanguageModel`); `FakeModelProvider` (`-testing`) |
+| `ModelProvider` | Calling the LLM for one turn | `aiSdkModel(model)` (`-ai-sdk`, any Vercel AI SDK v7 `LanguageModel`); `FakeModelProvider` (`-testing`) |
 | `AgentStore` | Threads, messages, tool calls (the write path) | MikroORM or Drizzle (`-store-mikro-orm`, `-store-drizzle`); `InMemoryAgentStore` (`-testing`) |
 | `AgentGovernanceQueries` | Spend/usage read-model (the analytics path) | Same MikroORM/Drizzle store packages; `InMemoryGovernanceQueries` (`-testing`) |
 | `ActorResolver` | Who's calling | `HeaderActorResolver` (`-nestjs`, gateway-only); `UnconfiguredActorResolver` (throws — the module's real default) |

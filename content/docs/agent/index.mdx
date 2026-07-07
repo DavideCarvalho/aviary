@@ -1,6 +1,6 @@
 ---
 title: Agent
-description: A governed, durable-backed AI agent for NestJS — chat, tool-calling, role/persona governance, token quota, cost tracking, and human-in-the-loop approval, with each turn running as a replay-safe durable workflow and wired into the ecosystem's durable, telescope, and diagnostics glue.
+description: A governed AI agent for NestJS — chat, tool-calling, role/persona governance, token quota, cost tracking, and human-in-the-loop approval, with each turn optionally a replay-safe durable workflow and wired into the ecosystem's durable, telescope, and diagnostics glue.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -43,10 +43,10 @@ durable in production without touching your tools or UI.
   tool; each delegation is a durable child run.
 - **The data satellite** — `@dudousxd/nestjs-agent-data` packages governed, read-only SQL
   (AST-validated, RBAC + tenant scoping) as an opt-in tool.
-- **A React frontend** — `@dudousxd/nestjs-agent-react`'s `useAgentChat` (Vercel AI SDK v6) plus
+- **A React frontend** — `@dudousxd/nestjs-agent-react`'s `useAgentChat` (Vercel AI SDK v7) plus
   styling-agnostic chat components and an optional markdown renderer.
 - **Zero provider code** — `@dudousxd/nestjs-agent-ai-sdk`'s `aiSdkModel(model)` adapts any Vercel AI
-  SDK v6 `LanguageModel` to the `ModelProvider` SPI, the first of a family of provider adapters, so an
+  SDK v7 `LanguageModel` to the `ModelProvider` SPI, the first of a family of provider adapters, so an
   app supplies `model` without writing a wrapper.
 
 ## The four glue points

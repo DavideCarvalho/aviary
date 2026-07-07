@@ -1,12 +1,12 @@
 ---
 title: Frontend
-description: Wire a React chat UI to the agent with useAgentChat — the AI SDK v6 transport, threads, personas, quota, cancel, HITL approve/reject, and styling-agnostic components.
+description: Wire a React chat UI to the agent with useAgentChat — the AI SDK v7 transport, threads, personas, quota, cancel, HITL approve/reject, and styling-agnostic components.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
 `@dudousxd/nestjs-agent-react` connects a React app to the `/agent` endpoints. Its `useAgentChat`
-hook wraps the Vercel AI SDK v6 `useChat` with an `AgentChatTransport` that speaks the backend's
+hook wraps the Vercel AI SDK v7 `useChat` with an `AgentChatTransport` that speaks the backend's
 `/agent/chat` SSE protocol, then layers on everything the REST surface exposes: thread history,
 personas, quota, cancel, and the human-in-the-loop approve/reject. The components ship **no styles**
 — every action is a callback and every class is yours via `classNames`.

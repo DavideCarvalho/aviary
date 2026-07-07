@@ -18,7 +18,7 @@ ordinary injectable, register the module, and hit the SSE chat endpoint. The age
 - **NestJS 10+** (both v10 and v11 are supported)
 - **TypeScript 5+** with `experimentalDecorators` and `emitDecoratorMetadata` enabled
 - A **model provider** — anything implementing the `ModelProvider` SPI. The zero-boilerplate path is
-  `aiSdkModel(...)` from `@dudousxd/nestjs-agent-ai-sdk`, which adapts any Vercel AI SDK v6
+  `aiSdkModel(...)` from `@dudousxd/nestjs-agent-ai-sdk`, which adapts any Vercel AI SDK v7
   `LanguageModel` so you write no provider code; e.g. `aiSdkModel(anthropic('claude-sonnet-4-6'))`. Any
   other `ModelProvider` works too, and for offline tests there's a deterministic fake in
   `@dudousxd/nestjs-agent-testing`.

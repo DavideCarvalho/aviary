@@ -17,7 +17,7 @@ module, the React frontend). Which tables, which tenant column, which roles, whi
 |---|---|
 | [`-core`](/docs/agent/packages/core) | Framework-agnostic agent loop, tool registry, and the SPIs (`ModelProvider`, `AgentStore`, `AgentGovernanceQueries`, `ActorResolver`, `RolesPolicy`, `TokenStreamSink`, `QuotaStore`). |
 | [`(umbrella)`](/docs/agent/packages/nestjs) | NestJS `AgentModule` + `@AiTool` + the `/agent` controllers; the `/durable` subpath for the durable runner. |
-| [`-ai-sdk`](/docs/agent/packages/ai-sdk) | `aiSdkModel(model)` adapts any Vercel AI SDK v6 `LanguageModel` to `ModelProvider` — zero provider code. |
+| [`-ai-sdk`](/docs/agent/packages/ai-sdk) | `aiSdkModel(model)` adapts any Vercel AI SDK v7 `LanguageModel` to `ModelProvider` — zero provider code. |
 | [`-react`](/docs/agent/packages/react) | `useAgentChat` + styling-agnostic chat components for a browser frontend. |
 | [`-data`](/docs/agent/packages/data) | `createExecuteSqlTool` — governed, read-only SQL as a prebuilt tool. |
 | [`-dashboard`](/docs/agent/packages/dashboard) | Standalone AI-gateway governance console (bundled SPA + API), no Telescope required. |
@@ -50,7 +50,7 @@ either, both, or neither.
 <Cards>
   <Card title="Core" href="/docs/agent/packages/core" description="The loop, the tool registry, and every SPI." />
   <Card title="NestJS (umbrella)" href="/docs/agent/packages/nestjs" description="AgentModule, @AiTool, the /agent controllers, and /durable." />
-  <Card title="AI SDK adapter" href="/docs/agent/packages/ai-sdk" description="aiSdkModel — zero provider code for any Vercel AI SDK v6 model." />
+  <Card title="AI SDK adapter" href="/docs/agent/packages/ai-sdk" description="aiSdkModel — zero provider code for any Vercel AI SDK v7 model." />
   <Card title="React" href="/docs/agent/packages/react" description="useAgentChat and styling-agnostic chat components." />
   <Card title="Data" href="/docs/agent/packages/data" description="Governed, read-only SQL as a prebuilt tool." />
   <Card title="Dashboard" href="/docs/agent/packages/dashboard" description="The standalone AI-gateway governance console." />

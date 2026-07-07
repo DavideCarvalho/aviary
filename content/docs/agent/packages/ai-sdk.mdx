@@ -1,6 +1,6 @@
 ---
 title: "@dudousxd/nestjs-agent-ai-sdk"
-description: aiSdkModel adapts any Vercel AI SDK v6 LanguageModel to the ModelProvider SPI — streaming, tool-call translation, cache-aware usage, and gateway cost, with zero provider code.
+description: aiSdkModel adapts any Vercel AI SDK v7 LanguageModel to the ModelProvider SPI — streaming, tool-call translation, cache-aware usage, and gateway cost, with zero provider code.
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
@@ -19,7 +19,7 @@ import { Callout } from 'fumadocs-ui/components/callout';
   </Tab>
 </Tabs>
 
-`aiSdkModel(model, opts?)` is the whole package: it wraps any Vercel AI SDK v6 `LanguageModel` so
+`aiSdkModel(model, opts?)` is the whole package: it wraps any Vercel AI SDK v7 `LanguageModel` so
 `AgentModule.forRoot({ model })` needs no hand-written `ModelProvider`. Pick a model from any AI SDK
 provider package and pass it straight in.
 
