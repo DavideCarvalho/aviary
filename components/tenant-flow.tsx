@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 // Interactive operator+tenants scene for the tenancy docs. Hand-authored SVG, no animation deps —
 // a token is moved between waypoints and CSS-transitions there. Send a run from a tenant and watch
@@ -8,34 +8,26 @@
 // Degrades without JS: SSR renders the static topology (operator · transport · two tenants) with a
 // prompt to interact. Theme-aware via Fumadocs' `--color-fd-*` variables; respects reduced motion.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from 'react';
 
-const ink = "var(--color-fd-foreground)";
-const muted = "var(--color-fd-muted-foreground)";
-const cardBg = "var(--color-fd-card)";
-const border = "var(--color-fd-border)";
-const accent = "var(--color-fd-primary)";
-const RED = "#e5484d";
+const ink = 'var(--color-fd-foreground)';
+const muted = 'var(--color-fd-muted-foreground)';
+const cardBg = 'var(--color-fd-card)';
+const border = 'var(--color-fd-border)';
+const accent = 'var(--color-fd-primary)';
+const RED = '#e5484d';
+// Semantic success green (named OK — `GREEN` below is the green tenant's waypoint).
+const OK = '#30a46c';
 
-const tintAccent =
-  "color-mix(in srgb, var(--color-fd-primary) 14%, var(--color-fd-card))";
-const tintAccentSoft =
-  "color-mix(in srgb, var(--color-fd-primary) 7%, var(--color-fd-card))";
-const neutral =
-  "color-mix(in srgb, var(--color-fd-foreground) 4%, var(--color-fd-card))";
-const tintRed = "color-mix(in srgb, #e5484d 13%, var(--color-fd-card))";
-const mono = "ui-monospace, SFMono-Regular, Menlo, monospace";
+const tintAccent = 'color-mix(in srgb, var(--color-fd-primary) 14%, var(--color-fd-card))';
+const tintAccentSoft = 'color-mix(in srgb, var(--color-fd-primary) 7%, var(--color-fd-card))';
+const neutral = 'color-mix(in srgb, var(--color-fd-foreground) 4%, var(--color-fd-card))';
+const tintRed = 'color-mix(in srgb, #e5484d 13%, var(--color-fd-card))';
+const mono = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
-type Tone = "go" | "deny";
-type Highlight = "none" | "op" | "blue" | "green" | "op-deny" | "blue-deny";
-type Stage = {
-  x: number;
-  y: number;
-  label: string;
-  tone: Tone;
-  hi: Highlight;
-  caption: string;
-};
+type Tone = 'go' | 'deny' | 'ok';
+type Highlight = 'none' | 'op' | 'blue' | 'green' | 'op-deny' | 'blue-deny';
+type Stage = { x: number; y: number; label: string; tone: Tone; hi: Highlight; caption: string };
 
 const BLUE = { x: 524, y: 88 };
 const GREEN = { x: 524, y: 216 };
@@ -43,57 +35,51 @@ const BUS_B = { x: 430, y: 118 };
 const BUS_G = { x: 430, y: 188 };
 const OP = { x: 232, y: 150 };
 
-function happyPath(name: "blue" | "green"): Stage[] {
-  const t = name === "blue" ? BLUE : GREEN;
-  const bus = name === "blue" ? BUS_B : BUS_G;
+function happyPath(name: 'blue' | 'green'): Stage[] {
+  const t = name === 'blue' ? BLUE : GREEN;
+  const bus = name === 'blue' ? BUS_B : BUS_G;
   return [
     {
       ...t,
-      label: "start-run",
-      tone: "go",
-      hi: "none",
+      label: 'start-run',
+      tone: 'go',
+      hi: 'none',
       caption: `${name} asks the operator to create a run (start-run).`,
     },
-    {
-      ...bus,
-      label: "start-run",
-      tone: "go",
-      hi: "none",
-      caption: "…proxied over the transport.",
-    },
+    { ...bus, label: 'start-run', tone: 'go', hi: 'none', caption: '…proxied over the transport.' },
     {
       ...OP,
-      label: "creating…",
-      tone: "go",
-      hi: "op",
+      label: 'creating…',
+      tone: 'go',
+      hi: 'op',
       caption: `Operator creates run@${name}, stamped namespace=${name} · status pending.`,
     },
     {
       ...bus,
-      label: "dispatch",
-      tone: "go",
-      hi: "none",
+      label: 'dispatch',
+      tone: 'go',
+      hi: 'none',
       caption: `Operator dispatches it to ${name}'s queue (handler@${name}).`,
     },
     {
       ...t,
-      label: "running",
-      tone: "go",
+      label: 'running',
+      tone: 'go',
       hi: name,
       caption: `${name} runs the step (store-less — it does the work).`,
     },
     {
       ...bus,
-      label: "reply",
-      tone: "go",
-      hi: "none",
+      label: 'reply',
+      tone: 'go',
+      hi: 'none',
       caption: `${name} replies with the result over the transport.`,
     },
     {
       ...OP,
-      label: "completed",
-      tone: "go",
-      hi: "op",
+      label: 'completed',
+      tone: 'ok',
+      hi: 'op',
       caption: `Operator records the result. run@${name} completed.`,
     },
   ];
@@ -102,38 +88,38 @@ function happyPath(name: "blue" | "green"): Stage[] {
 const CROSS_TENANT: Stage[] = [
   {
     ...BLUE,
-    label: "read run@green",
-    tone: "deny",
-    hi: "none",
-    caption: "Blue asks to read a run that belongs to green.",
+    label: 'read run@green',
+    tone: 'deny',
+    hi: 'none',
+    caption: 'Blue asks to read a run that belongs to green.',
   },
   {
     ...BUS_B,
-    label: "read run@green",
-    tone: "deny",
-    hi: "none",
-    caption: "Request proxied to the operator.",
+    label: 'read run@green',
+    tone: 'deny',
+    hi: 'none',
+    caption: 'Request proxied to the operator.',
   },
   {
     ...OP,
-    label: "checking…",
-    tone: "deny",
-    hi: "op-deny",
-    caption: "Operator loads the run, sees namespace=green ≠ blue → rejects.",
+    label: 'checking…',
+    tone: 'deny',
+    hi: 'op-deny',
+    caption: 'Operator loads the run, sees namespace=green ≠ blue → rejects.',
   },
   {
     ...BUS_B,
-    label: "cross-tenant ✗",
-    tone: "deny",
-    hi: "none",
-    caption: "cross-tenant error returned — before any read runs.",
+    label: 'cross-tenant ✗',
+    tone: 'deny',
+    hi: 'none',
+    caption: 'cross-tenant error returned — before any read runs.',
   },
   {
     ...BLUE,
-    label: "denied",
-    tone: "deny",
-    hi: "blue-deny",
-    caption: "A tenant only ever sees its own runs. Isolation holds.",
+    label: 'denied',
+    tone: 'deny',
+    hi: 'blue-deny',
+    caption: 'A tenant only ever sees its own runs. Isolation holds.',
   },
 ];
 
@@ -156,24 +142,20 @@ function Node({
   title: string;
   rows: string[];
   primary?: boolean;
-  highlight: "none" | "go" | "deny";
+  highlight: 'none' | 'go' | 'deny';
   tip: { title: string; body: string };
-  onTip: (
-    t: { ax: number; ay: number; title: string; body: string } | null,
-  ) => void;
+  onTip: (t: { ax: number; ay: number; title: string; body: string } | null) => void;
 }) {
-  const lit = highlight !== "none";
-  const ring = highlight === "deny" ? RED : accent;
-  const fill =
-    highlight === "deny" ? tintRed : highlight === "go" ? tintAccent : neutral;
+  const lit = highlight !== 'none';
+  const ring = highlight === 'deny' ? RED : accent;
+  const fill = highlight === 'deny' ? tintRed : highlight === 'go' ? tintAccent : neutral;
   const stroke = lit ? ring : border;
-  const enter = () =>
-    onTip({ ax: x + w / 2, ay: y, title: tip.title, body: tip.body });
+  const enter = () => onTip({ ax: x + w / 2, ay: y, title: tip.title, body: tip.body });
   const leave = () => onTip(null);
   return (
     <g
       className="tf-anim"
-      style={{ cursor: "help" }}
+      style={{ cursor: 'help' }}
       tabIndex={0}
       role="img"
       aria-label={`${tip.title}. ${tip.body}`}
@@ -190,7 +172,7 @@ function Node({
           width={w + 10}
           height={h + 10}
           rx={16}
-          style={{ fill: "none", stroke: ring, strokeWidth: 2 }}
+          style={{ fill: 'none', stroke: ring, strokeWidth: 2 }}
         />
       ) : null}
       <rect
@@ -203,21 +185,8 @@ function Node({
         style={{ fill, stroke, strokeWidth: lit || primary ? 1.5 : 1 }}
         filter="url(#tf-soft)"
       />
-      {primary ? (
-        <rect
-          x={x}
-          y={y}
-          width={4}
-          height={h}
-          rx={2}
-          style={{ fill: accent }}
-        />
-      ) : null}
-      <text
-        x={x + 17}
-        y={y + 26}
-        style={{ fill: ink, fontSize: 13.5, fontWeight: 600 }}
-      >
+      {primary ? <rect x={x} y={y} width={4} height={h} rx={2} style={{ fill: accent }} /> : null}
+      <text x={x + 17} y={y + 26} style={{ fill: ink, fontSize: 13.5, fontWeight: 600 }}>
         {title}
       </text>
       {rows.map((row, i) => (
@@ -254,17 +223,14 @@ function Wire({
   lx: number;
   ly: number;
   tip: { title: string; body: string };
-  onTip: (
-    t: { ax: number; ay: number; title: string; body: string } | null,
-  ) => void;
+  onTip: (t: { ax: number; ay: number; title: string; body: string } | null) => void;
 }) {
   const w = label.length * 6.2 + 14;
-  const enter = () =>
-    onTip({ ax: lx, ay: ly - 11, title: tip.title, body: tip.body });
+  const enter = () => onTip({ ax: lx, ay: ly - 11, title: tip.title, body: tip.body });
   const leave = () => onTip(null);
   return (
     <g
-      style={{ cursor: "help" }}
+      style={{ cursor: 'help' }}
       tabIndex={0}
       role="img"
       aria-label={`${tip.title}. ${tip.body}`}
@@ -305,19 +271,14 @@ export function TenantFlow() {
   const [scenario, setScenario] = useState<Stage[]>([]);
   const [stage, setStage] = useState(-1);
   const [reduced, setReduced] = useState(false);
-  const [tip, setTip] = useState<{
-    left: number;
-    top: number;
-    title: string;
-    body: string;
-  } | null>(null);
+  const [tip, setTip] = useState<{ left: number; top: number; title: string; body: string } | null>(
+    null,
+  );
   const svgRef = useRef<SVGSVGElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   // Map an SVG-space anchor to a pixel position within the wrapper so the HTML tooltip stays crisp.
-  function onTip(
-    t: { ax: number; ay: number; title: string; body: string } | null,
-  ) {
+  function onTip(t: { ax: number; ay: number; title: string; body: string } | null) {
     if (!t) {
       setTip(null);
       return;
@@ -336,11 +297,11 @@ export function TenantFlow() {
   }
 
   useEffect(() => {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     const on = () => setReduced(mq.matches);
     on();
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
   }, []);
 
   useEffect(() => {
@@ -355,22 +316,22 @@ export function TenantFlow() {
   }
 
   const active = stage >= 0 ? scenario[stage] : undefined;
-  const hi = active?.hi ?? "none";
-  const opHi = hi === "op" ? "go" : hi === "op-deny" ? "deny" : "none";
-  const blueHi = hi === "blue" ? "go" : hi === "blue-deny" ? "deny" : "none";
-  const greenHi = hi === "green" ? "go" : "none";
-  const tone = active?.tone === "deny" ? RED : accent;
+  const hi = active?.hi ?? 'none';
+  const opHi = hi === 'op' ? 'go' : hi === 'op-deny' ? 'deny' : 'none';
+  const blueHi = hi === 'blue' ? 'go' : hi === 'blue-deny' ? 'deny' : 'none';
+  const greenHi = hi === 'green' ? 'go' : 'none';
+  const tone = active?.tone === 'deny' ? RED : active?.tone === 'ok' ? OK : accent;
 
   const pill = {
-    font: "inherit",
+    font: 'inherit',
     fontSize: 12.5,
     lineHeight: 1,
-    color: "var(--color-fd-foreground)",
-    background: "var(--color-fd-card)",
-    border: "1px solid var(--color-fd-border)",
+    color: 'var(--color-fd-foreground)',
+    background: 'var(--color-fd-card)',
+    border: '1px solid var(--color-fd-border)',
     borderRadius: 9,
-    padding: "7px 12px",
-    cursor: "pointer",
+    padding: '7px 12px',
+    cursor: 'pointer',
   } as const;
 
   return (
@@ -385,7 +346,7 @@ export function TenantFlow() {
         @keyframes tf-ping { 0% { opacity: .5 } 70%, 100% { opacity: 0 } }
         @media (prefers-reduced-motion: reduce) { .tf-anim, .tf-token { transition: none } .tf-ping { animation: none; opacity: 0 } }
       `}</style>
-      <div ref={wrapRef} style={{ position: "relative" }}>
+      <div ref={wrapRef} style={{ position: 'relative' }}>
         <svg
           ref={svgRef}
           viewBox="0 0 780 300"
@@ -394,34 +355,22 @@ export function TenantFlow() {
           aria-label="Interactive operator and tenants: a run travels the transport, and cross-tenant reads are rejected"
         >
           <title>
-            A control-plane operator and two tenant workers wired over the
-            transport. Enqueue a run to watch start-run, dispatch and reply
-            travel between a tenant and the operator; or read another tenant's
-            run to see the operator reject it with a cross-tenant error.
+            A control-plane operator and two tenant workers wired over the transport. Enqueue a run
+            to watch start-run, dispatch and reply travel between a tenant and the operator; or read
+            another tenant's run to see the operator reject it with a cross-tenant error.
           </title>
           <defs>
             <filter id="tf-soft" x="-10%" y="-10%" width="120%" height="140%">
-              <feDropShadow
-                dx="0"
-                dy="3"
-                stdDeviation="5"
-                floodOpacity="0.10"
-              />
+              <feDropShadow dx="0" dy="3" stdDeviation="5" floodOpacity="0.10" />
             </filter>
             <filter id="tf-glow" x="-80%" y="-80%" width="260%" height="260%">
-              <feDropShadow
-                dx="0"
-                dy="0"
-                stdDeviation="5"
-                floodColor={tone}
-                floodOpacity="0.55"
-              />
+              <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor={tone} floodOpacity="0.55" />
             </filter>
           </defs>
 
           {/* Transport bus. */}
           <g
-            style={{ cursor: "help" }}
+            style={{ cursor: 'help' }}
             tabIndex={0}
             role="img"
             aria-label="Transport — the broker every tenant-operator message travels over"
@@ -429,8 +378,8 @@ export function TenantFlow() {
               onTip({
                 ax: 400,
                 ay: 60,
-                title: "Transport",
-                body: "The broker (Redis, or your DB). Every tenant↔operator message travels here — a tenant never touches the store directly.",
+                title: 'Transport',
+                body: 'The broker (Redis, or your DB). Every tenant↔operator message travels here — a tenant never touches the store directly.',
               })
             }
             onMouseLeave={() => onTip(null)}
@@ -438,8 +387,8 @@ export function TenantFlow() {
               onTip({
                 ax: 400,
                 ay: 60,
-                title: "Transport",
-                body: "The broker (Redis, or your DB). Every tenant↔operator message travels here — a tenant never touches the store directly.",
+                title: 'Transport',
+                body: 'The broker (Redis, or your DB). Every tenant↔operator message travels here — a tenant never touches the store directly.',
               })
             }
             onBlur={() => onTip(null)}
@@ -482,8 +431,8 @@ export function TenantFlow() {
             ly={133}
             onTip={onTip}
             tip={{
-              title: "Reads & control",
-              body: "getRunDetail, listRuns, cancel, retry… proxied to the operator and answered on a correlated reply.",
+              title: 'Reads & control',
+              body: 'getRunDetail, listRuns, cancel, retry… proxied to the operator and answered on a correlated reply.',
             }}
           />
           <Wire
@@ -496,8 +445,8 @@ export function TenantFlow() {
             ly={92}
             onTip={onTip}
             tip={{
-              title: "run@blue channel",
-              body: "blue’s run lifecycle rides here: start-run out, dispatch back to handler@blue, reply out.",
+              title: 'run@blue channel',
+              body: 'blue’s run lifecycle rides here: start-run out, dispatch back to handler@blue, reply out.',
             }}
           />
           <Wire
@@ -510,8 +459,8 @@ export function TenantFlow() {
             ly={212}
             onTip={onTip}
             tip={{
-              title: "run@green channel",
-              body: "green’s run lifecycle rides here: start-run out, dispatch back to handler@green, reply out.",
+              title: 'run@green channel',
+              body: 'green’s run lifecycle rides here: start-run out, dispatch back to handler@green, reply out.',
             }}
           />
 
@@ -525,14 +474,14 @@ export function TenantFlow() {
             highlight={opHi}
             title="Control plane · operator"
             rows={[
-              "engine · store · dashboard",
-              "namespace: — (drives all)",
-              "sees every tenant’s runs",
+              'engine · store · dashboard',
+              'namespace: — (drives all)',
+              'sees every tenant’s runs',
             ]}
             onTip={onTip}
             tip={{
-              title: "Operator (control plane)",
-              body: "Owns the store + dashboard and drives runs of every namespace. Its own namespace is unset, so it sees all tenants.",
+              title: 'Operator (control plane)',
+              body: 'Owns the store + dashboard and drives runs of every namespace. Its own namespace is unset, so it sees all tenants.',
             }}
           />
           <Node
@@ -542,14 +491,11 @@ export function TenantFlow() {
             h={96}
             highlight={blueHi}
             title="Tenant · blue"
-            rows={[
-              "DURABLE_TENANT=blue · no store",
-              "handler@blue · ProxyRunGateway",
-            ]}
+            rows={['DURABLE_TENANT=blue · no store', 'handler@blue · ProxyRunGateway']}
             onTip={onTip}
             tip={{
-              title: "Tenant · blue",
-              body: "A store-less worker. DURABLE_TENANT=blue → queues suffixed handler@blue, runs stamped blue, reads/control proxied to the operator.",
+              title: 'Tenant · blue',
+              body: 'A store-less worker. DURABLE_TENANT=blue → queues suffixed handler@blue, runs stamped blue, reads/control proxied to the operator.',
             }}
           />
           <Node
@@ -559,14 +505,11 @@ export function TenantFlow() {
             h={96}
             highlight={greenHi}
             title="Tenant · green"
-            rows={[
-              "DURABLE_TENANT=green · no store",
-              "handler@green · ProxyRunGateway",
-            ]}
+            rows={['DURABLE_TENANT=green · no store', 'handler@green · ProxyRunGateway']}
             onTip={onTip}
             tip={{
-              title: "Tenant · green",
-              body: "A store-less worker. DURABLE_TENANT=green → queues suffixed handler@green, runs stamped green, reads/control proxied to the operator.",
+              title: 'Tenant · green',
+              body: 'A store-less worker. DURABLE_TENANT=green → queues suffixed handler@green, runs stamped green, reads/control proxied to the operator.',
             }}
           />
 
@@ -578,14 +521,11 @@ export function TenantFlow() {
                 const dir = active.x < 330 ? 1 : active.x > 470 ? -1 : 0;
                 const chipX = dir === 0 ? -lw / 2 : dir > 0 ? 18 : -18 - lw;
                 const chipY = dir === 0 ? -36 : -10;
-                const textX =
-                  dir === 0 ? 0 : dir > 0 ? 18 + lw / 2 : -18 - lw / 2;
+                const textX = dir === 0 ? 0 : dir > 0 ? 18 + lw / 2 : -18 - lw / 2;
                 return (
                   <g
                     className="tf-token"
-                    style={{
-                      transform: `translate(${active.x}px, ${active.y}px)`,
-                    }}
+                    style={{ transform: `translate(${active.x}px, ${active.y}px)` }}
                   >
                     {active.label ? (
                       <g>
@@ -601,11 +541,7 @@ export function TenantFlow() {
                           x={textX}
                           y={chipY + 14}
                           textAnchor="middle"
-                          style={{
-                            fill: tone,
-                            fontSize: 10.5,
-                            fontFamily: mono,
-                          }}
+                          style={{ fill: tone, fontSize: 10.5, fontFamily: mono }}
                         >
                           {active.label}
                         </text>
@@ -624,36 +560,32 @@ export function TenantFlow() {
         {tip ? (
           <div
             style={{
-              position: "absolute",
+              position: 'absolute',
               left: tip.left,
               top: tip.top,
-              transform: "translate(-50%, calc(-100% - 12px))",
+              transform: 'translate(-50%, calc(-100% - 12px))',
               width: 220,
-              pointerEvents: "none",
+              pointerEvents: 'none',
               zIndex: 5,
-              background: "var(--color-fd-card)",
-              border: "1px solid var(--color-fd-border)",
+              background: 'var(--color-fd-card)',
+              border: '1px solid var(--color-fd-border)',
               borderRadius: 10,
-              padding: "8px 11px",
-              boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+              padding: '8px 11px',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
             }}
           >
             <div
               style={{
                 fontSize: 12.5,
                 fontWeight: 700,
-                color: "var(--color-fd-foreground)",
+                color: 'var(--color-fd-foreground)',
                 marginBottom: 3,
               }}
             >
               {tip.title}
             </div>
             <div
-              style={{
-                fontSize: 11.5,
-                lineHeight: 1.4,
-                color: "var(--color-fd-muted-foreground)",
-              }}
+              style={{ fontSize: 11.5, lineHeight: 1.4, color: 'var(--color-fd-muted-foreground)' }}
             >
               {tip.body}
             </div>
@@ -663,26 +595,12 @@ export function TenantFlow() {
 
       {/* Controls. */}
       <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          gap: 8,
-          marginTop: 14,
-        }}
+        style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 14 }}
       >
-        <button
-          type="button"
-          style={pill}
-          onClick={() => run(happyPath("blue"))}
-        >
+        <button type="button" style={pill} onClick={() => run(happyPath('blue'))}>
           ▶ Enqueue run@blue
         </button>
-        <button
-          type="button"
-          style={pill}
-          onClick={() => run(happyPath("green"))}
-        >
+        <button type="button" style={pill} onClick={() => run(happyPath('green'))}>
           ▶ Enqueue run@green
         </button>
         <button
@@ -694,7 +612,7 @@ export function TenantFlow() {
         </button>
         <button
           type="button"
-          style={{ ...pill, marginLeft: "auto" }}
+          style={{ ...pill, marginLeft: 'auto' }}
           onClick={() => {
             setStage(-1);
             setScenario([]);
@@ -709,7 +627,7 @@ export function TenantFlow() {
         style={{ minHeight: 32 }}
       >
         {active?.caption ??
-          "Enqueue a run to watch it travel the transport — or read another tenant’s run to see the isolation boundary reject it."}
+          'Enqueue a run to watch it travel the transport — or read another tenant’s run to see the isolation boundary reject it.'}
       </figcaption>
     </figure>
   );
