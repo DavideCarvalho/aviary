@@ -51,6 +51,9 @@ curl -X POST http://localhost:3000/agent/tool-call/reject \
 On approval the tool executes and the turn continues; on rejection the loop resumes with the
 rejection (and any reason) fed back to the model, which adapts instead of running the action.
 
+Both endpoints are ownership-scoped: the acting actor must own the tool call's run, or the request
+gets a `403` (`404` if the tool call doesn't exist at all).
+
 <Callout type="info" title="The frontend wraps this">
 `useAgentChat` surfaces pending approvals and exposes approve/reject callbacks, so a UI renders an
 "Approve?" prompt inline in the conversation. See [Frontend](/docs/agent/guides/frontend).
@@ -154,7 +157,7 @@ curl -X POST http://localhost:3000/agent/chat/$RUN_ID/cancel \
 ## Observability
 
 Every stage of a run is announced on Node's `diagnostics_channel` under `aviary:agent:*`
-(`run.started`, `message`, `tool-call`, `delegated`, `quota.exceeded`, `run.finished`). The
+(`run.started`, `message`, `tool-call`, `delegated`, `quota.exceeded`, `run.failed`, `run.finished`). The
 telescope extension consumes them for the "Agent" tab; under the durable runner, runs also appear in
 the durable "Workflows" tab for free. See [Cost & Governance](/docs/agent/guides/cost-and-governance).
 

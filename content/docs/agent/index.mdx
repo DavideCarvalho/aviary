@@ -52,7 +52,7 @@ durable in production without touching your tools or UI.
 ## The four glue points
 
 - **Diagnostics** — emits `aviary:agent:*` (`run.started`, `message`, `tool-call`, `delegated`,
-  `quota.exceeded`, `run.finished`) on Node's `diagnostics_channel`.
+  `quota.exceeded`, `run.failed`, `run.finished`) on Node's `diagnostics_channel`.
 - **Telescope** — `@dudousxd/nestjs-agent-telescope` adds an "Agent" tab with the governance
   sections; runs also appear in the durable "Workflows" tab for free.
 - **Codegen** — a `@dudousxd/nestjs-agent-codegen` extension injects `api.agent.*` into the unified

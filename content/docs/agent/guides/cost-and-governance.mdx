@@ -144,6 +144,14 @@ actor is over budget; the loop emits an `aviary:agent:quota.exceeded` diagnostic
 `GET /agent/quota/today` endpoint reports the actor's usage. Quota counts total tokens
 (`inputTokens + outputTokens`), unaffected by the cache split.
 
+Turn it on with `quotaLimitTokens` on `AgentModule.forRoot({ quotaLimitTokens: 200_000 })` — that's
+the whole setup. It's backed by the built-in `LedgerQuotaStore`, which reads the same usage ledger
+this page describes, so it needs no extra store or shared state, even across replicas. Pass an
+explicit `quota: QuotaStore` instead if you need a different backing store; it wins if both are set.
+A run that goes over quota ends its stream with a structured `run.failed` error
+(`code: 'quota_exceeded'`) rather than a plain diagnostics event alone — see
+[Frontend](/docs/agent/guides/frontend) for how that surfaces client-side.
+
 ---
 
 ## Surfacing it

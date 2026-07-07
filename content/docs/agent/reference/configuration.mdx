@@ -5,7 +5,7 @@ description: The full AgentModule.forRoot() options reference, forRootAsync, for
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Every option below is passed to `AgentModule.forRoot({ … })`. Only `model` is required — everything else has a default. See [Architecture](/docs/agent/concepts/architecture) for how these pieces fit together, and [`packages/nestjs`](/docs/agent/packages/nestjs) for the package itself.
+Every option below is passed to `AgentModule.forRoot({ … })`. `model` and `actorResolver` are required — everything else has a default. See [Architecture](/docs/agent/concepts/architecture) for how these pieces fit together, and [`packages/nestjs`](/docs/agent/packages/nestjs) for the package itself.
 
 ## `AgentModule.forRoot(options)`
 
@@ -22,15 +22,16 @@ Every option below is passed to `AgentModule.forRoot({ … })`. Only `model` is 
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `actorResolver` | `ActorResolver` | throws on every request | Resolves the acting `Actor` per request — the identity seam. No default fabricates a caller; provide one (or the opt-in `HeaderActorResolver`) before anything beyond a placeholder. |
-| `rolesPolicy` | `RolesPolicy` | role-in-`defaultRoles` | Tool authorization gate. |
-| `defaultRoles` | `string[]` | `['ADMIN']` | Roles a tool requires when its own `roles` is omitted. |
+| `actorResolver` | `ActorResolver` | — (required) | Resolves the acting `Actor` per request — the identity seam. Compile-time required: no default fabricates a caller. Supply an `ActorResolver` (or the opt-in `HeaderActorResolver`). |
+| `rolesPolicy` | `RolesPolicy` | `DefaultRolesPolicy` | Tool authorization gate. A tool that declares no `roles` reaches the policy with `roles: undefined`; `DefaultRolesPolicy` applies `defaultRoles` at that point (not baked into the tool spec earlier). |
+| `defaultRoles` | `string[]` | `['ADMIN']` | Roles `DefaultRolesPolicy` requires when a tool's own `roles` is omitted. |
 
 ### Quota
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `quota` | `QuotaStore` | _none_ | Daily token budget. Omit to disable quotas entirely. |
+| `quota` | `QuotaStore` | _none_ | Daily token budget, explicit store. Omit both `quota` and `quotaLimitTokens` to disable quotas entirely. Wins over `quotaLimitTokens` if both are set. |
+| `quotaLimitTokens` | `number` | _none_ | Daily token budget, no extra wiring: turns on quotas backed by the built-in `LedgerQuotaStore`, which reads the persisted usage ledger. |
 
 ### Routing
 
@@ -60,11 +61,12 @@ interface AgentModuleAsyncOptions {
   inject?: unknown[];
   useFactory: (...args: never[]) => AgentModuleOptions | Promise<AgentModuleOptions>;
   path?: string;
+  durable?: boolean;
 }
 ```
 
-<Callout type="info" title="Why path lives outside the factory">
-  `path` is static routing metadata used to mount `RouterModule` — it has to be known at import time, before the async factory resolves. Passing it on `AgentModuleAsyncOptions` (not inside the resolved `AgentModuleOptions`) is what makes that possible.
+<Callout type="info" title="Why path (and durable) live outside the factory">
+  `path` and `durable` are static wiring metadata used to mount `RouterModule` and (when set) the durable subpath — both have to be known at import time, before the async factory resolves. Passing them on `AgentModuleAsyncOptions` (not inside the resolved `AgentModuleOptions`) is what makes that possible.
 </Callout>
 
 `forRootAsync` always binds `AGENT_STORE` locally (its factory reads the resolved options), so the "omit `store` and import a store module" pattern is a `forRoot`-only path.
@@ -84,7 +86,7 @@ AgentModule.forFeature(definitions: AgentDefinition[])
 | `name` | `string` | Unique agent name. Referenced by `ctx.runAgent(name, task)`, the chat body's `agent`, and `delegatesTo`. |
 | `systemPrompt` | `string \| PromptBuilder` | Base prompt for this agent. A flat string, or a function resolved per turn from `PromptContext`. |
 | `tools` | `string[]` | Allow-list of tool names this agent may use (subset of all registered tools). |
-| `delegatesTo` | `string[]` | Names of other agents this agent may delegate to — auto-registered as `agent`-kind tools. |
+| `delegatesTo` | `string[]` | Names of other agents this agent may delegate to — auto-registered as `agent`-kind tools. Naming an unregistered agent throws at boot. Delegation depth is capped at `MAX_DELEGATION_DEPTH` (5). |
 | `personas` | `Persona[]` | Personas available to this agent. |
 | `defaultPersona` | `string` | Persona ID used when a turn doesn't specify one. |
 | `modelId` | `string` | Override the module-level model for this agent. |

@@ -21,9 +21,9 @@ adapter is free to back them with real relations. It covers five concerns across
 
 | Concern | Table | SPI methods |
 |---|---|---|
-| Threads | `agent_thread` | `createThread`, `getThread`, `listThreads`, `softDeleteThread`, `forkThread`, `setTitle`, `setActiveStream` |
+| Threads | `agent_thread` | `createThread`, `getThread`, `listThreads`, `softDeleteThread`, `forkThread`, `setTitle`, `setActiveStream`, `ownerOfThread` |
 | Messages | `agent_message` | `appendMessage`, `truncateFrom` |
-| Tool calls | `agent_tool_call` | `recordToolCall`, `updateToolCall` |
+| Tool calls | `agent_tool_call` | `recordToolCall`, `updateToolCall`, `ownerOfToolCall` |
 | Token usage (ledger) | `agent_token_usage` | `recordUsage`, `quotaToday` |
 | Model pricing | `agent_model_pricing` | — (read by the governance read-model) |
 
@@ -39,9 +39,15 @@ export interface AgentStore {
   recordToolCall(input: RecordToolCallInput): Promise<void>;
   recordUsage(input: RecordUsageInput): Promise<void>;
   quotaToday(actorRef: string, day: string): Promise<{ usedTokens: number }>;
+  ownerOfThread(threadId: string): Promise<string | null>;
+  ownerOfToolCall(toolCallId: string): Promise<string | null>;
   // …setTitle, setActiveStream, truncateFrom, updateToolCall
 }
 ```
+
+`ownerOfThread` and `ownerOfToolCall` resolve the owning `actorRef` (or `null` if the row doesn't
+exist) — the governance endpoints (`/agent/threads/:id`, `/agent/tool-call/approve` · `/reject`) call
+these to assert the acting actor owns the target before acting on it.
 
 Each usage row carries the cache-aware token counts (`inputTokens`, `outputTokens`,
 `cacheWriteTokens`, `cacheReadTokens`) and an optional provider-reported `costUsd` — the raw material

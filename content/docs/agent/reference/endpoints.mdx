@@ -16,7 +16,7 @@ All routes below assume the default `path: 'agent'` (set via [`AgentModule.forRo
 | `POST` | `/agent/chat/:runId/cancel` | — | `{ aborted: boolean }` |
 
 <Callout type="info" title="The chat response is a stream, not JSON">
-  `POST /agent/chat` responds `Content-Type: text/event-stream` with headers `X-Agent-Run-Id` and `X-Agent-Thread-Id`. The first frame is `event: meta` carrying `data: { runId, threadId }`, followed by `data: { delta: string }` frames as tokens arrive, and a closing `event: done`. `GET /agent/chat/:runId/stream` pipes the same format to resume/tail a run (its `meta` frame's `threadId` is `undefined`, since the thread isn't re-resolved on reconnect).
+  `POST /agent/chat` responds `Content-Type: text/event-stream` with headers `X-Agent-Run-Id` and `X-Agent-Thread-Id`. The first frame is `event: meta` carrying `data: { runId, threadId }`, followed by `data: { delta: string }` frames as tokens arrive, and a closing `event: done`. `GET /agent/chat/:runId/stream` pipes the same format to resume/tail a run (its `meta` frame's `threadId` is `undefined`, since the thread isn't re-resolved on reconnect). A failed run (e.g. quota exceeded) ends the stream with `event: error` carrying `data: { code, message }` (`code` is `quota_exceeded` or `run_failed`) instead of appending error text to the assistant message.
 </Callout>
 
 ## Threads
@@ -29,6 +29,8 @@ All routes below assume the default `path: 'agent'` (set via [`AgentModule.forRo
 | `DELETE` | `/agent/threads/:id` | — | `{ ok: boolean }` (soft-delete) |
 | `POST` | `/agent/threads/:id/fork-from/:messageId` | — | `ThreadSummary` — a new thread branched at `messageId` |
 
+The three `:id` routes are ownership-scoped: they resolve the acting actor and check they own the thread — `403` if it belongs to someone else, `404` if it doesn't exist.
+
 ## Tool-calls
 
 | Method | Path | Body | Returns |
@@ -36,7 +38,7 @@ All routes below assume the default `path: 'agent'` (set via [`AgentModule.forRo
 | `POST` | `/agent/tool-call/approve` | `{ runId: string; toolCallId: string }` | `{ ok: boolean }` |
 | `POST` | `/agent/tool-call/reject` | `{ runId: string; toolCallId: string; reason?: string }` | `{ ok: boolean }` |
 
-Approving/rejecting signals the run's `AgentRunner` (`approved: true`, or `approved: false` with an optional `reason`) — see [Human-in-the-loop & durability](/docs/agent/guides/human-in-the-loop-and-durability).
+Approving/rejecting signals the run's `AgentRunner` (`approved: true`, or `approved: false` with an optional `reason`) — see [Human-in-the-loop & durability](/docs/agent/guides/human-in-the-loop-and-durability). Both routes are ownership-scoped: the acting actor must own the tool call — `403` if it belongs to someone else, `404` if it doesn't exist.
 
 ## Quota
 

@@ -60,9 +60,9 @@ members — see the source for full JSDoc.
 | SPI | Purpose | Key shape |
 |---|---|---|
 | `ModelProvider` | Wraps the actual LLM call. | `runTurn(args: ModelTurnArgs): Promise<ModelTurnResult>` — `args` carries `system`, `messages`, `tools`, a `sink: SinkWriter` for live deltas, `abortSignal`; the result carries `text`, `toolCalls`, `usage`, optional `modelId` and `costUsd`. |
-| `AgentStore` | ORM-agnostic persistence for threads, messages, tool calls, and usage. | `createThread` / `getThread` / `listThreads` / `forkThread` / `appendMessage` / `truncateFrom` / `recordToolCall` / `updateToolCall` / `recordUsage` / `quotaToday`. |
+| `AgentStore` | ORM-agnostic persistence for threads, messages, tool calls, and usage. | `createThread` / `getThread` / `listThreads` / `forkThread` / `appendMessage` / `truncateFrom` / `recordToolCall` / `updateToolCall` / `recordUsage` / `quotaToday` / `ownerOfThread(threadId): Promise<string \| null>` / `ownerOfToolCall(toolCallId): Promise<string \| null>`. |
 | `AgentGovernanceQueries` | The read/analytics half of the store — the dashboard and Telescope tab both consume this one interface. | `spendByModel(range)` / `spendByActor(range)` / `usageTrend(range)` / `recentToolCalls(limit)` / `recentThreads(limit)`. |
-| `ActorResolver` | Resolves the caller for an inbound request — the identity seam; no default fabricates one. | `resolve(req: unknown): Actor \| Promise<Actor>`. |
+| `ActorResolver` | Resolves the caller for an inbound request — the identity seam; no default fabricates one, and it's a required option — there's no throwing placeholder to fall back to. | `resolve(req: unknown): Actor \| Promise<Actor>`. |
 | `RolesPolicy` | Decides whether an actor may invoke a tool. | `can(actor: Actor, tool: ToolSpec): boolean \| Promise<boolean>`. |
 | `TokenStreamSink` + `SinkWriter` | The data plane — live token transport decoupled from durability, keyed by `runId`. | Sink: `open(runId)` / `subscribe(runId): AsyncIterable<Uint8Array>` / `close(runId)`. Writer: `write(chunk)` / `end()`. |
 | `QuotaStore` | Per-actor/day token budget. | `check(actorRef, day): Promise<QuotaState>` / `bump(actorRef, day, tokens): Promise<void>`. |

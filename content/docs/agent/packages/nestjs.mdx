@@ -49,8 +49,9 @@ export class AppModule {}
 | `forRootAsync(options: AgentModuleAsyncOptions)` | Register via a factory (`imports` / `inject` / `useFactory`); `path` stays static since routes mount before the factory resolves. |
 | `forFeature(definitions: AgentDefinition[])` | Register additional named agents beyond the implicit default one (for [multi-agent](/docs/agent/guides/multi-agent) delegation). |
 
-`model` and (indirectly, via a resolver) `actorResolver` are the two pieces with no safe default —
-everything else has one. The full option-by-option reference lives in
+`model` and `actorResolver` are the two required fields — no safe default exists for either, so
+compile-time errors catch a forgotten one instead of a throwing placeholder at runtime. Everything
+else has a default. The full option-by-option reference lives in
 [Reference → Configuration](/docs/agent/reference/configuration); this page covers the surface, not
 every field.
 

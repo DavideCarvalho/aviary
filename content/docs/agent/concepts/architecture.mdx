@@ -23,10 +23,10 @@ an answer:
 | `ModelProvider` | Calling the LLM for one turn | `aiSdkModel(model)` (`-ai-sdk`, any Vercel AI SDK v7 `LanguageModel`); `FakeModelProvider` (`-testing`) |
 | `AgentStore` | Threads, messages, tool calls (the write path) | MikroORM or Drizzle (`-store-mikro-orm`, `-store-drizzle`); `InMemoryAgentStore` (`-testing`) |
 | `AgentGovernanceQueries` | Spend/usage read-model (the analytics path) | Same MikroORM/Drizzle store packages; `InMemoryGovernanceQueries` (`-testing`) |
-| `ActorResolver` | Who's calling | `HeaderActorResolver` (`-nestjs`, gateway-only); `UnconfiguredActorResolver` (throws — the module's real default) |
+| `ActorResolver` | Who's calling | `HeaderActorResolver` (`-nestjs`, gateway-only) — required, no default; you must supply one |
 | `RolesPolicy` | May this actor call this tool | `DefaultRolesPolicy` (role set-intersection, `-core`); `AuthzRolesPolicy` (`-authz`, delegates to a `nestjs-authz` Gate) |
-| `TokenStreamSink` | Live token transport (the data plane) | `InProcessTokenStreamSink` (`-nestjs`, the module default) |
-| `QuotaStore` | Per-actor daily token budget | `InMemoryQuotaStore` (`-testing`); omit it and quota checking is simply skipped |
+| `TokenStreamSink` | Live token transport (the data plane) | `InProcessTokenStreamSink` (`-nestjs`, the module default); for multi-replica, supply your own shared-transport sink (e.g. Redis pub/sub keyed by `runId`) via `forRoot({ sink })` |
+| `QuotaStore` | Per-actor daily token budget | `LedgerQuotaStore` (`-core`, ledger-backed — turns on with `quotaLimitTokens`, no shared state needed); `InMemoryQuotaStore` (`-testing`); omit both to skip quota checking |
 | `AgentRunner` | Executing a turn | `InlineAgentRunner` (`-nestjs`, the module default); the durable runner from `AgentDurableModule` |
 
 `AgentStore` and `AgentGovernanceQueries` are separate interfaces on purpose — one owns writes
@@ -36,8 +36,8 @@ single store adapter binds both, so you configure persistence once. See
 
 <Callout type="info" title="No SPI has an unsafe default">
 Most SPIs ship a working default (`DefaultRolesPolicy`, `InProcessTokenStreamSink`,
-`InlineAgentRunner`). `ActorResolver` is the deliberate exception: the real default is
-`UnconfiguredActorResolver`, which throws on every request. See
+`InlineAgentRunner`). `ActorResolver` is the deliberate exception: there is no default at all — it's
+a required field on `AgentModuleOptions`, so the agent never fabricates a caller. See
 [Identity & Authorization](/docs/agent/guides/identity-and-authorization).
 </Callout>
 

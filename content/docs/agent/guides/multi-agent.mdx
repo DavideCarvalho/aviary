@@ -67,6 +67,13 @@ array. Each call registers its definitions into the same shared `AgentRegistry`,
 orchestrator can `delegatesTo` an agent registered by an earlier one.
 </Callout>
 
+<Callout type="warn" title="delegatesTo is validated at boot">
+Naming an agent in `delegatesTo` that isn't registered (by `forRoot`'s default agent or any
+`forFeature` call) throws at startup — it no longer silently creates a delegate to an unrestricted
+phantom agent. Agent-to-agent delegation depth is also capped at `MAX_DELEGATION_DEPTH` (5, exported
+from `@dudousxd/nestjs-agent-core`); an orchestrator chain deeper than that fails the same way.
+</Callout>
+
 ---
 
 ## The synthesized `ask_<name>` tool

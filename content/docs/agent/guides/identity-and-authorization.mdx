@@ -35,12 +35,13 @@ interface ActorResolver {
 ```
 
 `req` is the raw transport request (an Express `Request` in a NestJS app), typed `unknown` so the core
-stays framework-agnostic. You configure exactly one resolver on `AgentModule.forRoot({ actorResolver })`.
+stays framework-agnostic. You configure exactly one resolver on `AgentModule.forRoot({ actorResolver })` —
+`actorResolver` is a required field, not something you can leave out.
 
 <Callout type="warn" title="There is no insecure default identity">
-Omit `actorResolver` and the module installs an `UnconfiguredActorResolver` that **throws on every
-request** — an identity is never derived from a default. This is deliberate: an agent that can act
-without a known caller is an agent that can act as anyone.
+`actorResolver` is required at compile time — there's no throwing placeholder class installed when
+it's missing, because it can't be missing; an identity is never derived from a default. This is
+deliberate: an agent that can act without a known caller is an agent that can act as anyone.
 </Callout>
 
 ---
@@ -159,12 +160,19 @@ The default `RolesPolicy` is a plain set-intersection: the actor passes if **any
 the tool's allowed set. Omit `roles` on the tool and it falls back to the module's `defaultRoles`.
 
 ```ts
-// effectively:
+// effectively, inside DefaultRolesPolicy:
 can(actor, tool) {
   const allowed = tool.roles ?? defaultRoles; // defaultRoles defaults to ['ADMIN']
   return (actor.roles ?? []).some((role) => allowed.includes(role));
 }
 ```
+
+<Callout type="info" title="Tools reach the policy with roles: undefined, not a baked-in default">
+Discovery doesn't bake `defaultRoles` into a tool's `spec.roles` — a tool that declares no `roles`
+reaches whichever `RolesPolicy` is active with `roles: undefined`, and `DefaultRolesPolicy` is what
+applies `defaultRoles` at that point. This matters if you write a custom `RolesPolicy` (or use
+`AuthzRolesPolicy`'s fallthrough): you'll see `undefined`, not a pre-filled `['ADMIN']`.
+</Callout>
 
 ```ts
 import { AiTool, type ToolHandler } from '@dudousxd/nestjs-agent';
@@ -244,11 +252,22 @@ the root; otherwise the `Gate` provider is missing and DI fails at boot.
 
 ---
 
+## The governance endpoints are ownership-scoped
+
+`POST /agent/tool-call/approve` · `/reject` and the `/agent/threads/:id` family (`GET`, `DELETE`,
+`POST .../fork-from/:messageId`) resolve the acting actor via the same `ActorResolver` and assert
+they own the target thread or tool call before acting on it: someone else's thread or tool call
+returns `403`, a missing one returns `404`. There's no path to approve, reject, read, fork, or delete
+another actor's state by guessing an id.
+
+---
+
 ## Why this is safe by construction
 
-- **Identity is never invented.** No resolver → every request throws. The header resolver throws on a
-  missing `x-actor-id`. A custom resolver should throw when it can't verify a principal. There is no
-  code path where the agent runs as an unknown or default caller.
+- **Identity is never invented.** `actorResolver` is required — there's no default to omit it in
+  favor of. The header resolver throws on a missing `x-actor-id`. A custom resolver should throw when
+  it can't verify a principal. There is no code path where the agent runs as an unknown or default
+  caller.
 - **Authorization is server-side and per-tool.** The model can *ask* to call any tool it can see, but the
   loop runs the policy check against the resolved actor before the handler executes. A prompt can't talk
   its way past a role intersection or a Gate denial.

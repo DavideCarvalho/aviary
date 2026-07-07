@@ -76,7 +76,7 @@ The return value is the AI SDK `useChat` result (`messages`, `sendMessage`, `sta
 | `persona` | `string` | Active persona id sent on every turn. |
 | `threadId` | `string` | Bind the chat to a thread; omitted → backend creates one on first send. |
 | `initialMessages` | `UIMessage[]` | Persisted history to seed `useChat` (consumed on mount). |
-| `hasActiveStream` / `activeStreamId` | `boolean` / `string` | Reconnect to a buffered in-flight stream (the thread's `activeStreamId`). |
+| `resumeRunId` | `string` | Reconnect to a buffered in-flight stream — wire it to the thread's `activeStreamId`. Its presence gates the resume and names the run; omit it and no resume request fires. |
 | `getPageContext` | `() => Record \| null` | Read at each send to attach a page snapshot (page-assistant). |
 | `onFinish` | `() => void` | Fired after each streamed turn (e.g. refetch the sidebar). |
 | `client` / `fetch` | `AgentClient` / `typeof fetch` | Inject an existing client or a custom fetch (tests / non-browser). |
@@ -231,6 +231,24 @@ The same run id backs `cancel`, which stops the SSE client-side and then hard-ab
 
 ---
 
+## Run failures and quota errors
+
+A run that fails mid-stream (quota exceeded, an unhandled error) doesn't append error text to the
+assistant message — it ends the stream with a structured `event: error` SSE frame carrying
+`{ code, message }` (`code` is `quota_exceeded` or `run_failed`). `useAgentChat`'s transport surfaces
+that as an AI SDK `error` chunk, so it shows up on the standard `chat.error` the SDK already gives
+you — the same `error` prop `MessageList` renders in its inline error+retry banner:
+
+```tsx
+<MessageList messages={chat.messages} status={chat.status} error={chat.error ?? null} />
+```
+
+Non-streaming REST calls (`loadThreads`, `approve`, `forkThread`, …) throw `AgentHttpError` on a
+non-2xx response — it carries `.status`, so a `403` from an ownership-scoped endpoint (someone else's
+thread or tool call) is easy to distinguish from a `404` or a `5xx`.
+
+---
+
 ## Threads, personas, quota, and cancel
 
 Beyond the streaming surface, the hook returns loaders and state for the rest of the REST API. Each
@@ -276,14 +294,14 @@ const detail = await chat.loadThread(threadId);
 const reopened = useAgentChat({
   threadId,
   initialMessages: detail.messages,
-  hasActiveStream: detail.activeStreamId != null,
-  activeStreamId: detail.activeStreamId ?? undefined,
+  resumeRunId: detail.activeStreamId ?? undefined,
 });
 ```
 
 <Callout type="info" title="No doomed resume GET">
-`hasActiveStream` gates the reconnect: when a thread has no buffered stream the transport resolves
-`null` without a network round-trip, so a normal mount never fires a resume request that 404s.
+`resumeRunId` gates the reconnect: when a thread has no buffered stream (`activeStreamId` is
+`null`), `resumeRunId` is `undefined` and the transport resolves `null` without a network
+round-trip, so a normal mount never fires a resume request that 404s.
 </Callout>
 
 ---
