@@ -60,8 +60,11 @@ you both persistence and analytics:
 | `AGENT_GOVERNANCE_QUERIES` | the read-model (`…GovernanceQueries`) | the dashboard & Telescope surfaces |
 
 Both are `Symbol.for(...)` tokens from `@dudousxd/nestjs-agent-core` (global-registry symbols, so DI
-survives pnpm's dual ESM/CJS copies). `AgentModule.forRoot({ … })` resolves the store from
-`AGENT_STORE` — you don't pass it in when a store module is imported.
+survives pnpm's dual ESM/CJS copies). A store module binds them **globally** (a Nest global module),
+so any module in the app resolves them without re-importing. That's why `store` on
+`AgentModule.forRoot({ … })` is **optional**: import a store module and the agent resolves the store
+from the app-wide `AGENT_STORE` — leave `store` off entirely. Pass `store` only for a store you don't
+bind through a module (the in-memory testing store, say).
 
 <Callout type="info" title="One import, read + write">
 Importing a store module binds `AGENT_GOVERNANCE_QUERIES` as well as `AGENT_STORE`. That's why the

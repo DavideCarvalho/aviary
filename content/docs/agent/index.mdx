@@ -41,6 +41,9 @@ durability compose instead of fighting.
   (AST-validated, RBAC + tenant scoping) as an opt-in tool.
 - **A React frontend** — `@dudousxd/nestjs-agent-react`'s `useAgentChat` (Vercel AI SDK v6) plus
   styling-agnostic chat components and an optional markdown renderer.
+- **Zero provider code** — `@dudousxd/nestjs-agent-ai-sdk`'s `aiSdkModel(model)` adapts any Vercel AI
+  SDK v6 `LanguageModel` to the `ModelProvider` SPI, the first of a family of provider adapters, so an
+  app supplies `model` without writing a wrapper.
 
 ## The four glue points
 
@@ -55,8 +58,9 @@ durability compose instead of fighting.
 <Callout type="warn" title="Status">
 Early development (`0.x`). The full family ships today — core, the NestJS module (inline + durable
 runners), MikroORM and Drizzle persistence, the governance read-model, the standalone dashboard, the
-telescope extension, governed SQL (`-data`), the React frontend (`-react`), codegen, and a runnable
-fully-offline end-to-end demo. The package surface and SPIs are still stabilizing.
+telescope extension, governed SQL (`-data`), the React frontend (`-react`), the AI SDK model adapter
+(`-ai-sdk`), codegen, and a runnable fully-offline end-to-end demo. The package surface and SPIs are
+still stabilizing.
 </Callout>
 
 ## Where to go next

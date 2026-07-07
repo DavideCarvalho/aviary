@@ -90,6 +90,33 @@ AgentModule.forRoot({
 });
 ```
 
+`durable: true` on its own configures the agent to expect the durable runner; the runner itself lives
+in `AgentDurableModule`, which you import alongside a configured `DurableModule`. The
+`agentDurable(options)` helper from `@dudousxd/nestjs-agent/durable` collapses those two imports into
+one — it wires `AgentModule.forRoot({ ...options, durable: true })` and `AgentDurableModule` together,
+so you spread it into `imports`:
+
+```ts
+import { DurableModule } from '@dudousxd/nestjs-durable';
+import { agentDurable } from '@dudousxd/nestjs-agent/durable';
+
+@Module({
+  imports: [
+    DurableModule.forRoot({ /* store, transport, … */ }),
+    ...agentDurable({
+      model: myModelProvider,
+      store: myAgentStore,
+      actorResolver: new HeaderActorResolver(),
+      // ...same options as AgentModule.forRoot, minus `durable`
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+The longhand — `AgentModule.forRoot({ durable: true })` plus a separate `AgentDurableModule` import —
+still works; `agentDurable` is just the one-import shortcut.
+
 The human-in-the-loop pause becomes a durable **signal**: on the approval boundary the run suspends
 into the state store (via the durable `waitForSignal` primitive) instead of holding a connection
 open. An approve/reject POST delivers the signal and the run resumes — minutes or restarts later —

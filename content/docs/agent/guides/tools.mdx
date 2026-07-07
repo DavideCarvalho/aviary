@@ -175,9 +175,7 @@ globals. It's the same context whether the turn runs inline or as a durable work
 
 | Field | Type | What it is |
 |---|---|---|
-| `actor` | `Actor` | The full caller — `{ id, roles?, tenantRef? }`. Your source of truth for scoping. |
-| `actorId` | `string` | The caller's id (shorthand for `actor.id`). |
-| `tenantRef` | `string?` | The caller's tenant, when the actor carries one. |
+| `actor` | `Actor` | The full caller — `{ id, roles?, tenantRef? }`. Your source of truth for scoping and identity. |
 | `threadId` | `string` | The conversation thread this turn belongs to. |
 | `runId` | `string` | This turn's run id. |
 | `requestId` | `string` | The originating request id. |
@@ -185,7 +183,9 @@ globals. It's the same context whether the turn runs inline or as a durable work
 | `pageContext` | `PageContext?` | Host-supplied context about where the turn was started. |
 | `host` | `unknown?` | An optional host handle (e.g. an ORM `EntityManager`) the app threads through. |
 
-The actor is the load-bearing field: never derive scope from tool input, derive it from `ctx.actor`.
+The actor is the load-bearing field, and the only source of identity: read `ctx.actor.id` and
+`ctx.actor.tenantRef` rather than any top-level shorthand. Never derive scope from tool input — derive
+it from `ctx.actor`.
 
 ```ts
 async execute(input: { customerId: string }, ctx: AiToolCtx) {

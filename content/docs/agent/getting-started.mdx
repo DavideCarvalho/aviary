@@ -17,8 +17,11 @@ ordinary injectable, register the module, and hit the SSE chat endpoint. The age
 - **Node.js 20+**
 - **NestJS 10+** (both v10 and v11 are supported)
 - **TypeScript 5+** with `experimentalDecorators` and `emitDecoratorMetadata` enabled
-- A **model provider** — any wrapper implementing the `ModelProvider` SPI (typically over the Vercel
-  AI SDK). For offline tests there's a deterministic fake in `@dudousxd/nestjs-agent-testing`.
+- A **model provider** — anything implementing the `ModelProvider` SPI. The zero-boilerplate path is
+  `aiSdkModel(...)` from `@dudousxd/nestjs-agent-ai-sdk`, which adapts any Vercel AI SDK v6
+  `LanguageModel` so you write no provider code; e.g. `aiSdkModel(anthropic('claude-sonnet-4-6'))`. Any
+  other `ModelProvider` works too, and for offline tests there's a deterministic fake in
+  `@dudousxd/nestjs-agent-testing`.
 
 ---
 
@@ -74,13 +77,15 @@ your module.
 // src/app.module.ts
 import { Module } from '@nestjs/common';
 import { AgentModule, HeaderActorResolver } from '@dudousxd/nestjs-agent';
+import { aiSdkModel } from '@dudousxd/nestjs-agent-ai-sdk';
+import { anthropic } from '@ai-sdk/anthropic';
 import { GetWeatherTool } from './tools/get-weather.tool.js';
 
 @Module({
   imports: [
     AgentModule.forRoot({
-      model: myModelProvider,          // a ModelProvider (e.g. a Vercel AI SDK wrapper)
-      store: myAgentStore,             // e.g. the MikroORM store, or from AGENT_STORE
+      model: aiSdkModel(anthropic('claude-sonnet-4-6')), // any ModelProvider; this is the zero-boilerplate path
+      // store: myAgentStore,          // optional — omit it and the store resolves from an imported store module
       defaultRoles: ['ADMIN'],         // roles a tool requires when its own `roles` is omitted
       actorResolver: new HeaderActorResolver(), // who's calling — see below
       // path: 'agent',                // route prefix (default 'agent')

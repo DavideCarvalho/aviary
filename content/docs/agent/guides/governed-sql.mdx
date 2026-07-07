@@ -146,8 +146,8 @@ that one method yourself and pass it as `tableAccess`.
 
 `TenantScopeRewriter` rewrites an accepted `SELECT` so every reference to a scoped table is constrained
 to a single tenant: `tenantColumn = '<tenantRef>'` is AND-ed into the `WHERE` for each scoped table in
-the `FROM`. The `tenantRef` comes from the tool context (`ctx.tenantRef`), which the agent derives from
-the caller's identity — the model never chooses it.
+the `FROM`. The `tenantRef` comes from the tool context (`ctx.actor.tenantRef`), which the agent
+derives from the caller's identity — the model never chooses it.
 
 - A query that already carries a matching tenant predicate is left as-is; one that targets a
   **different** tenant is rejected — no cross-tenant reads.
@@ -194,56 +194,55 @@ so a single tool result can't blow the model's context.
 
 ## Registering the tool with the agent
 
-`createExecuteSqlTool` returns a plain `{ spec, handler }` rather than an `@AiTool` class, so register
-it against the shared `ToolRegistry` at bootstrap. Inject the `AGENT_TOOL_REGISTRY` token and call
-`register(spec, handler)` — the tool then appears to the model exactly like any decorated tool.
+`createExecuteSqlTool` returns a plain `{ spec, handler }` — a `FunctionalTool` — rather than an
+`@AiTool` class. Register it declaratively with `provideAgentTool`: drop the returned provider in your
+module's `providers` and `AiToolDiscoveryService` picks it up at boot, exactly like a decorated tool.
+Because the pool comes from DI, use the factory form and list its dependencies in `inject`:
 
 ```ts
-// src/tools/governed-sql.provider.ts
-import { Inject, Injectable, type OnApplicationBootstrap } from '@nestjs/common';
-import { AGENT_TOOL_REGISTRY, type ToolRegistry } from '@dudousxd/nestjs-agent-core';
+// src/app.module.ts
+import { Module } from '@nestjs/common';
+import { AgentModule, provideAgentTool } from '@dudousxd/nestjs-agent';
 import {
   createExecuteSqlTool,
   GroupTableAccessPolicy,
   TenantScopeRewriter,
 } from '@dudousxd/nestjs-agent-data';
-import { ReadOnlyPool } from '../db/read-only-pool.js';
+import { ReadOnlyPool } from './db/read-only-pool.js';
 
-@Injectable()
-export class GovernedSqlTool implements OnApplicationBootstrap {
-  constructor(
-    @Inject(AGENT_TOOL_REGISTRY) private readonly registry: ToolRegistry,
-    private readonly pool: ReadOnlyPool,
-  ) {}
-
-  onApplicationBootstrap(): void {
-    const { spec, handler } = createExecuteSqlTool({
-      runner: { run: (sql) => this.pool.query(sql) },
-      tableAccess: new GroupTableAccessPolicy({
-        roleGroups: { ADMIN: ['orders', 'catalog'], SUPPORT: ['orders'] },
-        tablesByGroup: {
-          orders: ['orders', 'order_items'],
-          catalog: ['products', 'product_*'],
-        },
-      }),
-      tenantScope: new TenantScopeRewriter({
-        tenantColumn: 'tenant_id',
-        scopedTables: ['orders', 'order_items'],
-      }),
-    });
-    this.registry.register(spec, handler);
-  }
-}
-```
-
-```ts
-// src/app.module.ts
 @Module({
   imports: [AgentModule.forRoot({ /* model, store, actorResolver, … */ })],
-  providers: [ReadOnlyPool, GovernedSqlTool],
+  providers: [
+    ReadOnlyPool,
+    provideAgentTool(
+      (pool: ReadOnlyPool) =>
+        createExecuteSqlTool({
+          runner: { run: (sql) => pool.query(sql) },
+          tableAccess: new GroupTableAccessPolicy({
+            roleGroups: { ADMIN: ['orders', 'catalog'], SUPPORT: ['orders'] },
+            tablesByGroup: {
+              orders: ['orders', 'order_items'],
+              catalog: ['products', 'product_*'],
+            },
+          }),
+          tenantScope: new TenantScopeRewriter({
+            tenantColumn: 'tenant_id',
+            scopedTables: ['orders', 'order_items'],
+          }),
+        }),
+      [ReadOnlyPool],
+    ),
+  ],
 })
 export class AppModule {}
 ```
+
+<Callout type="info" title="Two forms of provideAgentTool">
+The factory form above resolves the tool from DI. For a tool that needs nothing injected, pass the
+`{ spec, handler }` value straight in — `provideAgentTool(createExecuteSqlTool({ … }))` — or list it on
+the module instead: `AgentModule.forRoot({ tools: [createExecuteSqlTool({ … })] })`. Either way you
+never touch a registry by hand.
+</Callout>
 
 Because `executeSql` is a `read`-kind tool, it auto-executes — no human-in-the-loop step. Its power is
 bounded entirely by the four guardrails plus your read-only credentials, so a read tool is the right
@@ -255,5 +254,5 @@ if you omit `tenantScope`, be sure your `tableAccess` policy alone is enough iso
 ## Related
 
 - [Tools](/docs/agent/guides/tools) — the `@AiTool` surface, `read` vs `action`, and the handler context
-- [Identity & Authorization](/docs/agent/guides/identity-and-authorization) — where `ctx.actor.roles` and `ctx.tenantRef` come from
+- [Identity & Authorization](/docs/agent/guides/identity-and-authorization) — where `ctx.actor.roles` and `ctx.actor.tenantRef` come from
 - [Getting Started](/docs/agent/getting-started) — install, register the module, stream your first turn
