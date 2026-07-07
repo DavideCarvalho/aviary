@@ -21,8 +21,9 @@ module, the React frontend). Which tables, which tenant column, which roles, whi
 | [`-react`](/docs/agent/packages/react) | `useAgentChat` + styling-agnostic chat components for a browser frontend. |
 | [`-data`](/docs/agent/packages/data) | `createExecuteSqlTool` — governed, read-only SQL as a prebuilt tool. |
 | [`-dashboard`](/docs/agent/packages/dashboard) | Standalone AI-gateway governance console (bundled SPA + API), no Telescope required. |
-| [`-store-mikro-orm`](/docs/agent/packages/store-mikro-orm) | `AgentStore` + `AgentGovernanceQueries` on MikroORM. |
-| [`-store-drizzle`](/docs/agent/packages/store-drizzle) | `AgentStore` + `AgentGovernanceQueries` on Drizzle. |
+| [`-store-mikro-orm`](/docs/agent/packages/store-mikro-orm) | `AgentStore` + `AgentGovernanceQueries` + `AgentPricingStore` on MikroORM. |
+| [`-store-drizzle`](/docs/agent/packages/store-drizzle) | `AgentStore` + `AgentGovernanceQueries` + `AgentPricingStore` on Drizzle. |
+| [`-transport-redis`](/docs/agent/packages/transport-redis) | `RedisTokenStreamSink` — a `TokenStreamSink` over Redis for multi-replica deployments. |
 | [`-telescope`](/docs/agent/packages/telescope) | Telescope extension — an "Agent" tab reusing the governance read-model. |
 | [`-authz`](/docs/agent/packages/authz) | Plugs `@dudousxd/nestjs-authz` into tool authorization as a `RolesPolicy`. |
 | [`-codegen`](/docs/agent/packages/codegen) | Emits `api.agent.*` into the ecosystem's unified typed client. |
@@ -34,11 +35,12 @@ module, the React frontend). Which tables, which tenant column, which roles, whi
 -react ──▸ (SSE /agent/chat) ──▸ umbrella (@dudousxd/nestjs-agent) ──▸ -core
 -codegen ─▸ (REST /agent/*)  ──┘                                       │
                                                                         │  (SPIs)
-        -store-mikro-orm / -store-drizzle ─────────────────────────────┤  AgentStore + AgentGovernanceQueries
+        -store-mikro-orm / -store-drizzle ─────────────────────────────┤  AgentStore + AgentGovernanceQueries + AgentPricingStore
                               -ai-sdk ──────────────────────────────────┤  ModelProvider
                               -authz ────────────────────────────────────┤  RolesPolicy
-                              -data (createExecuteSqlTool) ───────────────┤  a read-kind ToolSpec + ToolHandler
-        -dashboard / -telescope ──────────────────────────────────────────┘  consume AgentGovernanceQueries
+                              -transport-redis ────────────────────────────┤  TokenStreamSink
+                              -data (createExecuteSqlTool) ───────────────────┤  a read-kind ToolSpec + ToolHandler
+        -dashboard / -telescope ──────────────────────────────────────────────┘  consume AgentGovernanceQueries
 ```
 
 `-core` has no NestJS dependency and defines every contract; the umbrella package is the only one
@@ -54,8 +56,9 @@ either, both, or neither.
   <Card title="React" href="/docs/agent/packages/react" description="useAgentChat and styling-agnostic chat components." />
   <Card title="Data" href="/docs/agent/packages/data" description="Governed, read-only SQL as a prebuilt tool." />
   <Card title="Dashboard" href="/docs/agent/packages/dashboard" description="The standalone AI-gateway governance console." />
-  <Card title="Store (MikroORM)" href="/docs/agent/packages/store-mikro-orm" description="AgentStore + AgentGovernanceQueries on MikroORM." />
-  <Card title="Store (Drizzle)" href="/docs/agent/packages/store-drizzle" description="AgentStore + AgentGovernanceQueries on Drizzle." />
+  <Card title="Store (MikroORM)" href="/docs/agent/packages/store-mikro-orm" description="AgentStore + AgentGovernanceQueries + AgentPricingStore on MikroORM." />
+  <Card title="Store (Drizzle)" href="/docs/agent/packages/store-drizzle" description="AgentStore + AgentGovernanceQueries + AgentPricingStore on Drizzle." />
+  <Card title="Transport (Redis)" href="/docs/agent/packages/transport-redis" description="RedisTokenStreamSink for multi-replica token streaming." />
   <Card title="Telescope" href="/docs/agent/packages/telescope" description="An 'Agent' tab reusing the governance read-model." />
   <Card title="Authz" href="/docs/agent/packages/authz" description="Ability-aware RolesPolicy via @dudousxd/nestjs-authz." />
   <Card title="Codegen" href="/docs/agent/packages/codegen" description="api.agent.* in the unified typed client." />

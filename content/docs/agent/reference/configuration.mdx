@@ -15,8 +15,9 @@ Every option below is passed to `AgentModule.forRoot({ … })`. `model` and `act
 |---|---|---|---|
 | `model` | `ModelProvider` | — (required) | The LLM provider (e.g. a Vercel AI SDK wrapper). |
 | `store` | `AgentStore` | _none_ | Persistence adapter. Omit it and import a store module (e.g. `MikroOrmAgentStoreModule.forFeature()`) to bind `AGENT_STORE` globally instead — passing it here takes precedence within this module's scope. |
-| `sink` | `TokenStreamSink` | in-memory sink | Live token transport. The default is single-process only. |
+| `sink` | `TokenStreamSink` | in-memory sink | Live token transport. The default is single-process only — for multi-replica, use `@dudousxd/nestjs-agent-transport-redis`'s `RedisTokenStreamSink` instead. |
 | `tools` | `FunctionalTool[]` | `[]` | Static functional tools (`{ spec, handler }`) registered at boot. DI-dependent tools use `provideAgentTool(factory, inject)` in a module's `providers` instead. |
+| `toolTimeoutMs` | `number` | _none_ (no timeout) | Abort a single tool call that runs longer than this and record it as failed — the model gets the timeout as the tool's result and can adapt, instead of the turn hanging. See [Tools](/docs/agent/guides/tools#per-tool-timeout). |
 
 ### Identity & authz
 
@@ -44,6 +45,12 @@ Every option below is passed to `AgentModule.forRoot({ … })`. `model` and `act
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `durable` | `boolean` | `false` | Run each turn as a durable workflow instead of in-process. Requires importing `AgentDurableModule` from `@dudousxd/nestjs-agent/durable` alongside a configured `DurableModule` — otherwise boot throws a clear error instead of an unresolved-dependency crash. |
+
+### Follow-ups
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `followUps` | `boolean \| { count?: number }` | `false` | After the final turn, make one extra model call proposing short follow-up questions, stored on the assistant message's `followUps` and recorded as a `follow_ups` usage row. `true` proposes 3; pass `{ count }` to change that. Off by default — it costs an extra model call. See [Cost & Governance](/docs/agent/guides/cost-and-governance). |
 
 ### Default agent
 

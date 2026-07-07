@@ -10,6 +10,7 @@
     "dashboard",
     "store-mikro-orm",
     "store-drizzle",
+    "transport-redis",
     "telescope",
     "authz",
     "codegen",

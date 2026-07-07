@@ -254,11 +254,11 @@ the root; otherwise the `Gate` provider is missing and DI fails at boot.
 
 ## The governance endpoints are ownership-scoped
 
-`POST /agent/tool-call/approve` · `/reject` and the `/agent/threads/:id` family (`GET`, `DELETE`,
-`POST .../fork-from/:messageId`) resolve the acting actor via the same `ActorResolver` and assert
-they own the target thread or tool call before acting on it: someone else's thread or tool call
-returns `403`, a missing one returns `404`. There's no path to approve, reject, read, fork, or delete
-another actor's state by guessing an id.
+`POST /agent/tool-call/approve` · `/reject`, the `/agent/threads/:id` family (`GET`, `DELETE`,
+`POST .../fork-from/:messageId`), and `POST /agent/chat/:runId/cancel` resolve the acting actor via
+the same `ActorResolver` and assert they own the target thread, tool call, or run before acting on
+it: someone else's returns `403`, a missing one returns `404`. There's no path to approve, reject,
+read, fork, delete, or cancel another actor's state by guessing an id.
 
 ---
 

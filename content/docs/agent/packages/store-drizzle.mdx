@@ -58,9 +58,9 @@ export class AppModule {}
 ```
 
 <Callout type="warn" title="DrizzleAgentStoreModule.forRoot() is global">
-Like the MikroORM adapter, this module binds `AGENT_STORE` and `AGENT_GOVERNANCE_QUERIES` on a
-**global** Nest module. Import it once — the agent, dashboard, and telescope surfaces all resolve
-both tokens app-wide with no re-binding.
+Like the MikroORM adapter, this module binds `AGENT_STORE`, `AGENT_GOVERNANCE_QUERIES`, and
+`AGENT_PRICING_STORE` on a **global** Nest module. Import it once — the agent, dashboard, and
+telescope surfaces all resolve all three tokens app-wide with no re-binding.
 </Callout>
 
 <Callout type="info" title="ensureAgentSchema is a quick start, not a migration story">
@@ -73,9 +73,10 @@ migration files" path for tests, demos, and first boot.
 
 | Export | Kind | Purpose |
 |---|---|---|
-| `DrizzleAgentStoreModule` | `DynamicModule` factory | `.forRoot({ db })` binds `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` globally over your db handle |
+| `DrizzleAgentStoreModule` | `DynamicModule` factory | `.forRoot({ db })` binds `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` + `AGENT_PRICING_STORE` globally over your db handle |
 | `DrizzleAgentStore` | class | `AgentStore` implementation — the write side |
 | `DrizzleGovernanceQueries` | class | `AgentGovernanceQueries` implementation — the read-model (spend by model/actor, usage trend, recent activity) |
+| `DrizzlePricingStore` | class | `AgentPricingStore` implementation — `upsertModelPrice` / `listCurrentPrices`, the write side of model pricing (see [Cost & Governance](/docs/agent/guides/cost-and-governance#seeding-prices)) |
 | `agentSchema` | Drizzle schema object | The five agent tables (`agentThread`, `agentMessage`, `agentToolCall`, `agentTokenUsage`, `agentModelPricing`) |
 | `ensureAgentSchema(db)` | function | Idempotent `CREATE TABLE IF NOT EXISTS` DDL for all five tables |
 | `AgentDrizzleDb` | type | The db handle shape (`drizzle(client, { schema: agentSchema })`) the module and store expect |

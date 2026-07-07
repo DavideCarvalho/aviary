@@ -21,11 +21,11 @@ adapter is free to back them with real relations. It covers five concerns across
 
 | Concern | Table | SPI methods |
 |---|---|---|
-| Threads | `agent_thread` | `createThread`, `getThread`, `listThreads`, `softDeleteThread`, `forkThread`, `setTitle`, `setActiveStream`, `ownerOfThread` |
+| Threads | `agent_thread` | `createThread`, `getThread`, `listThreads`, `softDeleteThread`, `forkThread`, `setTitle`, `setActiveStream`, `ownerOfThread`, `ownerOfActiveStream` |
 | Messages | `agent_message` | `appendMessage`, `truncateFrom` |
 | Tool calls | `agent_tool_call` | `recordToolCall`, `updateToolCall`, `ownerOfToolCall` |
 | Token usage (ledger) | `agent_token_usage` | `recordUsage`, `quotaToday` |
-| Model pricing | `agent_model_pricing` | — (read by the governance read-model) |
+| Model pricing | `agent_model_pricing` | read by the governance read-model; written by the separate `AgentPricingStore` SPI (`upsertModelPrice`, `listCurrentPrices`) — see [Cost & Governance](/docs/agent/guides/cost-and-governance#seeding-prices) |
 
 ```ts
 // the shape both adapters implement
@@ -41,13 +41,15 @@ export interface AgentStore {
   quotaToday(actorRef: string, day: string): Promise<{ usedTokens: number }>;
   ownerOfThread(threadId: string): Promise<string | null>;
   ownerOfToolCall(toolCallId: string): Promise<string | null>;
+  ownerOfActiveStream(runId: string): Promise<string | null>;
   // …setTitle, setActiveStream, truncateFrom, updateToolCall
 }
 ```
 
-`ownerOfThread` and `ownerOfToolCall` resolve the owning `actorRef` (or `null` if the row doesn't
-exist) — the governance endpoints (`/agent/threads/:id`, `/agent/tool-call/approve` · `/reject`) call
-these to assert the acting actor owns the target before acting on it.
+`ownerOfThread`, `ownerOfToolCall`, and `ownerOfActiveStream` resolve the owning `actorRef` (or
+`null` if the row doesn't exist) — the governance endpoints (`/agent/threads/:id`,
+`/agent/tool-call/approve` · `/reject`, `/agent/chat/:runId/cancel`) call these to assert the acting
+actor owns the target before acting on it.
 
 Each usage row carries the cache-aware token counts (`inputTokens`, `outputTokens`,
 `cacheWriteTokens`, `cacheReadTokens`) and an optional provider-reported `costUsd` — the raw material
@@ -55,27 +57,30 @@ the [Cost & Governance](/docs/agent/guides/cost-and-governance) read-model rolls
 
 ---
 
-## Two tokens, bound together
+## Three tokens, bound together
 
-An adapter binds **two** DI tokens — the write side and the read side — so wiring one module gives
-you both persistence and analytics:
+An adapter binds **three** DI tokens — the write side, the read side, and the pricing writer — so
+wiring one module gives you persistence, analytics, and priced cost estimates:
 
 | Token | Bound to | Consumed by |
 |---|---|---|
 | `AGENT_STORE` | the store (`MikroOrmAgentStore` / `DrizzleAgentStore`) | the agent module — every turn reads it |
 | `AGENT_GOVERNANCE_QUERIES` | the read-model (`…GovernanceQueries`) | the dashboard & Telescope surfaces |
+| `AGENT_PRICING_STORE` | the pricing writer (`MikroOrmPricingStore` / `DrizzlePricingStore`) | your app, to seed/update model prices — see [Cost & Governance](/docs/agent/guides/cost-and-governance#seeding-prices) |
 
-Both are `Symbol.for(...)` tokens from `@dudousxd/nestjs-agent-core` (global-registry symbols, so DI
-survives pnpm's dual ESM/CJS copies). A store module binds them **globally** (a Nest global module),
-so any module in the app resolves them without re-importing. That's why `store` on
+All three are `Symbol.for(...)` tokens from `@dudousxd/nestjs-agent-core` (global-registry symbols,
+so DI survives pnpm's dual ESM/CJS copies). A store module binds them **globally** (a Nest global
+module), so any module in the app resolves them without re-importing. That's why `store` on
 `AgentModule.forRoot({ … })` is **optional**: import a store module and the agent resolves the store
 from the app-wide `AGENT_STORE` — leave `store` off entirely. Pass `store` only for a store you don't
 bind through a module (the in-memory testing store, say).
 
-<Callout type="info" title="One import, read + write">
-Importing a store module binds `AGENT_GOVERNANCE_QUERIES` as well as `AGENT_STORE`. That's why the
-governance console and Telescope tab "just work" once persistence is wired — they read the same
-adapter's read-model. See [Cost & Governance](/docs/agent/guides/cost-and-governance).
+<Callout type="info" title="One import, read + write + pricing">
+Importing a store module binds `AGENT_GOVERNANCE_QUERIES` and `AGENT_PRICING_STORE` as well as
+`AGENT_STORE`. That's why the governance console and Telescope tab "just work" once persistence is
+wired — they read the same adapter's read-model. Cost estimates are the exception: they stay `$0`
+until something writes to `AGENT_PRICING_STORE`, since a fresh pricing table has no rows to read. See
+[Cost & Governance](/docs/agent/guides/cost-and-governance).
 </Callout>
 
 ---
@@ -93,7 +98,7 @@ pnpm add @dudousxd/nestjs-agent-store-mikro-orm @mikro-orm/core @mikro-orm/nestj
 ```
 
 `MikroOrmAgentStoreModule.forFeature()` registers the five agent entities (`EntitySchema`) and binds
-both tokens. It needs a `MikroOrmModule.forRoot(...)` in scope for the `EntityManager`.
+all three tokens. It needs a `MikroOrmModule.forRoot(...)` in scope for the `EntityManager`.
 
 ```ts
 import { MikroOrmModule } from '@mikro-orm/nestjs';
@@ -103,7 +108,7 @@ import { AgentModule } from '@dudousxd/nestjs-agent';
 @Module({
   imports: [
     MikroOrmModule.forRoot(/* your config */),
-    MikroOrmAgentStoreModule.forFeature(), // registers entities + binds AGENT_STORE (+ queries)
+    MikroOrmAgentStoreModule.forFeature(), // registers entities + binds AGENT_STORE (+ queries + pricing)
     AgentModule.forRoot({
       model: myModelProvider,
       // no `store` — the agent reads it from AGENT_STORE
@@ -154,7 +159,7 @@ await ensureAgentSchema(db); // idempotent CREATE TABLE IF NOT EXISTS — or run
 
 @Module({
   imports: [
-    DrizzleAgentStoreModule.forRoot({ db }), // binds AGENT_STORE + AGENT_GOVERNANCE_QUERIES
+    DrizzleAgentStoreModule.forRoot({ db }), // binds AGENT_STORE + AGENT_GOVERNANCE_QUERIES + AGENT_PRICING_STORE
     AgentModule.forRoot({
       model: myModelProvider,
       defaultRoles: ['ADMIN'],
@@ -166,7 +171,8 @@ export class AppModule {}
 ```
 
 The package ships `agentSchema` (the Drizzle tables), `ensureAgentSchema` (the
-`CREATE TABLE IF NOT EXISTS` helper), `DrizzleAgentStore`, and `DrizzleGovernanceQueries`.
+`CREATE TABLE IF NOT EXISTS` helper), `DrizzleAgentStore`, `DrizzleGovernanceQueries`, and
+`DrizzlePricingStore`.
 
 <Callout type="warn" title="ensureAgentSchema is a quick start, not a migration story">
 `ensureAgentSchema` never drops or alters an existing column, so it can't evolve a table once it
@@ -190,7 +196,7 @@ rest of your stack.
 | Connection | MikroORM owns it (`forRoot`) | host owns it, passes `db` in |
 | Schema | MikroORM migrations (or `ensureAgentSchema`) | drizzle-kit migrations (or `ensureAgentSchema`) |
 | Dialects | whatever your MikroORM driver supports | SQLite-dialect (better-sqlite3, libsql, D1, …) |
-| Binds | `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` | `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` |
+| Binds | `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` + `AGENT_PRICING_STORE` | `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` + `AGENT_PRICING_STORE` |
 
 Reach for the adapter that matches the ORM already in your app. The SPI is the portability guarantee:
 if you migrate ORMs later, only the store module import changes — the agent, the tools, and the
@@ -201,9 +207,9 @@ governance surfaces are untouched.
 ## In-memory store for tests
 
 For offline tests and demos, `@dudousxd/nestjs-agent-testing` ships an `InMemoryAgentStore` (plus
-`InMemoryGovernanceQueries`, an `InMemoryQuotaStore`, `InMemoryTokenStreamSink`, and a deterministic
-fake model). No database, no migrations — the whole loop (auto-executing reads, a suspending action
-tool, multi-agent delegation) runs with zero infrastructure.
+`InMemoryGovernanceQueries`, `InMemoryPricingStore`, an `InMemoryQuotaStore`, `InMemoryTokenStreamSink`,
+and a deterministic fake model). No database, no migrations — the whole loop (auto-executing reads, a
+suspending action tool, multi-agent delegation) runs with zero infrastructure.
 
 ```ts
 import { InMemoryAgentStore } from '@dudousxd/nestjs-agent-testing';

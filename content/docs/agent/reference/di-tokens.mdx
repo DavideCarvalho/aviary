@@ -21,6 +21,7 @@ All tokens live in `packages/core/src/tokens.ts` and are `Symbol.for(...)` (glob
 | `AGENT_REGISTRY` | `AgentRegistry` | always — seeded with the default agent definition; `forFeature` registers more into the same instance | You need to look up an `AgentDefinition` by name outside the runner. |
 | `AGENT_ACTOR_RESOLVER` | `ActorResolver` | `options.actorResolver` (required — no default) | You need to resolve the calling `Actor` yourself, e.g. in a guard. |
 | `AGENT_GOVERNANCE_QUERIES` | `AgentGovernanceQueries` | a store adapter module (e.g. `MikroOrmAgentStoreModule`), consumed by the dashboard's `DashboardService` and the `-telescope` extension | You're building a custom governance/reporting surface over spend, usage, or thread history. |
+| `AGENT_PRICING_STORE` | `AgentPricingStore` | a store adapter module (e.g. `MikroOrmAgentStoreModule`) | You need to seed or update model prices (`upsertModelPrice`, `seedModelPrices`) — see [Cost & Governance](/docs/agent/guides/cost-and-governance#seeding-prices). Without it, unpriced models estimate at `$0`. |
 | `AGENT_DEPS_FACTORY` | `AgentDepsFactory` | `AgentDepsFactory` class, via `useExisting` | You need per-agent resolved deps (sink, personas, default persona) outside `AgentService`. A `Symbol.for` token — not the class — because tsup's dual index/durable bundles each get their own copy of the class. |
 
 <Callout type="warn" title="AGENT_STORE may be unbound">

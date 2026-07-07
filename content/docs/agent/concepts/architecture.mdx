@@ -25,7 +25,7 @@ an answer:
 | `AgentGovernanceQueries` | Spend/usage read-model (the analytics path) | Same MikroORM/Drizzle store packages; `InMemoryGovernanceQueries` (`-testing`) |
 | `ActorResolver` | Who's calling | `HeaderActorResolver` (`-nestjs`, gateway-only) — required, no default; you must supply one |
 | `RolesPolicy` | May this actor call this tool | `DefaultRolesPolicy` (role set-intersection, `-core`); `AuthzRolesPolicy` (`-authz`, delegates to a `nestjs-authz` Gate) |
-| `TokenStreamSink` | Live token transport (the data plane) | `InProcessTokenStreamSink` (`-nestjs`, the module default); for multi-replica, supply your own shared-transport sink (e.g. Redis pub/sub keyed by `runId`) via `forRoot({ sink })` |
+| `TokenStreamSink` | Live token transport (the data plane) | `InProcessTokenStreamSink` (`-nestjs`, the module default); for multi-replica, `RedisTokenStreamSink` (`-transport-redis`) via `forRoot({ sink })` |
 | `QuotaStore` | Per-actor daily token budget | `LedgerQuotaStore` (`-core`, ledger-backed — turns on with `quotaLimitTokens`, no shared state needed); `InMemoryQuotaStore` (`-testing`); omit both to skip quota checking |
 | `AgentRunner` | Executing a turn | `InlineAgentRunner` (`-nestjs`, the module default); the durable runner from `AgentDurableModule` |
 

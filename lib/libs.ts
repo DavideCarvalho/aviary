@@ -44,7 +44,7 @@ export const libs: AviaryLib[] = [
     bird: 'Magpie',
     icon: Bot,
     iconName: 'Bot',
-    packages: 12,
+    packages: 13,
     stage: 'wip',
   },
   {

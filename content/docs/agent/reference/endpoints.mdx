@@ -11,9 +11,17 @@ All routes below assume the default `path: 'agent'` (set via [`AgentModule.forRo
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| `POST` | `/agent/chat` | `{ message: string; threadId?: string; agent?: string; persona?: string; pageContext?: PageContext }` | SSE stream (see below) |
+| `POST` | `/agent/chat` | `{ message: string; threadId?: string; agent?: string; persona?: string; pageContext?: PageContext; regenerate?: boolean }` | SSE stream (see below) |
 | `GET` | `/agent/chat/:runId/stream` | — | SSE stream — reconnect to an in-flight run |
 | `POST` | `/agent/chat/:runId/cancel` | — | `{ aborted: boolean }` |
+
+`regenerate: true` re-runs the last exchange instead of appending a new user message: the loop
+truncates everything after the thread's last user message and re-answers it. It requires an existing
+`threadId` — there's no last exchange to redo on a fresh thread — and, like the ownership-scoped
+routes below, the caller must own that thread.
+
+`POST /agent/chat/:runId/cancel` is ownership-scoped: it resolves the acting actor and checks they
+own the run — `403` if it belongs to someone else, `404` if the run doesn't exist.
 
 <Callout type="info" title="The chat response is a stream, not JSON">
   `POST /agent/chat` responds `Content-Type: text/event-stream` with headers `X-Agent-Run-Id` and `X-Agent-Thread-Id`. The first frame is `event: meta` carrying `data: { runId, threadId }`, followed by `data: { delta: string }` frames as tokens arrive, and a closing `event: done`. `GET /agent/chat/:runId/stream` pipes the same format to resume/tail a run (its `meta` frame's `threadId` is `undefined`, since the thread isn't re-resolved on reconnect). A failed run (e.g. quota exceeded) ends the stream with `event: error` carrying `data: { code, message }` (`code` is `quota_exceeded` or `run_failed`) instead of appending error text to the assistant message.

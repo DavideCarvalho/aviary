@@ -178,6 +178,26 @@ structured error shape if you want the model to reason about the failure.
 
 ---
 
+## Per-tool timeout
+
+By default a tool call runs until it resolves — nothing bounds it. Set
+`AgentModule.forRoot({ toolTimeoutMs })` to cap every tool call's wall-clock time: a call that runs
+longer is aborted and recorded as a failed tool call, with the timeout fed back to the model as the
+result, so it can adapt (retry narrower input, try a different tool, or tell the user) instead of the
+turn hanging indefinitely.
+
+```ts
+AgentModule.forRoot({
+  model: myModelProvider,
+  actorResolver: new HeaderActorResolver(),
+  toolTimeoutMs: 30_000, // no tool call may run longer than 30s
+});
+```
+
+See [Configuration](/docs/agent/reference/configuration) for the full option reference.
+
+---
+
 ## The tool context (`AiToolCtx`)
 
 The second argument gives you everything about the invocation without reaching for request-scoped

@@ -59,7 +59,8 @@ await ensureAgentSchema(orm); // orm.schema.update({ safe: true }) — create + 
 ```
 
 <Callout type="warn" title="MikroOrmAgentStoreModule.forFeature() is global">
-It binds `AGENT_STORE` and `AGENT_GOVERNANCE_QUERIES` on a **global** Nest module. Import it once —
+It binds `AGENT_STORE`, `AGENT_GOVERNANCE_QUERIES`, and `AGENT_PRICING_STORE` on a **global** Nest
+module. Import it once —
 `AgentModule.forRoot({...})` (and the dashboard/telescope surfaces) resolve both tokens app-wide with
 no re-binding. Do not import it more than once expecting scoped behavior.
 </Callout>
@@ -68,9 +69,10 @@ no re-binding. Do not import it more than once expecting scoped behavior.
 
 | Export | Kind | Purpose |
 |---|---|---|
-| `MikroOrmAgentStoreModule` | `DynamicModule` factory | `.forFeature()` registers the five entities and binds `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` globally |
+| `MikroOrmAgentStoreModule` | `DynamicModule` factory | `.forFeature()` registers the five entities and binds `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` + `AGENT_PRICING_STORE` globally |
 | `MikroOrmAgentStore` | class | `AgentStore` implementation — the write side (threads, messages, tool calls, usage) |
 | `MikroOrmGovernanceQueries` | class | `AgentGovernanceQueries` implementation — the read-model (spend by model/actor, usage trend, recent activity) |
+| `MikroOrmPricingStore` | class | `AgentPricingStore` implementation — `upsertModelPrice` / `listCurrentPrices`, the write side of model pricing (see [Cost & Governance](/docs/agent/guides/cost-and-governance#seeding-prices)) |
 | `ensureAgentSchema(orm, opts?)` | function | Non-destructive `schema.update({ safe: true })` — create + add-column, never drop or alter |
 | `AGENT_ENTITIES` | `EntitySchema[]` | The five agent entity schemas, pre-stamped with `utf8mb4_unicode_ci` for MySQL parity |
 | `agentEntities({ collation? })` | function | Builds the entity schemas with a custom (or no) collation, e.g. for SQLite |

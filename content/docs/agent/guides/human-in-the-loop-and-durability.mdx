@@ -152,6 +152,15 @@ curl -X POST http://localhost:3000/agent/chat/$RUN_ID/cancel \
   -H 'x-actor-id: u1' -H 'x-actor-role: ADMIN'
 ```
 
+Cancel is ownership-scoped, same as approve/reject: the acting actor must own the run, or the
+request gets a `403` (`404` if the run doesn't exist).
+
+<Callout type="info" title="A failed durable run surfaces the same way as an inline one">
+Durable runs emit `event: error` on a failure (e.g. quota exceeded) exactly like the inline runner —
+the HTTP stream ends with the structured error frame instead of hanging. Durability changes how the
+run is checkpointed, not how a failure is reported to the client.
+</Callout>
+
 ---
 
 ## Observability

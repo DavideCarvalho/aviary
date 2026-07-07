@@ -115,6 +115,50 @@ cache rates to make the fallback precise for prompt-cached models:
 Supersede a price by inserting a new `isCurrent: true` row and clearing the flag on the old one; the
 read-model always joins to the current row, and historical rows are ignored.
 
+### Seeding prices
+
+<Callout type="warn" title="Unpriced models cost $0">
+The pricing table starts empty. Until something writes a row for a model, that model's estimate has
+no current price to join against, and every turn against it is costed at `$0` — tokens still
+accumulate correctly, only the dollar figure is missing. Seeding prices isn't optional for accurate
+cost reporting; it's a required setup step, same as wiring a store.
+</Callout>
+
+The write side is a separate SPI, `AgentPricingStore` (from `@dudousxd/nestjs-agent-core`), bound to
+the `AGENT_PRICING_STORE` token by the same store module that binds `AGENT_STORE`:
+
+```ts
+interface AgentPricingStore {
+  upsertModelPrice(input: ModelPriceInput): Promise<void>; // atomic supersede — retires the old
+                                                             // current row, inserts a new one now
+  listCurrentPrices(): Promise<CurrentModelPrice[]>;
+}
+```
+
+Inject it and seed prices at boot, either one at a time with `upsertModelPrice` or in bulk with the
+`seedModelPrices(store, prices[])` helper:
+
+```ts
+import { Inject, Injectable, OnApplicationBootstrap } from '@nestjs/common';
+import { AGENT_PRICING_STORE, seedModelPrices, type AgentPricingStore } from '@dudousxd/nestjs-agent';
+
+@Injectable()
+export class SeedAgentPricing implements OnApplicationBootstrap {
+  constructor(@Inject(AGENT_PRICING_STORE) private readonly pricing: AgentPricingStore) {}
+
+  async onApplicationBootstrap() {
+    await seedModelPrices(this.pricing, [
+      { modelId: 'claude-sonnet-4-6', inputPricePer1m: 3, outputPricePer1m: 15, cacheWritePricePer1m: 3.75, cacheReadPricePer1m: 0.3 },
+    ]);
+  }
+}
+```
+
+`upsertModelPrice` is the same atomic supersede described above, just exposed as a real write path
+instead of a manual insert — it retires the model's current row and inserts the new one as current,
+effective now. `-store-mikro-orm` and `-store-drizzle` both ship an implementation
+(`MikroOrmPricingStore` / `DrizzlePricingStore`); `-testing` ships `InMemoryPricingStore` for tests.
+
 ---
 
 ## The read-model
@@ -151,6 +195,17 @@ explicit `quota: QuotaStore` instead if you need a different backing store; it w
 A run that goes over quota ends its stream with a structured `run.failed` error
 (`code: 'quota_exceeded'`) rather than a plain diagnostics event alone — see
 [Frontend](/docs/agent/guides/frontend) for how that surfaces client-side.
+
+---
+
+## Follow-up suggestions cost an extra call
+
+`AgentModule.forRoot({ followUps: true | { count } })` proposes short follow-up questions after the
+final turn — but it does so with one **additional** model call, over and above the turn's own steps.
+That call writes its own usage row (`purpose: 'follow_ups'`), so it shows up in `spendByModel` /
+`spendByActor` like any other, and it counts against quota the same as a normal step. It's off by
+default for exactly this reason — turn it on only where the extra spend is worth the UX. See
+[Configuration](/docs/agent/reference/configuration) for the option.
 
 ---
 

@@ -8,8 +8,8 @@ import { Callout } from 'fumadocs-ui/components/callout';
 `@dudousxd/nestjs-agent-react` connects a React app to the `/agent` endpoints. Its `useAgentChat`
 hook wraps the Vercel AI SDK v7 `useChat` with an `AgentChatTransport` that speaks the backend's
 `/agent/chat` SSE protocol, then layers on everything the REST surface exposes: thread history,
-personas, quota, cancel, and the human-in-the-loop approve/reject. The components ship **no styles**
-— every action is a callback and every class is yours via `classNames`.
+personas, quota, cancel, regenerate, and the human-in-the-loop approve/reject. The components ship
+**no styles** — every action is a callback and every class is yours via `classNames`.
 
 ---
 
@@ -64,7 +64,8 @@ function Assistant({ me }: { me: { id: string; roles: string[] } }) {
 ```
 
 The return value is the AI SDK `useChat` result (`messages`, `sendMessage`, `status`, `stop`,
-`regenerate`, `error`, …) **plus** the agent extras below.
+`regenerate`, `error`, …) **plus** the agent extras below. `AgentChatTransport` wires the SDK's own
+`regenerate()` to a real backend regenerate — see [Regenerating a turn](#regenerating-a-turn) below.
 
 | Option | Type | Purpose |
 |---|---|---|
@@ -228,6 +229,26 @@ is identical whether the backend runs the turn durably or in-process, so the UI 
 `approve` / `reject` POST to `/agent/tool-call/approve` · `/reject` for the hook's current `runId`.
 The same run id backs `cancel`, which stops the SSE client-side and then hard-aborts the run server-side.
 </Callout>
+
+---
+
+## Regenerating a turn
+
+Calling `chat.regenerate()` (the AI SDK's own method, unchanged on the surface) now sends
+`regenerate: true` on the `/agent/chat` request instead of just replaying client-side state. The
+backend truncates everything after the thread's last user message and re-answers it — no duplicate
+user message appears, and the assistant's prior reply is what gets replaced.
+
+```tsx
+<MessageList
+  messages={chat.messages}
+  status={chat.status}
+  onRetry={() => chat.regenerate()}
+/>
+```
+
+Regenerate requires an existing `threadId` (there's no prior exchange to redo on a fresh thread) and,
+same as `cancel`, is ownership-scoped over HTTP — it operates on the caller's own thread.
 
 ---
 

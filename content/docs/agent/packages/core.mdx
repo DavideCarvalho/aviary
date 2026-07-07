@@ -60,7 +60,8 @@ members — see the source for full JSDoc.
 | SPI | Purpose | Key shape |
 |---|---|---|
 | `ModelProvider` | Wraps the actual LLM call. | `runTurn(args: ModelTurnArgs): Promise<ModelTurnResult>` — `args` carries `system`, `messages`, `tools`, a `sink: SinkWriter` for live deltas, `abortSignal`; the result carries `text`, `toolCalls`, `usage`, optional `modelId` and `costUsd`. |
-| `AgentStore` | ORM-agnostic persistence for threads, messages, tool calls, and usage. | `createThread` / `getThread` / `listThreads` / `forkThread` / `appendMessage` / `truncateFrom` / `recordToolCall` / `updateToolCall` / `recordUsage` / `quotaToday` / `ownerOfThread(threadId): Promise<string \| null>` / `ownerOfToolCall(toolCallId): Promise<string \| null>`. |
+| `AgentStore` | ORM-agnostic persistence for threads, messages, tool calls, and usage. | `createThread` / `getThread` / `listThreads` / `forkThread` / `appendMessage` / `truncateFrom` / `recordToolCall` / `updateToolCall` / `recordUsage` / `quotaToday` / `ownerOfThread(threadId): Promise<string \| null>` / `ownerOfToolCall(toolCallId): Promise<string \| null>` / `ownerOfActiveStream(runId): Promise<string \| null>`. |
+| `AgentPricingStore` | Write side of model pricing — the SPI that seeds the pricing table the cost estimate reads. | `upsertModelPrice(input: ModelPriceInput): Promise<void>` (atomic supersede — retires the model's current row, inserts a new current one) / `listCurrentPrices(): Promise<CurrentModelPrice[]>`. |
 | `AgentGovernanceQueries` | The read/analytics half of the store — the dashboard and Telescope tab both consume this one interface. | `spendByModel(range)` / `spendByActor(range)` / `usageTrend(range)` / `recentToolCalls(limit)` / `recentThreads(limit)`. |
 | `ActorResolver` | Resolves the caller for an inbound request — the identity seam; no default fabricates one, and it's a required option — there's no throwing placeholder to fall back to. | `resolve(req: unknown): Actor \| Promise<Actor>`. |
 | `RolesPolicy` | Decides whether an actor may invoke a tool. | `can(actor: Actor, tool: ToolSpec): boolean \| Promise<boolean>`. |
@@ -83,13 +84,16 @@ tool call as its own step so a turn stays replay-safe when it's executing as a d
 | `AiToolCtx` | `{ actor, threadId, runId, requestId, persona?, pageContext?, host? }` — handed to every `ToolHandler.execute`. |
 | `MessageUsage` | `{ inputTokens, outputTokens, cacheWriteTokens?, cacheReadTokens?, reasoningTokens? }` — the cache-aware usage shape behind cost accounting. |
 | `AgentDefinition` | `{ name, systemPrompt?, tools?, delegatesTo?, personas?, defaultPersona?, modelId?, maxSteps? }` — one named agent (the default one, or a `forFeature`-registered one). |
+| `ModelPriceInput` | `{ modelId, inputPricePer1m, outputPricePer1m, cacheWritePricePer1m?, cacheReadPricePer1m? }` — the shape `AgentPricingStore.upsertModelPrice` accepts. |
 
 ## Also exported
 
 `ToolRegistry`, `DefaultRolesPolicy`, `AgentRegistry`, the error classes
-(`ToolForbiddenError`, `ToolNotFoundError`, `ToolInputInvalidError`, `QuotaExceededError`), and the
-`aviary:agent:*` diagnostics helpers — re-exported by the umbrella package too, so an app importing
-`@dudousxd/nestjs-agent` never needs a direct dependency on `-core`.
+(`ToolForbiddenError`, `ToolNotFoundError`, `ToolInputInvalidError`, `QuotaExceededError`), the
+`seedModelPrices(store, prices[])` helper (loops `upsertModelPrice` over an array — the quick way to
+seed a pricing table at boot), and the `aviary:agent:*` diagnostics helpers — re-exported by the
+umbrella package too, so an app importing `@dudousxd/nestjs-agent` never needs a direct dependency on
+`-core`.
 
 See [Getting Started](/docs/agent/getting-started) to wire the loop into a NestJS app, or
 [Concepts → Architecture](/docs/agent/concepts/architecture) for how the SPIs above compose into a

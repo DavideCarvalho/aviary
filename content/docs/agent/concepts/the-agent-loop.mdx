@@ -59,6 +59,14 @@ with the actor, thread, model id, and token counts — the raw material the
 [cost and quota machinery](/docs/agent/concepts/governance) rolls up. A turn with three internal
 steps writes three usage rows, not one.
 
+## Optional: follow-up suggestions after the loop ends
+
+With `AgentModule.forRoot({ followUps: true })`, once the loop breaks (step 3 above) the turn makes
+**one more** model call — outside the `maxSteps`-bounded loop — asking for short follow-up questions.
+The result lands on the assistant message's `followUps` field and writes its own usage row
+(`purpose: 'follow_ups'`). It's off by default: the loop's job is answering the turn; follow-ups are
+an opt-in, separately-costed extra. See [Cost & Governance](/docs/agent/guides/cost-and-governance).
+
 ## Where to go next
 
 <Cards>
