@@ -1,0 +1,116 @@
+---
+title: '@dudousxd/nestjs-agent-testing'
+description: In-memory store, governance queries, quota, token sink, and a deterministic fake model — the whole agent loop, offline.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+Every SPI the agent depends on, in-memory: `AgentStore`, `AgentGovernanceQueries`, `QuotaStore`,
+`TokenStreamSink`, and a scripted `ModelProvider`. Exercise auto-executing reads, a suspending action
+tool, and multi-agent delegation with no API key, no database, and no Redis.
+
+<Tabs items={['pnpm', 'npm']}>
+<Tab value="pnpm">
+
+```bash
+pnpm add -D @dudousxd/nestjs-agent-testing
+```
+
+</Tab>
+<Tab value="npm">
+
+```bash
+npm install -D @dudousxd/nestjs-agent-testing
+```
+
+</Tab>
+</Tabs>
+
+## Minimal example
+
+```ts
+import { AgentModule, HeaderActorResolver } from '@dudousxd/nestjs-agent';
+import { FakeModelProvider, InMemoryAgentStore, echoScript } from '@dudousxd/nestjs-agent-testing';
+
+AgentModule.forRoot({
+  model: new FakeModelProvider(echoScript('Hello from the fake model.')),
+  store: new InMemoryAgentStore(), // pass directly instead of importing a store module
+  defaultRoles: ['ADMIN'],
+  actorResolver: new HeaderActorResolver(),
+});
+```
+
+Script a tool call instead of a plain reply by returning `toolCall` from a `FakeScript` — the
+function receives `(args, turnIndex)`, so the script is a pure function of the turn history:
+
+```ts
+import { FakeModelProvider, type FakeScript } from '@dudousxd/nestjs-agent-testing';
+
+const script: FakeScript = (args, turnIndex) =>
+  turnIndex === 0
+    ? { text: '', toolCall: { name: 'getWeather', input: { city: 'Lisbon' } } }
+    : { text: "It's partly cloudy in Lisbon." };
+
+const model = new FakeModelProvider(script);
+```
+
+## Exports
+
+| Export | Kind | Purpose |
+|---|---|---|
+| `FakeModelProvider` | class (`ModelProvider`) | Deterministic, offline model — streams a scripted reply to the sink and optionally requests one tool call |
+| `FakeScript` | type | `(args: ModelTurnArgs, turnIndex: number) => FakeTurn` — a pure function of the turn history |
+| `FakeTurn` | type | `{ text: string; toolCall?: { name: string; input: unknown }; costUsd?: number }` |
+| `echoScript(reply?)` | function → `FakeScript` | Trivial script: stream a fixed reply, never call a tool |
+| `InMemoryAgentStore` | class (`AgentStore`) | Full in-memory store — threads, messages, tool calls, usage — no database |
+| `InMemoryGovernanceQueries` | class (`AgentGovernanceQueries`) | In-memory read-model over an `InMemoryAgentStore`; takes an optional pricing map |
+| `InMemoryModelPrice` | type | `{ inputPricePer1m; outputPricePer1m; cacheWritePricePer1m?; cacheReadPricePer1m? }` — one entry in the pricing map |
+| `InMemoryQuotaStore` | class (`QuotaStore`) | In-memory per-actor/day token budget; constructor takes an optional `limitTokens` (default `1_000_000`) |
+| `InMemoryTokenStreamSink` | class (`TokenStreamSink`) | Buffers streamed chunks per run so a late subscriber (reconnect) replays everything emitted so far, then follows live |
+
+<Callout type="info" title="Pricing map defaults to empty — zero cost, tokens still counted">
+`InMemoryGovernanceQueries` takes an optional `ReadonlyMap<string, InMemoryModelPrice>`. Omit it (the
+default) and every row's estimated cost is `0` while `inputTokens` / `outputTokens` still accumulate
+correctly — pass a map only when a test needs to assert on spend, not just token counts.
+</Callout>
+
+```ts
+import { InMemoryAgentStore, InMemoryGovernanceQueries } from '@dudousxd/nestjs-agent-testing';
+
+const store = new InMemoryAgentStore();
+const queries = new InMemoryGovernanceQueries(
+  store,
+  new Map([['claude-sonnet-4-6', { inputPricePer1m: 3, outputPricePer1m: 15 }]]),
+);
+```
+
+## Peer dependencies
+
+`@dudousxd/nestjs-agent-core` (workspace peer).
+
+## The runnable offline demo
+
+The repo's `examples/agent-demo` is built entirely on these in-memory pieces — a scripted proof of
+auto-executing reads, a suspending action tool, and multi-agent delegation, with zero
+infrastructure:
+
+```bash
+pnpm --filter agent-demo demo   # the offline scripted proof
+pnpm --filter agent-demo start  # the full NestJS app + console at /ai-gateway
+```
+
+## When to use it
+
+Use this package for unit tests of your tools and app wiring, and for any environment where a real
+model/database/Redis would be overkill — CI, demos, local development before you've wired
+persistence. Swap in a real store adapter
+([`store-mikro-orm`](/docs/agent/packages/store-mikro-orm) or
+[`store-drizzle`](/docs/agent/packages/store-drizzle)) and a real `ModelProvider`
+(`@dudousxd/nestjs-agent-ai-sdk`'s `aiSdkModel`) for production — the agent loop and your tools are
+unchanged either way.
+
+## Related
+
+- [Persistence](/docs/agent/guides/persistence) — the `AgentStore` SPI this package's in-memory store implements, and the two real adapters
+- [Getting Started](/docs/agent/getting-started) — the `pnpm --filter agent-demo demo` walkthrough

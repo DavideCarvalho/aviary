@@ -166,13 +166,15 @@ signals off the `aviary:agent:*` diagnostics channel — pick either or both.
     live activity — at `/ai-gateway`.
   </Tab>
   <Tab value="Telescope tab">
-    Already running `@dudousxd/nestjs-telescope`? Add the extension to get the same governance
-    sections as an "Agent" tab (agent runs also show up in the durable "Workflows" tab for free):
+    Already running `@dudousxd/nestjs-telescope`? Register the extension on Telescope's `extensions`
+    array to get the same governance sections as an "Agent" tab (agent runs also show up in the
+    durable "Workflows" tab for free):
 
     ```ts
-    import { AgentTelescopeModule } from '@dudousxd/nestjs-agent-telescope';
+    import { TelescopeModule } from '@dudousxd/nestjs-telescope';
+    import { agentTelescopeExtension } from '@dudousxd/nestjs-agent-telescope';
 
-    @Module({ imports: [AgentTelescopeModule.forRoot()] })
+    @Module({ imports: [TelescopeModule.forRoot({ extensions: [agentTelescopeExtension()] })] })
     export class AppModule {}
     ```
   </Tab>

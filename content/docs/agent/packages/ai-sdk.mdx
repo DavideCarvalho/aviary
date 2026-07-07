@@ -1,0 +1,78 @@
+---
+title: "@dudousxd/nestjs-agent-ai-sdk"
+description: aiSdkModel adapts any Vercel AI SDK v6 LanguageModel to the ModelProvider SPI — streaming, tool-call translation, cache-aware usage, and gateway cost, with zero provider code.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+<Tabs items={['pnpm', 'npm']}>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @dudousxd/nestjs-agent-ai-sdk ai @dudousxd/nestjs-agent-core
+    ```
+  </Tab>
+  <Tab value="npm">
+    ```bash
+    npm install @dudousxd/nestjs-agent-ai-sdk ai @dudousxd/nestjs-agent-core
+    ```
+  </Tab>
+</Tabs>
+
+`aiSdkModel(model, opts?)` is the whole package: it wraps any Vercel AI SDK v6 `LanguageModel` so
+`AgentModule.forRoot({ model })` needs no hand-written `ModelProvider`. Pick a model from any AI SDK
+provider package and pass it straight in.
+
+```ts
+import { aiSdkModel } from '@dudousxd/nestjs-agent-ai-sdk';
+import { anthropic } from '@ai-sdk/anthropic';
+import { AgentModule } from '@dudousxd/nestjs-agent';
+
+AgentModule.forRoot({
+  model: aiSdkModel(anthropic('claude-sonnet-4-6')),
+  // …
+});
+```
+
+`opts` is `CallSettings` — anything you'd pass to the SDK's `streamText` (`temperature`,
+`maxOutputTokens`, `providerOptions`, headers, …). `model`, `system`, `messages`, `tools`, and
+`abortSignal` are owned by the adapter and always win over `opts`.
+
+## What the adapter does
+
+| Concern | Behavior |
+|---|---|
+| Streaming | Calls `streamText`, forwards every `text-delta` to `args.sink` as it arrives, and assembles the full text for the turn result. |
+| Tool calls | Builds an SDK `ToolSet` **without** an `execute` function, so the SDK returns tool-calls for the agent loop to run as its own steps — the adapter never executes a tool itself. |
+| Usage | Maps SDK `LanguageModelUsage` to the core `MessageUsage` shape, including cache (`cacheWriteTokens` / `cacheReadTokens`) and reasoning (`reasoningTokens`) breakdowns when the provider reports them. |
+| Cost | Reads a gateway's real reported cost — Vercel AI Gateway's `providerMetadata.gateway.cost`, then OpenRouter's `total_cost` — into `costUsd`. Direct providers (Anthropic/OpenAI/Bedrock direct) report only tokens, so `costUsd` is left `undefined` and the governance read-model estimates instead. See [Cost & Governance](/docs/agent/guides/cost-and-governance). |
+| Model id | Surfaces `response.modelId` on the result when the SDK reports one, so accounting reflects the model actually used rather than only the configured id. |
+
+## Tool schemas reach the model as real shapes
+
+A tool's `input` is a [Standard Schema](https://standardschema.dev) — Zod, Valibot, or ArkType all
+work (see [Tools](/docs/agent/guides/tools)). The adapter recognizes two forms and hands them straight
+to the SDK's own schema conversion rather than degrading them:
+
+- **Zod** — detected by its `~standard.vendor === 'zod'` tag; the SDK converts it with its native
+  zod-to-json-schema path.
+- **Valibot / ArkType / Zod 4** — detected by the Standard JSON Schema extension
+  (`~standard.jsonSchema`); the SDK calls its `input()` converter.
+
+Either way the model sees the tool's real parameter names and required fields, not a generic object.
+A hand-rolled Standard Schema that implements neither still validates correctly (the loop calls
+`~standard.validate` before running the handler), but the adapter degrades its *model-facing* schema
+to a permissive `{ type: 'object', additionalProperties: true }` — the model has to guess the
+arguments. Implement `~standard.jsonSchema` on a custom schema to avoid that.
+
+<Callout type="info" title="Peer dependency: ai ^6.0.0">
+`ai` is a peer, not a bundled dependency — bring the AI SDK version your app already uses. `@ai-sdk/*`
+provider packages (`@ai-sdk/anthropic`, `@ai-sdk/openai`, `@ai-sdk/amazon-bedrock`, …) are separate
+installs; pick whichever the model in `aiSdkModel(...)` needs.
+</Callout>
+
+## Related
+
+- [Getting Started](/docs/agent/getting-started) — the zero-boilerplate model path in full
+- [Cost & Governance](/docs/agent/guides/cost-and-governance) — reported-cost-wins, the cache-aware fallback estimate, and the pricing table
+- [Tools](/docs/agent/guides/tools) — why Standard Schema shape matters for tool calling

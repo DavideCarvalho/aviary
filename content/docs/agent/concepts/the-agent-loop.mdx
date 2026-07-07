@@ -1,0 +1,73 @@
+---
+title: The agent loop
+description: One turn is model → tools → model, bounded by maxSteps, with a usage row appended every time the model is called.
+---
+
+import { Cards, Card } from 'fumadocs-ui/components/card';
+
+A **turn** is the unit of work behind one chat message: the model responds, the loop runs whatever
+tools it asked for, and feeds the results back — repeating until the model stops calling tools or a
+step ceiling is hit. Everything else in the library (governance, cost, HITL) hangs off this one
+iteration.
+
+## model → tools → model
+
+Each pass through the loop is one **step**:
+
+1. The model is called with the system prompt, the thread's messages so far, and the tools the actor
+   is allowed to see. This is one `ModelProvider.runTurn` call.
+2. A usage row is appended — unconditionally, whether or not the model asked for a tool.
+3. If the model returned zero tool calls, the loop **breaks** — the turn is done.
+4. Otherwise, each requested tool call is resolved by its `kind`, and the results are fed back to the
+   model as the next step's input.
+
+```text
+step 0: model → [toolCallA, toolCallB]
+        toolCallA (read)   → auto-executes
+        toolCallB (action) → suspends for approval, then executes
+step 1: model (sees both results) → []
+        loop breaks — turn done
+```
+
+## `read` vs `action`
+
+A tool call's `kind` decides whether it runs unattended or waits for a human — see
+[Tools](/docs/agent/guides/tools) for the full decorator surface:
+
+| `kind` | What happens | Use for |
+|---|---|---|
+| `read` | Auto-executes immediately, same step | Lookups, queries — anything side-effect-free |
+| `action` | Loop suspends for an explicit approve/reject before `execute` runs | Anything that mutates, spends, sends, or deletes |
+| `agent` | Synthesized, never hand-authored — delegates to a named sub-agent | Multi-agent orchestration |
+
+A rejected `action` call doesn't throw — its result (`{ rejected: true, reason }`) is fed back to the
+model like any other tool result, so the model can adapt within the same turn instead of failing it.
+
+## Bounded by `maxSteps`
+
+The loop is a plain bounded iteration, not a "runs until done" open loop:
+
+```ts
+for (let i = 0; i < maxSteps; i += 1) {
+  // one model call, then its tool calls
+}
+```
+
+`maxSteps` comes from the `AgentDefinition` (`AgentModule.forRoot({ defaultAgent: { maxSteps } })`,
+or per named agent via `forFeature`) and **defaults to 8** when omitted. It exists to stop a
+model that keeps calling tools from running away with an unbounded turn — hitting the ceiling ends
+the turn with whatever text the last step produced.
+
+## Every turn appends a usage row
+
+Step 2 above isn't conditional on tool calls: **every** model call writes a row to the usage ledger,
+with the actor, thread, model id, and token counts — the raw material the
+[cost and quota machinery](/docs/agent/concepts/governance) rolls up. A turn with three internal
+steps writes three usage rows, not one.
+
+## Where to go next
+
+<Cards>
+  <Card title="Tools" href="/docs/agent/guides/tools" description="@AiTool classes, read vs action, the handler signature, and the tool context." />
+  <Card title="Human-in-the-loop & Durability" href="/docs/agent/guides/human-in-the-loop-and-durability" description="How an action tool's suspend is implemented under each runner." />
+</Cards>

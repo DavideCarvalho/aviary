@@ -1,0 +1,93 @@
+---
+title: '@dudousxd/nestjs-agent-telescope'
+description: Telescope extension that adds an "Agent" tab — live runs + tool calls off diagnostics, historical spend off the governance read-model.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+The first-class `@dudousxd/nestjs-telescope` extension for nestjs-agent. It adds an "Agent" tab fed
+by two sources: the `aviary:agent:*` diagnostics channel (live runs, tool calls) via a watcher, and
+the `AGENT_GOVERNANCE_QUERIES` read-model (historical spend/usage) via a set of dashboard data
+providers.
+
+<Tabs items={['pnpm', 'npm']}>
+<Tab value="pnpm">
+
+```bash
+pnpm add @dudousxd/nestjs-agent-telescope @dudousxd/nestjs-telescope
+```
+
+</Tab>
+<Tab value="npm">
+
+```bash
+npm install @dudousxd/nestjs-agent-telescope @dudousxd/nestjs-telescope
+```
+
+</Tab>
+</Tabs>
+
+## Minimal example
+
+Register `agentTelescopeExtension()` on Telescope's `extensions` array, same as any other Telescope
+extension:
+
+```ts
+import { TelescopeModule } from '@dudousxd/nestjs-telescope';
+import { agentTelescopeExtension } from '@dudousxd/nestjs-agent-telescope';
+
+@Module({
+  imports: [
+    TelescopeModule.forRoot({
+      authorizer: () => true, // restrict in production
+      extensions: [agentTelescopeExtension()],
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+<Callout type="warn" title="The governance panels need AGENT_GOVERNANCE_QUERIES bound">
+The Spend / Models / Actors panels resolve `AGENT_GOVERNANCE_QUERIES` from the host DI container at
+request time. The host must bind that token — by importing a store module
+([`store-mikro-orm`](/docs/agent/packages/store-mikro-orm), [`store-drizzle`](/docs/agent/packages/store-drizzle),
+or [`testing`](/docs/agent/packages/testing)'s `InMemoryGovernanceQueries`) — in the same app that
+registers `TelescopeModule.forRoot({ extensions: [agentTelescopeExtension()] })`. If the binding is
+absent, those panels render an empty state; the live watcher-fed panels (runs, tool calls) keep
+working regardless, since they depend only on the diagnostics channel.
+</Callout>
+
+<Callout type="info" title="Runs also show up in the Workflows tab, for free">
+Under the durable runner (`AgentModule.forRoot({ durable: true })`), each turn is a durable workflow,
+so it already appears in `@dudousxd/nestjs-durable`'s Telescope "Workflows" tab with no extra wiring
+— the Agent tab's governance sections are additive, not a replacement.
+</Callout>
+
+## Exports
+
+| Export | Kind | Purpose |
+|---|---|---|
+| `agentTelescopeExtension()` | function → `TelescopeExtension` | The extension: registers the watcher, the `agent` entry type, the "Agent" dashboard, and every data provider below |
+| `AgentTelescopeWatcher` | class (`Watcher`) | Subscribes to `aviary:agent:*` diagnostics (`run.started`, `message`, `tool-call`, `quota.exceeded`, `run.finished`) and records each as a Telescope entry of type `agent` |
+| `agentDashboard()` | function | The "Agent" dashboard definition (panels wired to the data providers) |
+| `agentRunsProvider`, `agentTokensProvider`, `agentToolsProvider`, `agentToolStatusProvider` | data providers | Live activity panels, sourced from watcher-recorded entries |
+| `agentSpendTotalProvider`, `agentTokensTotalProvider`, `agentSpendByModelProvider`, `agentModelSpendTableProvider`, `agentSpendByActorProvider`, `agentActorSpendTableProvider`, `agentUsageTrendProvider` | data providers | Governance panels, sourced from `AGENT_GOVERNANCE_QUERIES` |
+| `resolveRange`, `shiftUtcDay` | functions | Range/day-bucketing helpers shared by the governance providers |
+| `toActorSpendRows`, `toActorSpendSegments`, `toModelSpendRows`, `toModelSpendSegments`, `totalCostUsd`, `totalTokens`, `toUsageTrendRows` | functions | Pure row/segment shaping helpers behind the governance panels |
+
+## Peer dependencies
+
+`@dudousxd/nestjs-telescope` (`>=1.15.0`).
+
+## When to use it
+
+Add this package once you're already running `@dudousxd/nestjs-telescope` and want agent runs, tool
+calls, and spend in the same console as your requests, queries, and jobs — no separate route to
+stand up. If you don't run Telescope, `@dudousxd/nestjs-agent-dashboard` gives you the same
+governance surfaces standalone (see [Cost & Governance](/docs/agent/guides/cost-and-governance)).
+
+## Related
+
+- [Cost & Governance](/docs/agent/guides/cost-and-governance) — the ledger, the read-model, and surfacing it via dashboard or Telescope tab
+- [Telescope docs](/docs/telescope) — the extension mechanism, watchers, and the console itself

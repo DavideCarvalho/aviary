@@ -1,0 +1,91 @@
+---
+title: "@dudousxd/nestjs-agent-dashboard"
+description: A standalone AI-gateway governance console — bundled React SPA + JSON/SSE API mounted at its own route, no Telescope required — plus a dependency-free client subpath.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+<Tabs items={['pnpm', 'npm']}>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @dudousxd/nestjs-agent-dashboard
+    ```
+  </Tab>
+  <Tab value="npm">
+    ```bash
+    npm install @dudousxd/nestjs-agent-dashboard
+    ```
+  </Tab>
+</Tabs>
+
+`AgentDashboardModule` mounts a bundled React SPA and its JSON + SSE API at their own route — spend
+per model/actor, a usage trend, and live tool-call/thread activity — without needing
+`@dudousxd/nestjs-telescope` installed at all.
+
+```ts
+import { Module } from '@nestjs/common';
+import { AgentDashboardModule } from '@dudousxd/nestjs-agent-dashboard';
+
+@Module({
+  imports: [AgentDashboardModule.forRoot({ basePath: '/ai-gateway' })],
+})
+export class AppModule {}
+```
+
+## `AgentDashboardModule.forRoot(options?)`
+
+| Option | Default | Purpose |
+|---|---|---|
+| `basePath` | `/ai-gateway` | Where the SPA is served — a page route, kept out of any `/api` prefix. |
+| `apiBasePath` | `<basePath>/api` | Where the JSON + SSE API is mounted (what the SPA fetches). Set it under your app's own `/api` prefix so it inherits your auth/proxy rules while the UI stays at `basePath`. |
+
+It requires `AGENT_GOVERNANCE_QUERIES` to already be bound — import it alongside your
+`AgentModule.forRoot(...)` and a store adapter (MikroORM or Drizzle) that provides the read-model.
+
+<Callout type="warn" title="Front it with your own guard">
+The mounted controllers are path-relative and carry no built-in authentication. Guard `basePath` (and
+`apiBasePath`) the same way you'd guard any other admin surface in your app.
+</Callout>
+
+## Subpath `/client` — a dependency-free typed client
+
+`@dudousxd/nestjs-agent-dashboard/client` re-declares the governance row shapes so it has **zero**
+runtime dependencies — safe to use from any frontend that only wants to call the API, without pulling
+in the server package.
+
+```ts
+import { agentClient } from '@dudousxd/nestjs-agent-dashboard/client';
+
+const overview = await agentClient.spend({ fromDay: '2026-06-01', toDay: '2026-06-30' });
+// overview.byModel / overview.byActor / overview.trend
+
+const calls = await agentClient.toolCalls(50);
+const threads = await agentClient.threads(50);
+
+const stop = agentClient.streamEvents((event) => console.log(event.event, event.payload));
+// stop() closes the SSE connection
+```
+
+| Method | Returns |
+|---|---|
+| `agentClient.spend(range: GovernanceRange)` | `{ byModel, byActor, trend }` for the day range. |
+| `agentClient.toolCalls(limit = 50)` | Most recent tool-call activity rows. |
+| `agentClient.threads(limit = 50)` | Most recent thread activity rows. |
+| `agentClient.streamEvents(onEvent)` | Live-tails `aviary:agent:*` over SSE; returns a function that closes the stream. |
+
+The client reads `window.__AGENT_BASE__` / `window.__AGENT_API__` (injected by the UI controller) to
+find its API base, falling back to `/ai-gateway` / `/ai-gateway/api` — so the bundled SPA needs no
+build-time configuration, and an external frontend can set those globals itself to point elsewhere.
+
+## When to use it
+
+Reach for `-dashboard` when you want a governance console but aren't running Telescope, or want the
+AI-gateway surface independently addressable at its own route. Already running Telescope? The
+[`-telescope`](/docs/agent/packages/telescope) extension adds the same governance sections as an
+"Agent" tab instead — both read the same `AGENT_GOVERNANCE_QUERIES` read-model, so you can run either
+or both.
+
+See [Cost & Governance](/docs/agent/guides/cost-and-governance) for the ledger and read-model this
+console surfaces, and [Reference → Endpoints](/docs/agent/reference/endpoints) for the API routes
+directly.

@@ -1,0 +1,57 @@
+---
+title: Governance
+description: Four layers stack on every turn — who's calling and what they may do, how many tokens they've spent today, what it cost, and an audit trail of everything that happened.
+---
+
+import { Cards, Card } from 'fumadocs-ui/components/card';
+
+"Governance" isn't one feature — it's four independent layers the loop applies to every turn.
+Each has its own SPI, its own configuration point, and its own guide; none of them requires the
+others.
+
+| Layer | What it does | Where configured | Guide |
+|---|---|---|---|
+| Identity + authorization | Resolves the actor from the request, no insecure default; gates each tool by role intersection or a delegated ability | `actorResolver` + per-tool `roles`/`ability` on `AgentModule.forRoot` | [Identity & Authorization](/docs/agent/guides/identity-and-authorization) |
+| Daily quota | Blocks a turn before it runs when the actor is over their daily token budget | `quota` (a `QuotaStore`) on `AgentModule.forRoot`; omit it and quota checking is skipped | [Cost & Governance](/docs/agent/guides/cost-and-governance) |
+| Cost | A usage row per model call, rolled into spend per model/actor/day; a gateway's reported cost wins, else a cache-aware token estimate | The store's `AgentGovernanceQueries` + a versioned `AgentModelPricing` table | [Cost & Governance](/docs/agent/guides/cost-and-governance) |
+| Audit | Every stage of a run announced on Node's `diagnostics_channel` | Nothing to configure — `aviary:agent:*` always fires; consumed by Telescope or your own subscriber | [Cost & Governance](/docs/agent/guides/cost-and-governance) |
+
+## Identity + authorization
+
+Two questions gate every tool call: who is calling, and may they call this. The agent never invents
+an actor — omit `actorResolver` and every request throws. Once an actor is resolved, each tool
+declares exactly one gate: `roles` (built-in set-intersection against `defaultRoles`) or `ability`
+(delegated to a `nestjs-authz` Gate via `AgentAuthzModule`). Both checks run server-side, before the
+tool's `execute` is ever called — a model can *ask* for anything, it can't talk its way past the
+gate.
+
+## Quota
+
+A per-actor daily token budget, checked before the model is even called and bumped after every turn.
+It counts `inputTokens + outputTokens` — unaffected by the cache-token breakdown that only refines
+cost. Over budget throws `QuotaExceededError` and emits `aviary:agent:quota.exceeded`;
+`GET /agent/quota/today` reports the actor's current usage.
+
+## Cost
+
+Every model call appends a usage row regardless of outcome. Cost is resolved **per row**: a
+gateway's real reported cost (Vercel AI Gateway, OpenRouter) wins when present; otherwise the
+estimate accounts for prompt caching (cache writes at a premium, cache reads at a discount) against
+the current pricing row for that model. `AgentGovernanceQueries` rolls the rows up into spend by
+model, spend by actor, a daily trend, and recent activity — the same read-model the standalone
+dashboard and the Telescope "Agent" tab both consume.
+
+## Audit
+
+Every stage of a run — start, message, tool call, delegation, quota exceeded, finish — is announced
+on Node's `diagnostics_channel` under `aviary:agent:*`. This is unconditional instrumentation, not an
+opt-in: the library doesn't instrument your code, but it always announces its own. Telescope
+consumes the channel for live activity; any other subscriber (your own metrics, an alerting rule)
+can tap the same events.
+
+## Where to go next
+
+<Cards>
+  <Card title="Identity & Authorization" href="/docs/agent/guides/identity-and-authorization" description="ActorResolver, role vs. ability gates, and there being no insecure default." />
+  <Card title="Cost & Governance" href="/docs/agent/guides/cost-and-governance" description="The usage ledger, reported-cost-wins, cache-aware pricing, and the console." />
+</Cards>

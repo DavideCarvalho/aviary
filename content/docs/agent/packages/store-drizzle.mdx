@@ -1,0 +1,96 @@
+---
+title: '@dudousxd/nestjs-agent-store-drizzle'
+description: Drizzle AgentStore adapter — threads, messages, tool calls, usage — over an app-owned SQLite-dialect handle.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+The `AgentStore` SPI (from `@dudousxd/nestjs-agent-core`) backed by Drizzle. Unlike the MikroORM
+adapter, this package never opens a connection itself — the host app owns and hands it an
+already-opened Drizzle db.
+
+<Tabs items={['pnpm', 'npm']}>
+<Tab value="pnpm">
+
+```bash
+pnpm add @dudousxd/nestjs-agent-store-drizzle drizzle-orm
+```
+
+</Tab>
+<Tab value="npm">
+
+```bash
+npm install @dudousxd/nestjs-agent-store-drizzle drizzle-orm
+```
+
+</Tab>
+</Tabs>
+
+## Minimal example
+
+Any SQLite-dialect driver works (better-sqlite3, libsql, D1, …):
+
+```ts
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import {
+  DrizzleAgentStoreModule,
+  agentSchema,
+  ensureAgentSchema,
+} from '@dudousxd/nestjs-agent-store-drizzle';
+import { AgentModule } from '@dudousxd/nestjs-agent';
+
+const db = drizzle(new Database('app.db'), { schema: agentSchema });
+await ensureAgentSchema(db); // idempotent CREATE TABLE IF NOT EXISTS — or run your own migrations
+
+@Module({
+  imports: [
+    DrizzleAgentStoreModule.forRoot({ db }), // binds AGENT_STORE + AGENT_GOVERNANCE_QUERIES
+    AgentModule.forRoot({
+      model: myModelProvider,
+      defaultRoles: ['ADMIN'],
+      actorResolver: new HeaderActorResolver(),
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+<Callout type="warn" title="DrizzleAgentStoreModule.forRoot() is global">
+Like the MikroORM adapter, this module binds `AGENT_STORE` and `AGENT_GOVERNANCE_QUERIES` on a
+**global** Nest module. Import it once — the agent, dashboard, and telescope surfaces all resolve
+both tokens app-wide with no re-binding.
+</Callout>
+
+<Callout type="info" title="ensureAgentSchema is a quick start, not a migration story">
+It never drops or alters an existing column, so it can't evolve a table once it exists. Prefer
+drizzle-kit migrations in production; treat `ensureAgentSchema` as the "stand it up with no
+migration files" path for tests, demos, and first boot.
+</Callout>
+
+## Exports
+
+| Export | Kind | Purpose |
+|---|---|---|
+| `DrizzleAgentStoreModule` | `DynamicModule` factory | `.forRoot({ db })` binds `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` globally over your db handle |
+| `DrizzleAgentStore` | class | `AgentStore` implementation — the write side |
+| `DrizzleGovernanceQueries` | class | `AgentGovernanceQueries` implementation — the read-model (spend by model/actor, usage trend, recent activity) |
+| `agentSchema` | Drizzle schema object | The five agent tables (`agentThread`, `agentMessage`, `agentToolCall`, `agentTokenUsage`, `agentModelPricing`) |
+| `ensureAgentSchema(db)` | function | Idempotent `CREATE TABLE IF NOT EXISTS` DDL for all five tables |
+| `AgentDrizzleDb` | type | The db handle shape (`drizzle(client, { schema: agentSchema })`) the module and store expect |
+
+## Peer dependencies
+
+`drizzle-orm` (`>=0.40.0 <1.0.0`) and `@nestjs/common` (`^10 \|\| ^11`).
+
+## When to use it
+
+Reach for this adapter when your app already owns a Drizzle connection (or wants one) and you'd
+rather hand the agent a db handle than let an ORM own the lifecycle. Dialect support is
+SQLite-family only (better-sqlite3, libsql, D1, …) — for other engines use
+[`store-mikro-orm`](/docs/agent/packages/store-mikro-orm).
+
+## Related
+
+- [Persistence](/docs/agent/guides/persistence) — the `AgentStore` SPI, the two bound tokens, and choosing an adapter

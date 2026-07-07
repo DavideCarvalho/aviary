@@ -102,6 +102,16 @@ The parsed, typed value is what lands in your handler's first argument — the `
 `execute`.
 </Callout>
 
+<Callout type="warn" title="Give the model the real parameter shapes">
+The model only calls a tool well when it can see the tool's parameters. Zod (any version), Valibot,
+and ArkType all convey their shape to the model — Zod by its vendor tag, the others through the
+Standard JSON Schema extension — so with any of them the model sees `city`, `units`, and which are
+required. A **hand-rolled** Standard Schema that implements neither still *validates* the input, but
+the model receives only a generic object and has to guess the arguments. If you write your own
+schema, implement the [`~standard.jsonSchema`](https://standardschema.dev) converter so the model
+sees the shape too.
+</Callout>
+
 There's a third kind, `agent`, but you never author it. The library synthesizes an `agent`-kind
 delegate tool for each `delegatesTo` edge in a multi-agent setup; the loop handles it directly and
 your handler is never called. See [Multi-agent](/docs/agent/guides/multi-agent).

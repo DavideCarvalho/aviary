@@ -1,0 +1,41 @@
+---
+title: Diagnostics events
+description: The aviary:agent:* diagnostics_channel events published by @dudousxd/nestjs-agent-core, with exact payload shapes.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+`@dudousxd/nestjs-agent-core` publishes lifecycle events on the `aviary:agent:*` [`node:diagnostics_channel`](https://nodejs.org/api/diagnostics_channel.html) namespace via `@dudousxd/nestjs-diagnostics`' `emit('agent', <event>, payload)`. Both the [dashboard's live feed](/docs/agent/reference/endpoints#dashboard-json-api) and the `-telescope` "Agent" tab subscribe to the same channel — see [Governance](/docs/agent/concepts/governance) and [`packages/telescope`](/docs/agent/packages/telescope).
+
+## Events
+
+| Event | Payload fields | Publisher |
+|---|---|---|
+| `run.started` | `runId: string`; `threadId: string`; `actorId: string`; `persona?: string` | `publishAgentRunStarted` |
+| `message` | `runId: string`; `threadId: string`; `role: 'user' \| 'assistant'`; `textLength: number` | `publishAgentMessage` |
+| `tool-call` | `runId: string`; `toolName: string`; `toolType: 'read' \| 'action'`; `status: string`; `durationMs?: number` | `publishAgentToolCall` |
+| `quota.exceeded` | `actorId: string`; `usedTokens: number`; `limitTokens: number` | `publishAgentQuotaExceeded` |
+| `run.finished` | `runId: string`; `threadId: string`; `steps: number`; `inputTokens: number`; `outputTokens: number` | `publishAgentRunFinished` |
+| `delegated` | `runId: string`; `fromAgent?: string`; `toAgent: string` | `publishAgentDelegated` |
+
+<Callout type="info" title="tool-call's toolType is narrower than ToolKind">
+  `AgentToolCallEvent.toolType` is `'read' | 'action'` — it does not include the `'agent'` kind that `ToolSpec.kind` supports for delegation. Delegation gets its own `delegated` event instead.
+</Callout>
+
+## How to subscribe
+
+Directly, via `node:diagnostics_channel`:
+
+```ts
+import { subscribe } from 'node:diagnostics_channel';
+import { channelName } from '@dudousxd/nestjs-diagnostics';
+
+subscribe(channelName('agent', 'tool-call'), (message) => {
+  // message: DiagnosticEvent<AgentToolCallEvent>
+  //   { v?, ts: number, lib: 'agent', event: 'tool-call', traceId?, payload: AgentToolCallEvent }
+});
+```
+
+Or via the telescope extension, which wires the same channel into a navigable entry type and dashboard page without any manual `subscribe` calls — see [`packages/telescope`](/docs/agent/packages/telescope).
+
+The dashboard's `GET /ai-gateway/api/stream` SSE endpoint forwards these same events flattened to `LiveAgentEvent` (`{ event, ts, payload }`) for browser clients — see [Endpoints](/docs/agent/reference/endpoints#dashboard-json-api).

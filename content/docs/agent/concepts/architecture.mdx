@@ -1,0 +1,65 @@
+---
+title: Architecture
+description: The library is mechanism — the loop, tool registry, RBAC, quota, cost, audit, HITL, streaming; your domain is policy you supply through a fixed set of SPIs.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Cards, Card } from 'fumadocs-ui/components/card';
+
+`@dudousxd/nestjs-agent` draws one hard line: **mechanism** lives in the library, **policy** lives in
+your app. The agentic loop, the tool registry, per-tool RBAC, daily quota, cost accounting, audit,
+human approval, and resumable streaming are all mechanism — you never rewrite them. Which model,
+which store, which roles, which tenant column — that's policy, and it's supplied entirely through a
+small set of SPIs (service provider interfaces). Swap an SPI's implementation and nothing else in
+the loop changes.
+
+## The SPIs are the seams
+
+Every place the library needs something app-specific, it asks for an interface instead of assuming
+an answer:
+
+| SPI | What it abstracts | Shipped implementation(s) |
+|---|---|---|
+| `ModelProvider` | Calling the LLM for one turn | `aiSdkModel(model)` (`-ai-sdk`, any Vercel AI SDK v6 `LanguageModel`); `FakeModelProvider` (`-testing`) |
+| `AgentStore` | Threads, messages, tool calls (the write path) | MikroORM or Drizzle (`-store-mikro-orm`, `-store-drizzle`); `InMemoryAgentStore` (`-testing`) |
+| `AgentGovernanceQueries` | Spend/usage read-model (the analytics path) | Same MikroORM/Drizzle store packages; `InMemoryGovernanceQueries` (`-testing`) |
+| `ActorResolver` | Who's calling | `HeaderActorResolver` (`-nestjs`, gateway-only); `UnconfiguredActorResolver` (throws — the module's real default) |
+| `RolesPolicy` | May this actor call this tool | `DefaultRolesPolicy` (role set-intersection, `-core`); `AuthzRolesPolicy` (`-authz`, delegates to a `nestjs-authz` Gate) |
+| `TokenStreamSink` | Live token transport (the data plane) | `InProcessTokenStreamSink` (`-nestjs`, the module default) |
+| `QuotaStore` | Per-actor daily token budget | `InMemoryQuotaStore` (`-testing`); omit it and quota checking is simply skipped |
+| `AgentRunner` | Executing a turn | `InlineAgentRunner` (`-nestjs`, the module default); the durable runner from `AgentDurableModule` |
+
+`AgentStore` and `AgentGovernanceQueries` are separate interfaces on purpose — one owns writes
+(threads/messages/tool calls), the other owns read/analytics (spend, trends, activity) — but a
+single store adapter binds both, so you configure persistence once. See
+[Persistence](/docs/agent/guides/persistence) and [Cost & Governance](/docs/agent/guides/cost-and-governance).
+
+<Callout type="info" title="No SPI has an unsafe default">
+Most SPIs ship a working default (`DefaultRolesPolicy`, `InProcessTokenStreamSink`,
+`InlineAgentRunner`). `ActorResolver` is the deliberate exception: the real default is
+`UnconfiguredActorResolver`, which throws on every request. See
+[Identity & Authorization](/docs/agent/guides/identity-and-authorization).
+</Callout>
+
+## Control plane vs. data plane
+
+The loop's checkpointed state (model calls, tool calls, approvals) and its live token stream travel
+on two different planes, and they don't fight each other:
+
+- **Control plane** — the model turn and every tool call run as **checkpointed steps** under
+  whichever `AgentRunner` is active. Under the durable runner that's a literal durable `@Step`; under
+  the inline runner it's just an awaited call. Either way this is what makes an `action` tool's
+  approval pause safe to suspend.
+- **Data plane** — tokens the model streams mid-turn flow through the `TokenStreamSink` (`open` /
+  `subscribe` / `close`), independent of the control plane's checkpoints. A dropped SSE connection
+  reconnects and replays the buffer; a durable suspend doesn't touch it at all.
+
+This split is why streaming and durability compose instead of trading off — see
+[The agent loop](/docs/agent/concepts/the-agent-loop) and [Runners](/docs/agent/concepts/runners).
+
+## Where to go next
+
+<Cards>
+  <Card title="The package family" href="/docs/agent/packages" description="What each @dudousxd/nestjs-agent-* package adds, and the four glue points into the ecosystem." />
+  <Card title="Getting Started" href="/docs/agent/getting-started" description="Install, declare a tool, register the module, and stream your first turn." />
+</Cards>

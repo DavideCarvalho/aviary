@@ -1,0 +1,96 @@
+---
+title: "@dudousxd/nestjs-agent-core"
+description: The framework-agnostic agent loop, tool registry, and every SPI a provider, store, or dashboard implements against.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+<Tabs items={['pnpm', 'npm']}>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @dudousxd/nestjs-agent-core
+    ```
+  </Tab>
+  <Tab value="npm">
+    ```bash
+    npm install @dudousxd/nestjs-agent-core
+    ```
+  </Tab>
+</Tabs>
+
+`-core` has no NestJS dependency. It owns `runAgentLoop` — the model → tools → model cycle — the
+`ToolRegistry`, and the SPIs every other package implements or is bound to: a model provider, a
+store, a governance read-model, an actor resolver, a roles policy, a token sink, and a quota store.
+
+<Callout type="info" title="You rarely import this directly">
+Most apps only ever import `@dudousxd/nestjs-agent` (the umbrella) and a store package. `-core`
+matters when you're writing a `ModelProvider`, an `AgentStore` adapter, or a custom `RolesPolicy` —
+or reading the shapes below to understand what the loop guarantees. See
+[Concepts → Architecture](/docs/agent/concepts/architecture) for how the pieces fit together.
+</Callout>
+
+## Implementing an SPI directly
+
+Most consumers only ever type against `-core`'s interfaces — for example a custom `RolesPolicy` that
+replaces the default role-intersection check:
+
+```ts
+import type { Actor, RolesPolicy, ToolSpec } from '@dudousxd/nestjs-agent-core';
+
+export class BusinessHoursPolicy implements RolesPolicy {
+  can(actor: Actor, tool: ToolSpec): boolean {
+    const withinHours = new Date().getUTCHours() < 18;
+    const hasRole = (tool.roles ?? []).some((role) => actor.roles?.includes(role));
+    return tool.kind === 'action' ? hasRole && withinHours : hasRole;
+  }
+}
+```
+
+`runAgentLoop` is the one place tool execution happens — a `ModelProvider.runTurn` performs exactly
+one model turn and **must not** execute tools itself, which is what keeps a turn replay-safe under the
+durable runner. See [Concepts → The agent loop](/docs/agent/concepts/the-agent-loop) for the full
+turn-by-turn walkthrough.
+
+## The SPIs
+
+Every contract a provider, store, or dashboard is built against. Shapes are trimmed to their key
+members — see the source for full JSDoc.
+
+| SPI | Purpose | Key shape |
+|---|---|---|
+| `ModelProvider` | Wraps the actual LLM call. | `runTurn(args: ModelTurnArgs): Promise<ModelTurnResult>` — `args` carries `system`, `messages`, `tools`, a `sink: SinkWriter` for live deltas, `abortSignal`; the result carries `text`, `toolCalls`, `usage`, optional `modelId` and `costUsd`. |
+| `AgentStore` | ORM-agnostic persistence for threads, messages, tool calls, and usage. | `createThread` / `getThread` / `listThreads` / `forkThread` / `appendMessage` / `truncateFrom` / `recordToolCall` / `updateToolCall` / `recordUsage` / `quotaToday`. |
+| `AgentGovernanceQueries` | The read/analytics half of the store — the dashboard and Telescope tab both consume this one interface. | `spendByModel(range)` / `spendByActor(range)` / `usageTrend(range)` / `recentToolCalls(limit)` / `recentThreads(limit)`. |
+| `ActorResolver` | Resolves the caller for an inbound request — the identity seam; no default fabricates one. | `resolve(req: unknown): Actor \| Promise<Actor>`. |
+| `RolesPolicy` | Decides whether an actor may invoke a tool. | `can(actor: Actor, tool: ToolSpec): boolean \| Promise<boolean>`. |
+| `TokenStreamSink` + `SinkWriter` | The data plane — live token transport decoupled from durability, keyed by `runId`. | Sink: `open(runId)` / `subscribe(runId): AsyncIterable<Uint8Array>` / `close(runId)`. Writer: `write(chunk)` / `end()`. |
+| `QuotaStore` | Per-actor/day token budget. | `check(actorRef, day): Promise<QuotaState>` / `bump(actorRef, day, tokens): Promise<void>`. |
+| `AgentRunner` | Runs a turn — the inline or durable strategy. | `start(input: AgentRunInput): Promise<{ runId }>` / `signal(runId, toolCallId, decision)` / `cancel(runId)`. |
+
+<Callout type="warn" title="A ModelProvider never executes tools">
+`runTurn` streams text and returns requested tool calls — it must not run them. The loop runs every
+tool call as its own step so a turn stays replay-safe when it's executing as a durable workflow. See
+[Concepts → Runners](/docs/agent/concepts/runners) for inline vs durable.
+</Callout>
+
+## Core types worth knowing
+
+| Type | What it holds |
+|---|---|
+| `Actor` | `{ id, roles?, tenantRef? }` — the caller, resolved by an `ActorResolver`. |
+| `ToolSpec` | `{ name, kind: 'read' \| 'action' \| 'agent', description, inputSchema, roles?, ability?, targetAgent? }` — the declared shape of a tool. |
+| `AiToolCtx` | `{ actor, threadId, runId, requestId, persona?, pageContext?, host? }` — handed to every `ToolHandler.execute`. |
+| `MessageUsage` | `{ inputTokens, outputTokens, cacheWriteTokens?, cacheReadTokens?, reasoningTokens? }` — the cache-aware usage shape behind cost accounting. |
+| `AgentDefinition` | `{ name, systemPrompt?, tools?, delegatesTo?, personas?, defaultPersona?, modelId?, maxSteps? }` — one named agent (the default one, or a `forFeature`-registered one). |
+
+## Also exported
+
+`ToolRegistry`, `DefaultRolesPolicy`, `AgentRegistry`, the error classes
+(`ToolForbiddenError`, `ToolNotFoundError`, `ToolInputInvalidError`, `QuotaExceededError`), and the
+`aviary:agent:*` diagnostics helpers — re-exported by the umbrella package too, so an app importing
+`@dudousxd/nestjs-agent` never needs a direct dependency on `-core`.
+
+See [Getting Started](/docs/agent/getting-started) to wire the loop into a NestJS app, or
+[Concepts → Architecture](/docs/agent/concepts/architecture) for how the SPIs above compose into a
+running turn.

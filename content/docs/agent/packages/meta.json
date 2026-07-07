@@ -1,0 +1,18 @@
+{
+  "title": "Packages",
+  "pages": [
+    "index",
+    "core",
+    "nestjs",
+    "ai-sdk",
+    "react",
+    "data",
+    "dashboard",
+    "store-mikro-orm",
+    "store-drizzle",
+    "telescope",
+    "authz",
+    "codegen",
+    "testing"
+  ]
+}

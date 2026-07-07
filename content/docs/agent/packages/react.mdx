@@ -1,0 +1,76 @@
+---
+title: "@dudousxd/nestjs-agent-react"
+description: useAgentChat, the AgentChatTransport and AgentClient, styling-agnostic chat components, dictation, and the markdown subpath.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+<Tabs items={['pnpm', 'npm']}>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @dudousxd/nestjs-agent-react ai @ai-sdk/react
+    ```
+  </Tab>
+  <Tab value="npm">
+    ```bash
+    npm install @dudousxd/nestjs-agent-react ai @ai-sdk/react
+    ```
+  </Tab>
+</Tabs>
+
+`@dudousxd/nestjs-agent-react` connects a React app to the `/agent` endpoints. `useAgentChat` wraps
+the Vercel AI SDK v6 `useChat` with a transport that speaks the backend's SSE protocol, then layers on
+threads, personas, quota, cancel, and human-in-the-loop approve/reject. Components ship unstyled —
+every class is yours via `classNames`.
+
+```tsx
+import { useAgentChat, ChatInput, MessageList } from '@dudousxd/nestjs-agent-react';
+
+function Assistant() {
+  const chat = useAgentChat({
+    getHeaders: () => ({ 'x-actor-id': 'u1', 'x-actor-role': 'ADMIN' }),
+  });
+
+  return (
+    <div>
+      <MessageList messages={chat.messages} status={chat.status} />
+      <ChatInput onSubmit={(text) => chat.sendMessage({ text })} />
+    </div>
+  );
+}
+```
+
+## Exports
+
+| Export | What it is |
+|---|---|
+| `useAgentChat(options)` | The hook — the AI SDK `useChat` result plus threads/personas/quota/cancel/approve/reject. |
+| `AgentClient` | The framework-agnostic REST client the hook is built on; usable standalone. |
+| `AgentChatTransport` | The `useChat` transport implementing the `/agent/chat` SSE protocol. |
+| `ChatInput` | The composer — Enter submits, Shift+Enter newlines, optional dictation. |
+| `MessageList` | Windows the thread; typing indicator, error+retry banner, follow-up chips, tool-part rendering. |
+| `MessageItem` | A single message, if you want to lay out the list yourself. |
+| `useSpeechRecognition` | Browser dictation hook backing `ChatInput`'s optional mic button. |
+| `SPEECH_LANGUAGES` / `DEFAULT_SPEECH_LANG` | The dictation language catalog and default. |
+
+Subpath `@dudousxd/nestjs-agent-react/markdown` exports `AgentMarkdown` — a streaming-aware GFM +
+KaTeX + Mermaid renderer for `renderText`, behind its own peers so a plain-text app never pulls them
+in.
+
+## Peer dependencies
+
+| Peer | Required for |
+|---|---|
+| `react` (>=18) | Always. |
+| `ai`, `@ai-sdk/react` | The hook — `useAgentChat` returns the SDK's own `useChat` result, extended. |
+| `streamdown`, `@streamdown/code`, `@streamdown/math`, `@streamdown/mermaid`, `react-markdown`, `remark-gfm`, `remark-math`, `rehype-katex`, `rehype-sanitize`, `katex`, `prism-react-renderer`, `unist-util-visit` | Optional — only if you import the `/markdown` subpath. |
+
+## When to use it
+
+Reach for `-react` when the frontend is React and you want the streaming + HITL + thread machinery
+handled for you. Apps on another framework, or wanting full control over the wire protocol, can build
+directly against `AgentClient` or the raw `/agent/*` REST + SSE surface described in
+[Getting Started](/docs/agent/getting-started#the-endpoints).
+
+See [Frontend](/docs/agent/guides/frontend) for the full hook option table, wiring headers to
+identity, rendering approve/reject, and reopening an existing thread.

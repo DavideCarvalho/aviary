@@ -1,0 +1,100 @@
+---
+title: '@dudousxd/nestjs-agent-codegen'
+description: A @dudousxd/nestjs-codegen extension that injects a typed api.agent.* client for the agent's JSON REST routes into your generated api.ts.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+The agent's controllers live in `node_modules`, where `@dudousxd/nestjs-codegen`'s static AST
+discovery can't see them. This extension injects the JSON REST routes directly — threads, personas,
+tool-call approve/reject, quota, cancel — so they show up in your unified generated client.
+
+<Tabs items={['pnpm', 'npm']}>
+<Tab value="pnpm">
+
+```bash
+pnpm add -D @dudousxd/nestjs-agent-codegen @dudousxd/nestjs-codegen
+```
+
+</Tab>
+<Tab value="npm">
+
+```bash
+npm install -D @dudousxd/nestjs-agent-codegen @dudousxd/nestjs-codegen
+```
+
+</Tab>
+</Tabs>
+
+## Minimal example
+
+```ts
+// codegen.config.ts
+import { defineConfig } from '@dudousxd/nestjs-codegen';
+import { nestjsAgentCodegen } from '@dudousxd/nestjs-agent-codegen';
+
+export default defineConfig({
+  extensions: [nestjsAgentCodegen({ basePath: '/api' })],
+});
+```
+
+```ts
+// generated client usage — plain fetch always works:
+import { api } from '../lib/api';
+
+const threads = await api.agent.threads.list();
+await api.agent.toolCall.approve({ body: { runId, toolCallId } });
+```
+
+With the [`@dudousxd/nestjs-codegen-tanstack`](/docs/codegen) extension registered, each call also
+returns a handle with `.queryOptions()` / `.mutationOptions()`:
+
+```ts
+import { useQuery, useMutation } from '@tanstack/react-query';
+
+const threads = useQuery(api.agent.threads.list().queryOptions());
+const approve = useMutation(api.agent.toolCall.approve().mutationOptions());
+```
+
+<Callout type="warn" title="Streaming endpoints are deliberately omitted">
+`POST /agent/chat` and `GET /agent/chat/:runId/stream` are SSE, not JSON, so they're excluded from
+the generated client. Use `@dudousxd/nestjs-agent-react`'s `useAgentChat` (a Vercel AI SDK
+transport) for those — see [Frontend](/docs/agent/guides/frontend).
+</Callout>
+
+## Exports
+
+| Export | Kind | Purpose |
+|---|---|---|
+| `nestjsAgentCodegen(options?)` | function → `CodegenExtension` | Injects the agent's JSON REST routes (threads, personas, tool-call approve/reject, quota, cancel) into the codegen route set |
+| `AgentCodegenOptions` | type | `{ basePath?: string; name?: string }` — the mount prefix (default `''`) and the client namespace (default `'agent'`, i.e. `api.agent.*`) |
+
+## Routes it injects
+
+| Method & path | Generated name |
+|---|---|
+| `GET /agent/threads` | `agent.threads.list` |
+| `GET /agent/threads/personas/catalog` | `agent.personas` |
+| `GET /agent/threads/:id` | `agent.threads.get` |
+| `DELETE /agent/threads/:id` | `agent.threads.remove` |
+| `POST /agent/threads/:id/fork-from/:messageId` | `agent.threads.fork` |
+| `POST /agent/tool-call/approve` | `agent.toolCall.approve` |
+| `POST /agent/tool-call/reject` | `agent.toolCall.reject` |
+| `GET /agent/quota/today` | `agent.quota` |
+| `POST /agent/chat/:runId/cancel` | `agent.chat.cancel` |
+
+## Peer dependencies
+
+`@dudousxd/nestjs-codegen` (`>=0.2.0`).
+
+## When to use it
+
+Add this extension once your frontend already consumes a `@dudousxd/nestjs-codegen`-generated
+client and you want the agent's thread/persona/quota/approval surface typed the same way as the
+rest of your API — rather than hand-writing a client against those routes.
+
+## Related
+
+- [Frontend](/docs/agent/guides/frontend) — `useAgentChat`, the streaming transport, and where the generated client fits alongside it
+- [Codegen docs](/docs/codegen) — the extension mechanism and the unified `api.ts` output

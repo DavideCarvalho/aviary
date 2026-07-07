@@ -13,12 +13,15 @@ tracking, audit, human approval for destructive actions, and resumable streaming
 **mechanism** — the library. Your **domain** (which tables, which tenant column, which roles) stays
 policy you supply.
 
-<Callout type="info" title="The turn is a durable workflow">
-Each agent turn runs as a `@dudousxd/nestjs-durable` workflow: every model and tool call is a
-checkpointed step, so a crash mid-turn replays from cache. Human-in-the-loop approval is a durable
-**signal** — the run suspends in the state store instead of holding a connection, and resumes when a
-human approves. Live tokens flow on a separate data plane (a `TokenStreamSink`) so streaming and
-durability compose instead of fighting.
+<Callout type="info" title="The turn can be a durable workflow">
+Out of the box the turn runs on an **inline** runner — in-process, no extra dependencies. Add
+`@dudousxd/nestjs-durable` and flip `durable: true` and each turn instead runs as a durable
+workflow: every model and tool call becomes a checkpointed step, so a crash mid-turn replays from
+cache, and human-in-the-loop approval becomes a durable **signal** — the run suspends in the state
+store instead of holding a connection, and resumes when a human approves. Either way live tokens
+flow on a separate data plane (a `TokenStreamSink`), so streaming and durability compose instead of
+fighting. The wire protocol your frontend speaks is identical, so you develop inline and flip to
+durable in production without touching your tools or UI.
 </Callout>
 
 ## What you get
@@ -33,8 +36,9 @@ durability compose instead of fighting.
 - **A governance console** — `@dudousxd/nestjs-agent-dashboard` mounts a standalone AI-gateway
   console (bundled React SPA + NestJS module) at its own route, no Telescope required.
 - **Streaming** — SSE with resume; reconnect replays the buffered tokens.
-- **Durable or inline** — `DurableAgentRunner` (default headline) or an in-process fallback behind
-  one `AgentRunner` SPI.
+- **Inline or durable** — an in-process runner by default, or opt into the durable runner (add
+  `@dudousxd/nestjs-durable`, set `durable: true`) for checkpointed, replay-safe turns — one
+  `AgentRunner` SPI, identical wire protocol.
 - **Multi-agent** — an orchestrator delegates to named sub-agents via a synthesized `ask_<name>`
   tool; each delegation is a durable child run.
 - **The data satellite** — `@dudousxd/nestjs-agent-data` packages governed, read-only SQL

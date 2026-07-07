@@ -1,0 +1,28 @@
+---
+title: DI tokens
+description: The Symbol.for(...) injection tokens exported by @dudousxd/nestjs-agent-core, what they resolve to, and who binds them.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+All tokens live in `packages/core/src/tokens.ts` and are `Symbol.for(...)` (global symbol registry), not plain `Symbol()` — pnpm peer multiplexing + dual ESM/CJS can load `core` more than once, and a plain `Symbol()` would mint a distinct token per copy. Naming convention: `@dudousxd/nestjs-agent:<name>`. See [Architecture](/docs/agent/concepts/architecture) for how these providers wire together.
+
+| Token | Resolves to | Bound by | Inject it when… |
+|---|---|---|---|
+| `AGENT_OPTIONS` | `AgentModuleOptions` (the raw options object) | `AgentModule.forRoot`/`forRootAsync` (`useValue`/`useFactory`) | You need the resolved module config itself, not a derived provider. |
+| `AGENT_STORE` | `AgentStore` | `forRoot` when `options.store` is set, or a global store adapter module (e.g. `MikroOrmAgentStoreModule`) otherwise; always bound locally by `forRootAsync` | You need direct thread/message persistence access outside `AgentService`. |
+| `AGENT_RUNNER` | `AgentRunner` | `InlineAgentRunner` by default; re-bound to `AGENT_DURABLE_RUNNER` when `durable: true` | You need to `start`/`signal`/`cancel` a run directly rather than through `AgentService`. |
+| `AGENT_DURABLE_RUNNER` | `AgentRunner` (durable-backed) | **only** `AgentDurableModule` (`@dudousxd/nestjs-agent/durable`) | Never inject directly — `AGENT_RUNNER` reads it via optional injection when `durable: true`, and throws a clear error if `AgentDurableModule` wasn't imported. |
+| `AGENT_SINK` | `TokenStreamSink` | `options.sink`, else `InProcessTokenStreamSink` | You need to publish/subscribe to raw token streams outside the chat controller. |
+| `AGENT_MODEL` | `ModelProvider` | `options.model` | A tool or service needs the configured LLM provider directly. |
+| `AGENT_ROLES_POLICY` | `RolesPolicy` | `options.rolesPolicy`, else `DefaultRolesPolicy(options.defaultRoles)` | You're implementing custom tool-authorization logic that needs the active policy. |
+| `AGENT_QUOTA_STORE` | `QuotaStore \| undefined` | `options.quota` | You need to read/write token budgets outside `AgentService.quotaToday`. |
+| `AGENT_TOOL_REGISTRY` | `ToolRegistry` | always, a fresh `new ToolRegistry()` per module instance | You're registering or introspecting tools directly (most apps use `provideAgentTool` instead). |
+| `AGENT_REGISTRY` | `AgentRegistry` | always — seeded with the default agent definition; `forFeature` registers more into the same instance | You need to look up an `AgentDefinition` by name outside the runner. |
+| `AGENT_ACTOR_RESOLVER` | `ActorResolver` | `options.actorResolver`, else `UnconfiguredActorResolver` (throws on every request) | You need to resolve the calling `Actor` yourself, e.g. in a guard. |
+| `AGENT_GOVERNANCE_QUERIES` | `AgentGovernanceQueries` | a store adapter module (e.g. `MikroOrmAgentStoreModule`), consumed by the dashboard's `DashboardService` and the `-telescope` extension | You're building a custom governance/reporting surface over spend, usage, or thread history. |
+| `AGENT_DEPS_FACTORY` | `AgentDepsFactory` | `AgentDepsFactory` class, via `useExisting` | You need per-agent resolved deps (sink, personas, default persona) outside `AgentService`. A `Symbol.for` token — not the class — because tsup's dual index/durable bundles each get their own copy of the class. |
+
+<Callout type="warn" title="AGENT_STORE may be unbound">
+  When `options.store` is omitted from `forRoot`, `AgentModule` does not bind `AGENT_STORE` at all — it relies on a globally-bound store adapter module to satisfy the dependency. Injecting it in a module that doesn't also import a store adapter (and didn't pass `store` to `forRoot`) fails to resolve.
+</Callout>

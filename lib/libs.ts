@@ -40,7 +40,7 @@ export const libs: AviaryLib[] = [
     slug: 'agent',
     pkg: 'nestjs-agent',
     name: 'Agent',
-    blurb: 'A governed, durable-backed AI agent — chat + tool-calling + RBAC + quota + cost + human-in-the-loop, with each turn a replay-safe durable workflow.',
+    blurb: 'A governed AI agent for NestJS — chat + tool-calling + RBAC + quota + cost + human-in-the-loop, with each turn optionally a replay-safe durable workflow.',
     bird: 'Magpie',
     icon: Bot,
     iconName: 'Bot',

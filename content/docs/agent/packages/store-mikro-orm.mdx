@@ -1,0 +1,95 @@
+---
+title: '@dudousxd/nestjs-agent-store-mikro-orm'
+description: MikroORM AgentStore adapter — threads, messages, tool calls, usage — with safe auto-schema.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+The `AgentStore` SPI (from `@dudousxd/nestjs-agent-core`) backed by MikroORM. The store is a POJO
+that receives an `EntityManager`; every operation runs on a fresh `em.fork()` so per-request
+identity maps never bleed across concurrent turns.
+
+<Tabs items={['pnpm', 'npm']}>
+<Tab value="pnpm">
+
+```bash
+pnpm add @dudousxd/nestjs-agent-store-mikro-orm @mikro-orm/core @mikro-orm/nestjs
+```
+
+</Tab>
+<Tab value="npm">
+
+```bash
+npm install @dudousxd/nestjs-agent-store-mikro-orm @mikro-orm/core @mikro-orm/nestjs
+```
+
+</Tab>
+</Tabs>
+
+## Minimal example
+
+```ts
+import { MikroOrmModule } from '@mikro-orm/nestjs';
+import { MikroOrmAgentStoreModule } from '@dudousxd/nestjs-agent-store-mikro-orm';
+import { AgentModule } from '@dudousxd/nestjs-agent';
+
+@Module({
+  imports: [
+    MikroOrmModule.forRoot(/* your config */),
+    MikroOrmAgentStoreModule.forFeature(), // registers entities + binds AGENT_STORE (+ queries)
+    AgentModule.forRoot({
+      model: myModelProvider,
+      // no `store` — the agent reads it from AGENT_STORE
+      defaultRoles: ['ADMIN'],
+      actorResolver: new HeaderActorResolver(),
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+Create the tables with your normal MikroORM migrations, or call the exported `ensureAgentSchema`
+helper at boot for a quick start:
+
+```ts
+import { ensureAgentSchema } from '@dudousxd/nestjs-agent-store-mikro-orm';
+
+await ensureAgentSchema(orm); // orm.schema.update({ safe: true }) — create + add-column only
+```
+
+<Callout type="warn" title="MikroOrmAgentStoreModule.forFeature() is global">
+It binds `AGENT_STORE` and `AGENT_GOVERNANCE_QUERIES` on a **global** Nest module. Import it once —
+`AgentModule.forRoot({...})` (and the dashboard/telescope surfaces) resolve both tokens app-wide with
+no re-binding. Do not import it more than once expecting scoped behavior.
+</Callout>
+
+## Exports
+
+| Export | Kind | Purpose |
+|---|---|---|
+| `MikroOrmAgentStoreModule` | `DynamicModule` factory | `.forFeature()` registers the five entities and binds `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` globally |
+| `MikroOrmAgentStore` | class | `AgentStore` implementation — the write side (threads, messages, tool calls, usage) |
+| `MikroOrmGovernanceQueries` | class | `AgentGovernanceQueries` implementation — the read-model (spend by model/actor, usage trend, recent activity) |
+| `ensureAgentSchema(orm, opts?)` | function | Non-destructive `schema.update({ safe: true })` — create + add-column, never drop or alter |
+| `AGENT_ENTITIES` | `EntitySchema[]` | The five agent entity schemas, pre-stamped with `utf8mb4_unicode_ci` for MySQL parity |
+| `agentEntities({ collation? })` | function | Builds the entity schemas with a custom (or no) collation, e.g. for SQLite |
+| `AGENT_COLLATION` | `'utf8mb4_unicode_ci'` | The default collation baked into `AGENT_ENTITIES` |
+| entity classes (`AgentThread`, `AgentMessage`, `AgentToolCall`, `AgentTokenUsage`, `AgentModelPricing`) | `EntitySchema`-backed classes | The five tables — `agent_thread`, `agent_message`, `agent_tool_call`, `agent_token_usage`, `agent_model_pricing` |
+
+## Peer dependencies
+
+`@mikro-orm/core` (`^6 \|\| ^7`), `@mikro-orm/nestjs` (`^6 \|\| ^7`), and `@nestjs/common`
+(`^10 \|\| ^11`) — plus your driver package (`@mikro-orm/postgresql`, `@mikro-orm/mysql`, …).
+
+## When to use it
+
+Reach for this adapter when MikroORM is already your app's ORM — `MikroOrmModule.forRoot(...)`
+owns the connection, and `forFeature()` just registers the agent's five entities alongside your own.
+If you'd rather bring an already-opened handle and skip MikroORM entirely, see
+[`store-drizzle`](/docs/agent/packages/store-drizzle).
+
+## Related
+
+- [Persistence](/docs/agent/guides/persistence) — the `AgentStore` SPI, the two bound tokens, and choosing an adapter
+- [Cost & Governance](/docs/agent/guides/cost-and-governance) — the read-model this adapter feeds, and the ledger cost formula

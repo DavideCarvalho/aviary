@@ -1,0 +1,102 @@
+---
+title: Configuration
+description: The full AgentModule.forRoot() options reference, forRootAsync, forFeature, and the AgentDefinition/Persona shapes.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Every option below is passed to `AgentModule.forRoot({ … })`. Only `model` is required — everything else has a default. See [Architecture](/docs/agent/concepts/architecture) for how these pieces fit together, and [`packages/nestjs`](/docs/agent/packages/nestjs) for the package itself.
+
+## `AgentModule.forRoot(options)`
+
+### Model & infra
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `model` | `ModelProvider` | — (required) | The LLM provider (e.g. a Vercel AI SDK wrapper). |
+| `store` | `AgentStore` | _none_ | Persistence adapter. Omit it and import a store module (e.g. `MikroOrmAgentStoreModule.forFeature()`) to bind `AGENT_STORE` globally instead — passing it here takes precedence within this module's scope. |
+| `sink` | `TokenStreamSink` | in-memory sink | Live token transport. The default is single-process only. |
+| `tools` | `FunctionalTool[]` | `[]` | Static functional tools (`{ spec, handler }`) registered at boot. DI-dependent tools use `provideAgentTool(factory, inject)` in a module's `providers` instead. |
+
+### Identity & authz
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `actorResolver` | `ActorResolver` | throws on every request | Resolves the acting `Actor` per request — the identity seam. No default fabricates a caller; provide one (or the opt-in `HeaderActorResolver`) before anything beyond a placeholder. |
+| `rolesPolicy` | `RolesPolicy` | role-in-`defaultRoles` | Tool authorization gate. |
+| `defaultRoles` | `string[]` | `['ADMIN']` | Roles a tool requires when its own `roles` is omitted. |
+
+### Quota
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `quota` | `QuotaStore` | _none_ | Daily token budget. Omit to disable quotas entirely. |
+
+### Routing
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `path` | `string` | `'agent'` | Route prefix the controllers mount under (→ `/agent/chat`, `/agent/threads`, …). |
+
+### Durable
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `durable` | `boolean` | `false` | Run each turn as a durable workflow instead of in-process. Requires importing `AgentDurableModule` from `@dudousxd/nestjs-agent/durable` alongside a configured `DurableModule` — otherwise boot throws a clear error instead of an unresolved-dependency crash. |
+
+### Default agent
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `defaultAgent` | `DefaultAgentOptions` | _none_ (bare assistant) | The implicit single agent's config — base prompt, tool allow-list, personas, model/step overrides. Additional named agents are added via `forFeature`. |
+
+`DefaultAgentOptions` is `Omit<AgentDefinition, 'name'> & { name?: string }` — every field from `AgentDefinition` below except `name` is optional, defaulting `name` to `'default'`.
+
+## `AgentModule.forRootAsync(options)`
+
+```ts
+interface AgentModuleAsyncOptions {
+  imports?: unknown[];
+  inject?: unknown[];
+  useFactory: (...args: never[]) => AgentModuleOptions | Promise<AgentModuleOptions>;
+  path?: string;
+}
+```
+
+<Callout type="info" title="Why path lives outside the factory">
+  `path` is static routing metadata used to mount `RouterModule` — it has to be known at import time, before the async factory resolves. Passing it on `AgentModuleAsyncOptions` (not inside the resolved `AgentModuleOptions`) is what makes that possible.
+</Callout>
+
+`forRootAsync` always binds `AGENT_STORE` locally (its factory reads the resolved options), so the "omit `store` and import a store module" pattern is a `forRoot`-only path.
+
+## `AgentModule.forFeature(definitions)`
+
+Registers additional named agents — an orchestrator plus its sub-agents — against the same `AgentRegistry` the default agent lives in:
+
+```ts
+AgentModule.forFeature(definitions: AgentDefinition[])
+```
+
+### `AgentDefinition`
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | `string` | Unique agent name. Referenced by `ctx.runAgent(name, task)`, the chat body's `agent`, and `delegatesTo`. |
+| `systemPrompt` | `string \| PromptBuilder` | Base prompt for this agent. A flat string, or a function resolved per turn from `PromptContext`. |
+| `tools` | `string[]` | Allow-list of tool names this agent may use (subset of all registered tools). |
+| `delegatesTo` | `string[]` | Names of other agents this agent may delegate to — auto-registered as `agent`-kind tools. |
+| `personas` | `Persona[]` | Personas available to this agent. |
+| `defaultPersona` | `string` | Persona ID used when a turn doesn't specify one. |
+| `modelId` | `string` | Override the module-level model for this agent. |
+| `maxSteps` | `number` | Cap on tool-call/response steps per turn. |
+
+### `Persona`
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Unique persona ID within the agent. |
+| `label` | `string` | Display label (returned by `GET /threads/personas/catalog`). |
+| `systemPrompt` | `string \| PromptBuilder` | A flat prompt, or a builder composed per request that wraps/extends the agent's `basePrompt`. |
+| `allowedTools` | `string[]` | If set, only these tool names are offered (after role filtering already applied). |
+
+See [Multi-agent](/docs/agent/guides/multi-agent) for how `forFeature` + `delegatesTo` compose an orchestrator, and [Identity & authorization](/docs/agent/guides/identity-and-authorization) for `actorResolver`/`rolesPolicy`.

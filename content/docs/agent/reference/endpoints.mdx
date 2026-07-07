@@ -1,0 +1,62 @@
+---
+title: Endpoints
+description: The REST + SSE surface mounted by AgentModule (default /agent) and the dashboard JSON API mounted by AgentDashboardModule (default /ai-gateway/api).
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+All routes below assume the default `path: 'agent'` (set via [`AgentModule.forRoot`](/docs/agent/reference/configuration)) — replace the `/agent` prefix if you configured a different one. See [Frontend](/docs/agent/guides/frontend) for a client walkthrough and [`packages/dashboard`](/docs/agent/packages/dashboard) for the console SPA.
+
+## Chat
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `POST` | `/agent/chat` | `{ message: string; threadId?: string; agent?: string; persona?: string; pageContext?: PageContext }` | SSE stream (see below) |
+| `GET` | `/agent/chat/:runId/stream` | — | SSE stream — reconnect to an in-flight run |
+| `POST` | `/agent/chat/:runId/cancel` | — | `{ aborted: boolean }` |
+
+<Callout type="info" title="The chat response is a stream, not JSON">
+  `POST /agent/chat` responds `Content-Type: text/event-stream` with headers `X-Agent-Run-Id` and `X-Agent-Thread-Id`. The first frame is `event: meta` carrying `data: { runId, threadId }`, followed by `data: { delta: string }` frames as tokens arrive, and a closing `event: done`. `GET /agent/chat/:runId/stream` pipes the same format to resume/tail a run (its `meta` frame's `threadId` is `undefined`, since the thread isn't re-resolved on reconnect).
+</Callout>
+
+## Threads
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `GET` | `/agent/threads` | — | `ThreadSummary[]` for the resolved actor |
+| `GET` | `/agent/threads/personas/catalog` | — | `{ id: string; label: string }[]` |
+| `GET` | `/agent/threads/:id` | — | `ThreadDetail \| null` |
+| `DELETE` | `/agent/threads/:id` | — | `{ ok: boolean }` (soft-delete) |
+| `POST` | `/agent/threads/:id/fork-from/:messageId` | — | `ThreadSummary` — a new thread branched at `messageId` |
+
+## Tool-calls
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `POST` | `/agent/tool-call/approve` | `{ runId: string; toolCallId: string }` | `{ ok: boolean }` |
+| `POST` | `/agent/tool-call/reject` | `{ runId: string; toolCallId: string; reason?: string }` | `{ ok: boolean }` |
+
+Approving/rejecting signals the run's `AgentRunner` (`approved: true`, or `approved: false` with an optional `reason`) — see [Human-in-the-loop & durability](/docs/agent/guides/human-in-the-loop-and-durability).
+
+## Quota
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `GET` | `/agent/quota/today` | — | `{ usedTokens: number }` |
+
+<Callout type="warn" title="Only usedTokens comes back">
+  The controller returns `{ usedTokens }` only — it does not echo `limitTokens` or `withinLimit`, even though the core `QuotaState` type has both. Compute against the configured limit client-side if you need it. See [Cost & governance](/docs/agent/guides/cost-and-governance).
+</Callout>
+
+## Dashboard JSON API
+
+Mounted by `AgentDashboardModule.forRoot({ apiBasePath })` (default `/ai-gateway/api`, i.e. `<basePath>/api` under the default `/ai-gateway` UI base). Requires `AGENT_GOVERNANCE_QUERIES` to be bound by a store adapter (e.g. `MikroOrmAgentStoreModule`).
+
+| Method | Path | Query | Returns |
+|---|---|---|---|
+| `GET` | `/ai-gateway/api/spend` | `from?`, `to?` (`YYYY-MM-DD`, default last 30 days) | `SpendOverview` — `{ byModel: ModelSpendRow[]; byActor: ActorSpendRow[]; trend: UsageTrendPoint[] }` |
+| `GET` | `/ai-gateway/api/tool-calls` | `limit?` (default 50, max 200) | `ToolCallActivityRow[]` |
+| `GET` | `/ai-gateway/api/threads` | `limit?` (default 50, max 200) | `ThreadActivityRow[]` |
+| `GET` | `/ai-gateway/api/stream` | — | SSE — `{ data: LiveAgentEvent }`, one frame per `aviary:agent:*` diagnostics event |
+
+`LiveAgentEvent` is `{ event: string; ts: number; payload: Record<string, unknown> }` — see [Diagnostics events](/docs/agent/reference/diagnostics-events) for the `event` names and `payload` shapes.

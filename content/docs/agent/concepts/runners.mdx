@@ -1,0 +1,94 @@
+---
+title: Runners
+description: One AgentRunner SPI, two implementations — inline runs in-process by default, durable is an opt-in that checkpoints every step and turns HITL approval into a real suspend.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Cards, Card } from 'fumadocs-ui/components/card';
+
+The [agent loop](/docs/agent/concepts/the-agent-loop) doesn't know or care how its `step` and
+`awaitApproval` hooks are implemented — that's the whole point of the `AgentRunner` SPI. Two
+implementations exist, and switching between them never touches your tools, your frontend, or the
+wire protocol.
+
+```ts
+interface AgentRunner {
+  start(input: AgentRunInput): Promise<{ runId: string }>;
+  signal(runId: string, toolCallId: string, decision: Decision): Promise<void>;
+  cancel(runId: string): Promise<void>;
+}
+```
+
+`start` enqueues and returns immediately with the `runId` — the actual tokens flow separately over
+the `TokenStreamSink` data plane, not through this call. See
+[Architecture](/docs/agent/concepts/architecture) for how the control and data planes split.
+
+## Inline (default) vs. durable (opt-in)
+
+| | Inline runner (default) | Durable runner (`durable: true`) |
+|---|---|---|
+| The pause | an in-process runner holds the turn open | a real durable **suspend** — the run is checkpointed to the state store |
+| Surviving a restart | no — the pending turn is lost | yes — the run resumes from cache on approval |
+| Requires | nothing extra | `@dudousxd/nestjs-durable` + `AgentDurableModule` + a configured `DurableModule` |
+| Wire protocol | identical | identical |
+
+`AgentModule.forRoot` binds `InlineAgentRunner` to the `AGENT_RUNNER` token unless `durable: true` is
+set — inline is the real, zero-dependency default, not a fallback.
+
+## When to pick which
+
+- **Inline** for local development, tests (pairs naturally with `@dudousxd/nestjs-agent-testing`'s
+  fake model and in-memory store), and any deployment where a lost in-flight turn on a crash is
+  acceptable.
+- **Durable** once you need a turn to survive a process restart mid-approval, want every model and
+  tool call individually checkpointed (so a crash replays from cache instead of re-charging the model
+  or re-running a side effect), or already run `@dudousxd/nestjs-durable` elsewhere in the app.
+
+Because the `AgentRunner` SPI is the only seam, you can develop against inline and flip to durable in
+production by changing configuration, not code.
+
+## The one-import shortcut
+
+The long form wires `durable: true` on `AgentModule.forRoot` and imports `AgentDurableModule`
+separately. `agentDurable(options)` collapses both into one:
+
+```ts
+import { DurableModule } from '@dudousxd/nestjs-durable';
+import { agentDurable } from '@dudousxd/nestjs-agent/durable';
+
+@Module({
+  imports: [
+    DurableModule.forRoot({ /* store, transport, … */ }),
+    ...agentDurable({
+      model: myModelProvider,
+      store: myAgentStore,
+      actorResolver: new HeaderActorResolver(),
+      // ...same options as AgentModule.forRoot, minus `durable`
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+`agentDurable` spreads into `imports` because it wires `AgentModule.forRoot({ ...options, durable:
+true })` and `AgentDurableModule` together — it isn't a module itself.
+
+<Callout type="warn" title="durable: true alone isn't enough">
+Setting `durable: true` on `AgentModule.forRoot` without importing `AgentDurableModule` throws at
+boot with a clear message rather than failing silently or falling back to inline — a forgotten import
+is a configuration error, not a degraded mode.
+</Callout>
+
+## Full details
+
+The mechanics of the durable suspend itself — the `agent.run` workflow, `ctx.waitForSignal`, and
+resuming a dropped stream — are in
+[Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability); the durable
+runtime it depends on is documented in full at [`@dudousxd/nestjs-durable`](/docs/durable).
+
+## Where to go next
+
+<Cards>
+  <Card title="Human-in-the-loop & Durability" href="/docs/agent/guides/human-in-the-loop-and-durability" description="Action approval as a durable signal — the run suspends and resumes across restarts." />
+  <Card title="Durable" href="/docs/durable" description="The workflow runtime the durable runner is built on — steps, signals, replay." />
+</Cards>
