@@ -21,13 +21,7 @@ Each pass through the loop is one **step**:
 4. Otherwise, each requested tool call is resolved by its `kind`, and the results are fed back to the
    model as the next step's input.
 
-```text
-step 0: model → [toolCallA, toolCallB]
-        toolCallA (read)   → auto-executes
-        toolCallB (action) → suspends for approval, then executes
-step 1: model (sees both results) → []
-        loop breaks — turn done
-```
+<AgentLoop />
 
 ## `read` vs `action`
 

@@ -3,6 +3,7 @@ import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import { TypeTable } from "fumadocs-ui/components/type-table";
 import defaultMdxComponents from "fumadocs-ui/mdx";
 import type { MDXComponents } from "mdx/types";
+import { AgentLoop } from "@/components/agent-loop";
 import { CodeFlow } from "@/components/code-flow";
 import { ReplayDiagram } from "@/components/replay-diagram";
 import { Screenshot } from "@/components/screenshot";
@@ -18,6 +19,7 @@ export function getMDXComponents(components?: MDXComponents) {
     Step,
     Steps,
     TypeTable,
+    AgentLoop,
     CodeFlow,
     ReplayDiagram,
     Screenshot,
