@@ -5,6 +5,7 @@ import defaultMdxComponents from "fumadocs-ui/mdx";
 import type { MDXComponents } from "mdx/types";
 import { AgentLoop } from "@/components/agent-loop";
 import { CodeFlow } from "@/components/code-flow";
+import { QueueSim, SingletonSim } from "@/components/queue-sim";
 import { ReplayDiagram } from "@/components/replay-diagram";
 import { Screenshot } from "@/components/screenshot";
 import { TenancyDiagram } from "@/components/tenancy-diagram";
@@ -21,6 +22,8 @@ export function getMDXComponents(components?: MDXComponents) {
     TypeTable,
     AgentLoop,
     CodeFlow,
+    QueueSim,
+    SingletonSim,
     ReplayDiagram,
     Screenshot,
     TenancyDiagram,
