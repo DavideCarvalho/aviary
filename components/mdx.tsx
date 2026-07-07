@@ -5,6 +5,7 @@ import defaultMdxComponents from "fumadocs-ui/mdx";
 import type { MDXComponents } from "mdx/types";
 import { AgentLoop } from "@/components/agent-loop";
 import { CodeFlow } from "@/components/code-flow";
+import { DlqSim, RetrySim } from "@/components/failure-sims";
 import { QueueSim, SingletonSim } from "@/components/queue-sim";
 import { ReplayDiagram } from "@/components/replay-diagram";
 import { Screenshot } from "@/components/screenshot";
@@ -22,7 +23,9 @@ export function getMDXComponents(components?: MDXComponents) {
     TypeTable,
     AgentLoop,
     CodeFlow,
+    DlqSim,
     QueueSim,
+    RetrySim,
     SingletonSim,
     ReplayDiagram,
     Screenshot,
