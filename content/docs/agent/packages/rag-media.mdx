@@ -54,6 +54,8 @@ Every file attached to `knowledge-base` is now chunked, embedded, and indexed wi
 | `AgentMediaIngestionService` | The subscriber. `settle()` awaits in-flight ingestion (graceful shutdown / tests); `handleAttach` / `handleDelete` are the ingest entry points. |
 | `ingestMediaFile(event, deps)` | The pure ingest function — size-gate → read → extract → `remove` → chunk → embed → upsert. Run it inside a durable workflow if you want at-least-once. |
 | `removeMedia(event, { store })` | The delete-sync half — drops a record's chunks. |
+| `reconcileMediaRag(query, deps)` | Drift repair — diff a `MediaSource` against the index, ingest what's missing, remove orphans. |
+| `applyMediaIngestJob(job, deps)` | Runs one `MediaIngestJob` — call it from your durable worker when using the `enqueue` hook. |
 | `TextExtractor` / `MimeTextExtractor` / `defaultTextExtractor()` | Bytes → text, dispatched by mime type. `text/*`, JSON, HTML shipped; register your own for PDF/DOCX. |
 | `MediaAttachEvent` / `MediaDeleteEvent` | The channel payload shapes (mirroring media's `AttachPayload` / `DeletePayload`). |
 
@@ -87,6 +89,59 @@ const extractor = defaultTextExtractor().register('application/pdf', async (byte
 );
 
 AgentMediaIngestionModule.forRoot({ store, embedder, readFile, extractor });
+```
+
+## Keeping the index in sync
+
+Ingestion rides the diagnostics channel, so it's eventual and best-effort: the vectors update just
+after the media event fires. That covers the normal `MediaLibrary.attach()` / `delete()` path — but
+an event can be missed if the process was down when it fired, or if a record was deleted straight in
+the database, bypassing the library. `reconcileMediaRag` repairs that drift by diffing the source of
+truth against the index:
+
+```ts
+import { reconcileMediaRag } from '@dudousxd/nestjs-agent-rag-media';
+
+const { ingested, removed } = await reconcileMediaRag(
+  { ownerType: 'user', ownerId: actor.id, collection: 'knowledge-base' },
+  {
+    store,
+    embedder,
+    readFile,
+    // your source of truth — the media records currently attached
+    source: {
+      listMedia: ({ ownerType, ownerId, collection }) =>
+        mediaLibrary.list(ownerType, ownerId, collection),
+    },
+  },
+);
+```
+
+It ingests media that isn't indexed yet and removes indexed documents whose media record is gone —
+touching only the difference, so it's cheap to run on a schedule or at boot. It leans on
+`VectorStore.listDocumentIds(filter?)` (new in `-rag`) to enumerate what's indexed for the owner.
+
+## At-least-once ingestion
+
+`AgentMediaIngestionModule` ingests inline. For large files or an at-least-once guarantee, pass an
+`enqueue` hook — attach/delete are then handed to your durable queue instead of ingested inline, and a
+worker replays them with `applyMediaIngestJob`. This keeps durability **opt-in**: the package pulls in
+no durable dependency of its own.
+
+```ts
+import { applyMediaIngestJob } from '@dudousxd/nestjs-agent-rag-media';
+
+AgentMediaIngestionModule.forRoot({
+  store,
+  embedder,
+  readFile,
+  enqueue: (job) => durableQueue.add('media-rag', job), // { type: 'ingest' | 'remove', event }
+});
+
+// in the durable worker:
+async function handle(job) {
+  await applyMediaIngestJob(job, { store, embedder, readFile, extractor: defaultTextExtractor() });
+}
 ```
 
 ## Observability
