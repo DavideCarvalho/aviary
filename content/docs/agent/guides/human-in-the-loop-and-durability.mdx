@@ -39,17 +39,22 @@ through the REST endpoints:
 curl -X POST http://localhost:3000/agent/tool-call/approve \
   -H 'content-type: application/json' \
   -H 'x-actor-id: u1' -H 'x-actor-role: ADMIN' \
-  -d '{ "runId": "...", "toolCallId": "..." }'
+  -d '{ "toolCallId": "..." }'
 
 # reject (with an optional reason the model sees)
 curl -X POST http://localhost:3000/agent/tool-call/reject \
   -H 'content-type: application/json' \
   -H 'x-actor-id: u1' -H 'x-actor-role: ADMIN' \
-  -d '{ "runId": "...", "toolCallId": "...", "reason": "not now" }'
+  -d '{ "toolCallId": "...", "reason": "not now" }'
 ```
 
 On approval the tool executes and the turn continues; on rejection the loop resumes with the
 rejection (and any reason) fed back to the model, which adapts instead of running the action.
+
+A decision carries only the `toolCallId`: the server derives the exact run awaiting it (the tool
+call's thread's active stream), so no run id is sent or trusted. That is also what lets a **delegated
+sub-agent's** action tool be approved — a sub-agent streams into the top-level run the human is
+watching, and the same `toolCallId` resolves to the sub-agent's own child run.
 
 Both endpoints are ownership-scoped: the acting actor must own the tool call's run, or the request
 gets a `403` (`404` if the tool call doesn't exist at all).

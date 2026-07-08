@@ -44,7 +44,7 @@ export default defineConfig({
 import { api } from '../lib/api';
 
 const threads = await api.agent.threads.list();
-await api.agent.toolCall.approve({ body: { runId, toolCallId } });
+await api.agent.toolCall.approve({ body: { toolCallId } });
 ```
 
 With the [`@dudousxd/nestjs-codegen-tanstack`](/docs/codegen) extension registered, each call also

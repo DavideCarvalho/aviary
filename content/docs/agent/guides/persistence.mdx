@@ -41,6 +41,7 @@ export interface AgentStore {
   quotaToday(actorRef: string, day: string): Promise<{ usedTokens: number }>;
   ownerOfThread(threadId: string): Promise<string | null>;
   ownerOfToolCall(toolCallId: string): Promise<string | null>;
+  runForToolCall(toolCallId: string): Promise<string | null>;
   ownerOfActiveStream(runId: string): Promise<string | null>;
   // …setTitle, setActiveStream, truncateFrom, updateToolCall
 }
@@ -49,7 +50,9 @@ export interface AgentStore {
 `ownerOfThread`, `ownerOfToolCall`, and `ownerOfActiveStream` resolve the owning `actorRef` (or
 `null` if the row doesn't exist) — the governance endpoints (`/agent/threads/:id`,
 `/agent/tool-call/approve` · `/reject`, `/agent/chat/:runId/cancel`) call these to assert the acting
-actor owns the target before acting on it.
+actor owns the target before acting on it. `runForToolCall` resolves the tool call's thread's active
+stream — the run currently awaiting it — so approve/reject route to the exact run (including a
+delegated sub-agent's own child run) without a client-supplied run id.
 
 Each usage row carries the cache-aware token counts (`inputTokens`, `outputTokens`,
 `cacheWriteTokens`, `cacheReadTokens`) and an optional provider-reported `costUsd` — the raw material

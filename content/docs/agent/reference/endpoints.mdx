@@ -43,10 +43,10 @@ The three `:id` routes are ownership-scoped: they resolve the acting actor and c
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| `POST` | `/agent/tool-call/approve` | `{ runId: string; toolCallId: string }` | `{ ok: boolean }` |
-| `POST` | `/agent/tool-call/reject` | `{ runId: string; toolCallId: string; reason?: string }` | `{ ok: boolean }` |
+| `POST` | `/agent/tool-call/approve` | `{ toolCallId: string }` | `{ ok: boolean }` |
+| `POST` | `/agent/tool-call/reject` | `{ toolCallId: string; reason?: string }` | `{ ok: boolean }` |
 
-Approving/rejecting signals the run's `AgentRunner` (`approved: true`, or `approved: false` with an optional `reason`) — see [Human-in-the-loop & durability](/docs/agent/guides/human-in-the-loop-and-durability). Both routes are ownership-scoped: the acting actor must own the tool call — `403` if it belongs to someone else, `404` if it doesn't exist.
+Approving/rejecting signals the run's `AgentRunner` (`approved: true`, or `approved: false` with an optional `reason`) — see [Human-in-the-loop & durability](/docs/agent/guides/human-in-the-loop-and-durability). The run is derived server-side from the `toolCallId` (its thread's active stream), so no run id is sent — that is also how a delegated sub-agent's action tool routes to its own child run. Both routes are ownership-scoped: the acting actor must own the tool call — `403` if it belongs to someone else, `404` if it doesn't exist.
 
 ## Quota
 

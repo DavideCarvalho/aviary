@@ -110,7 +110,8 @@ it('suspends an action tool until approved, then executes', async () => {
 
   const collected = collect(service.subscribe(runId));
   await new Promise((resolve) => setTimeout(resolve, 20)); // let the loop reach the approval gate
-  await service.approve(runId, 'call-0-purgeCache'); // FakeModelProvider ids calls `call-<turn>-<name>`
+  // approve by tool-call id — the server derives the run; FakeModelProvider ids calls `call-<turn>-<name>`
+  await service.approve({ id: 'u1', roles: ['ADMIN'] }, 'call-0-purgeCache');
 
   expect(await collected).toContain('purged ok');
 });
