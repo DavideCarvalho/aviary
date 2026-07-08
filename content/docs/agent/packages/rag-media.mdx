@@ -155,9 +155,11 @@ const { ingested, removed } = await reconcileMediaRag(
 );
 ```
 
-It ingests media that isn't indexed yet and removes indexed documents whose media record is gone —
-touching only the difference, so it's cheap to run on a schedule or at boot. It leans on
-`VectorStore.listDocumentIds(filter?)` (new in `-rag`) to enumerate what's indexed for the owner.
+It ingests media that isn't indexed yet, re-ingests media whose content changed (the indexed `size`
+fingerprint no longer matches — catching a file replaced while nobody was listening), and removes
+indexed documents whose media record is gone — touching only the difference, so it's cheap to run on
+a schedule or at boot. It leans on `VectorStore.listDocuments(filter?)` (new in `-rag`) to enumerate
+what's indexed for the owner.
 
 ## At-least-once ingestion
 

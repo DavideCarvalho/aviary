@@ -16,7 +16,7 @@ in `-core`, so the agent runtime stays storage-agnostic.
 
 - **`EmbeddingProvider`** (core SPI) — text → vectors. `aiSdkEmbedding(model)` implements it over any
   Vercel AI SDK embedding model.
-- **`VectorStore`** (`-rag`) — `upsert` + `search` + `remove` + `listDocumentIds`. Ships `MemoryVectorStore` (in-JS cosine) and
+- **`VectorStore`** (`-rag`) — `upsert` + `search` + `remove` + `listDocuments`. Ships `MemoryVectorStore` (in-JS cosine) and
   `PgVectorStore` (pgvector). The extension point for Qdrant/Pinecone/etc.
 - **`Retriever`** (core SPI) — `retrieve(query) → Passage[]`. `EmbeddingRetriever` bridges an
   embedder + a vector store into one.
@@ -172,7 +172,7 @@ await store.ensureSchema(); // FT.CREATE — HNSW cosine index
 ```
 
 Swap `MemoryVectorStore` for either in the wiring above; nothing else changes. For any other backend
-(Qdrant, Pinecone, Weaviate), implement the `VectorStore` SPI — `upsert` + `search` + `remove` + `listDocumentIds`.
+(Qdrant, Pinecone, Weaviate), implement the `VectorStore` SPI — `upsert` + `search` + `remove` + `listDocuments`.
 
 ## Ingesting uploads automatically
 

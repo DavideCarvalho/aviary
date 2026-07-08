@@ -77,10 +77,10 @@ await store.ensureSchema();
 ```
 
 <Callout type="info" title="Custom vector stores">
-  `VectorStore` (`upsert` / `search` / `remove` / `listDocumentIds`) is the extension point —
+  `VectorStore` (`upsert` / `search` / `remove` / `listDocuments`) is the extension point —
   implement it over Qdrant, Pinecone, Weaviate, or your own `-data` SQL seam, and pair it with any
   `EmbeddingProvider` via `EmbeddingRetriever`. `remove(documentId)` deletes a document's chunks
   (delete-sync, and avoiding an orphaned tail when a re-ingest produces fewer chunks);
-  `listDocumentIds(filter?)` enumerates the indexed documents — the seam
+  `listDocuments(filter?)` enumerates the indexed documents (id + metadata) — the seam
   [rag-media](/docs/agent/packages/rag-media)'s reconciler diffs against.
 </Callout>
