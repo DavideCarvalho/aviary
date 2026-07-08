@@ -102,10 +102,47 @@ mechanism** — no new message field:
 Either way, each retrieval also emits an `aviary:agent:retrieved` diagnostics event
 (`{ runId, query, count }`) — subscribe for retrieval metrics without instrumenting your code.
 
-## Production storage: pgvector
+## Better relevance: hybrid + reranking
 
-`MemoryVectorStore` is for tests and small corpora. For scale, `PgVectorStore` uses pgvector over an
-injected `PgClient` (bring your own `pg` / `postgres.js`):
+Because every retriever — vector, keyword, fused, reranked — is a core `Retriever`, they **compose**.
+Two standard precision upgrades:
+
+**Hybrid search** fuses dense vector similarity with lexical BM25 (so exact keyword matches aren't
+lost to fuzzy embeddings). `HybridRetriever` uses Reciprocal Rank Fusion — no score normalization
+needed between the two scales. Feed both retrievers the *same* chunks so their ids line up:
+
+```ts
+import {
+  EmbeddingRetriever, KeywordRetriever, HybridRetriever,
+  chunkDocuments, ingestChunks,
+} from '@dudousxd/nestjs-agent-rag';
+
+const chunks = chunkDocuments(docs, { chunkSize: 800 });
+await ingestChunks(chunks, { embedder, store });   // dense
+const keyword = new KeywordRetriever();
+keyword.add(chunks);                                // lexical BM25 (same chunk ids)
+
+const hybrid = new HybridRetriever([new EmbeddingRetriever(embedder, store), keyword]);
+```
+
+**Reranking** over-fetches cheap candidates, then reorders them with a stronger model (a
+cross-encoder / Cohere / Voyage rerank endpoint behind the `Reranker` SPI):
+
+```ts
+import { RerankingRetriever } from '@dudousxd/nestjs-agent-rag';
+
+const retriever = new RerankingRetriever(hybrid, reranker, { fetchTopK: 20 });
+// fetch 20 candidates → rerank → return the top few. Still just a `Retriever`.
+```
+
+Any of these drops straight into `createRetrievalTool(retriever)` or `forRoot({ retrieval })`.
+
+## Production storage: pgvector or Redis
+
+`MemoryVectorStore` is for tests and small corpora. For scale, two shipped adapters — both take an
+injected client (no driver dependency) and expose `ensureSchema()`:
+
+**pgvector** (Postgres):
 
 ```ts
 import { Pool } from 'pg';
@@ -119,7 +156,23 @@ const store = new PgVectorStore(
 await store.ensureSchema(); // vector extension + table + HNSW cosine index
 ```
 
-Swap `MemoryVectorStore` for it in the ingestion + retriever wiring above; nothing else changes.
+**Redis** (RediSearch — Redis Stack / Redis 8+), the ecosystem-native option if you already run Redis:
+
+```ts
+import { createClient } from 'redis';
+import { RedisVectorStore } from '@dudousxd/nestjs-agent-rag';
+
+const client = createClient({ url: process.env.REDIS_URL });
+await client.connect();
+const store = new RedisVectorStore(
+  { sendCommand: (args) => client.sendCommand(args) },
+  { dimensions: 1536, filterableFields: ['owner'] }, // TAG fields you can filter by
+);
+await store.ensureSchema(); // FT.CREATE — HNSW cosine index
+```
+
+Swap `MemoryVectorStore` for either in the wiring above; nothing else changes. For any other backend
+(Qdrant, Pinecone, Weaviate), implement the `VectorStore` SPI — it's `upsert` + `search`.
 
 ## Related
 

@@ -70,6 +70,7 @@ members — see the source for full JSDoc.
 | `AgentRunner` | Runs a turn — the inline or durable strategy. | `start(input: AgentRunInput): Promise<{ runId }>` / `signal(runId, toolCallId, decision)` / `cancel(runId)`. |
 | `Retriever` | RAG retrieval seam — vector/keyword search behind the agentic tool or inject mode. | `retrieve(query: string, options?: RetrieveOptions): Promise<Passage[]>`. |
 | `EmbeddingProvider` | Text → vectors, for retrieval + ingestion. | `embed(texts: string[]): Promise<number[][]>`. |
+| `Reranker` | Second-stage RAG precision — re-scores retrieved passages against the query. | `rerank(query: string, passages: Passage[], options?: RerankOptions): Promise<Passage[]>`. |
 
 <Callout type="warn" title="A ModelProvider never executes tools">
 `runTurn` streams text and returns requested tool calls — it must not run them. The loop runs every

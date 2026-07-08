@@ -23,10 +23,16 @@ pnpm add @dudousxd/nestjs-agent-rag @dudousxd/nestjs-agent-core
 | Export | What it is |
 |---|---|
 | `chunkText(text, { chunkSize?, overlap? })` | Overlapping, boundary-aware chunks (defaults 800 / 100). |
-| `ingestDocuments(docs, { embedder, store, chunkSize?, overlap? })` | Chunk → embed (batched) → upsert. Returns the chunk count. Deterministic ids (`${doc.id}#${n}`) so re-ingest overwrites. |
+| `chunkDocuments(docs, { chunkSize?, overlap? })` | Documents → `ChunkRecord[]` (ids `${doc.id}#${n}`). Feed the same array to a vector store and a keyword index. |
+| `ingestChunks(chunks, { embedder, store })` | Embed pre-chunked records (batched) → upsert. |
+| `ingestDocuments(docs, { embedder, store, chunkSize?, overlap? })` | `chunkDocuments` + `ingestChunks` in one call. Returns the chunk count. |
 | `EmbeddingRetriever(embedder, store)` | The core `Retriever` from an `EmbeddingProvider` + `VectorStore`. |
+| `KeywordRetriever({ k1?, b? })` | In-memory BM25 lexical `Retriever` (the keyword half of hybrid). `add(chunks)` to index. |
+| `HybridRetriever(retrievers, { k?, fetchTopK?, weights? })` | Fuses retrievers with Reciprocal Rank Fusion. |
+| `RerankingRetriever(base, reranker, { fetchTopK? })` | Over-fetch from `base`, reorder with a `Reranker`, truncate to `topK`. |
 | `MemoryVectorStore` | In-JS cosine `VectorStore` — tests + small/embedded corpora. |
 | `PgVectorStore(client, { table?, dimensions? })` | pgvector `VectorStore` over an injected `PgClient`. `ensureSchema()` creates the extension, table, and HNSW cosine index. |
+| `RedisVectorStore(client, { index?, prefix?, dimensions?, filterableFields? })` | RediSearch `VectorStore` over an injected `RedisSearchClient` (`sendCommand`). HNSW + cosine; `ensureSchema()` runs `FT.CREATE`. |
 | `createRetrievalTool(retriever, { name?, description?, topK? })` | The agentic-retrieval tool (`{ spec, handler }`) — pass to `provideAgentTool`. |
 
 ## Building blocks
