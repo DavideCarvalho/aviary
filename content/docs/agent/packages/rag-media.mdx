@@ -1,0 +1,102 @@
+---
+title: '@dudousxd/nestjs-agent-rag-media'
+description: Auto-ingest nestjs-media uploads into agent RAG — extract, chunk, embed, index, owner-scoped, delete-synced. Couples via the diagnostics channel, no hard media dependency.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Attach a file through [`@dudousxd/nestjs-media`](/docs/media) and it becomes searchable by the agent
+automatically: extract text, chunk, embed, index — scoped to its owner, with delete kept in sync.
+
+It couples to the media library through the **diagnostics channel** — the same `aviary:media:*` seam
+[Telescope](/docs/agent/packages/telescope) rides — so it has **no hard dependency on
+`@dudousxd/nestjs-media`**. You supply a one-line `readFile`; the integration listens for attach and
+delete events.
+
+## Install
+
+```bash
+pnpm add @dudousxd/nestjs-agent-rag-media @dudousxd/nestjs-agent-rag @dudousxd/nestjs-agent-core
+```
+
+## Wire it
+
+```ts
+import { AgentMediaIngestionModule } from '@dudousxd/nestjs-agent-rag-media';
+
+@Module({
+  imports: [
+    AgentMediaIngestionModule.forRoot({
+      store,                           // any VectorStore — Pg, Redis, Memory
+      embedder,                        // any EmbeddingProvider
+      collections: ['knowledge-base'], // omit = every collection
+      readFile: (disk, path) => media.disk(disk).get(path), // the only glue
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+Every file attached to `knowledge-base` is now chunked, embedded, and indexed with
+`{ mediaId, ownerType, ownerId, collection }` metadata; deleting the record removes its chunks.
+
+<Callout type="warn" title="Owner comes from the server, never the client">
+  The owner stamped onto each chunk is taken from the **server-side attach record**
+  (`AttachPayload.ownerId`), not from any client-supplied key or path. That's what makes owner-scoped
+  retrieval a real trust boundary rather than a hint.
+</Callout>
+
+## API
+
+| Export | What it is |
+|---|---|
+| `AgentMediaIngestionModule.forRoot(options)` | Registers `AgentMediaIngestionService`, which subscribes to the media channels on boot. Options: `{ readFile, embedder, store, collections?, extractor?, chunk?, maxBytes? }`. |
+| `AgentMediaIngestionService` | The subscriber. `settle()` awaits in-flight ingestion (graceful shutdown / tests); `handleAttach` / `handleDelete` are the ingest entry points. |
+| `ingestMediaFile(event, deps)` | The pure ingest function — size-gate → read → extract → `remove` → chunk → embed → upsert. Run it inside a durable workflow if you want at-least-once. |
+| `removeMedia(event, { store })` | The delete-sync half — drops a record's chunks. |
+| `TextExtractor` / `MimeTextExtractor` / `defaultTextExtractor()` | Bytes → text, dispatched by mime type. `text/*`, JSON, HTML shipped; register your own for PDF/DOCX. |
+| `MediaAttachEvent` / `MediaDeleteEvent` | The channel payload shapes (mirroring media's `AttachPayload` / `DeletePayload`). |
+
+## Owner-scoped retrieval
+
+Ingestion stamps the owner onto every chunk, so a per-user / per-tenant retriever is one wrapper —
+[`FilteredRetriever`](/docs/agent/packages/rag) from `-rag`:
+
+```ts
+import { EmbeddingRetriever, FilteredRetriever } from '@dudousxd/nestjs-agent-rag';
+
+const base = new EmbeddingRetriever(embedder, store);
+const forThisUser = new FilteredRetriever(base, { ownerId: actor.id });
+```
+
+Pass `forThisUser` to `createRetrievalTool(...)` or `forRoot({ retrieval })` and the agent only ever
+retrieves that owner's documents. The fixed filter takes precedence, so a crafted query can't widen
+the scope.
+
+## Custom extractors
+
+`defaultTextExtractor()` decodes `text/*` and JSON, strips `text/html`, and **skips** anything else
+(unsupported types are dropped, not indexed as binary garbage). Register a parser to add a format:
+
+```ts
+import { defaultTextExtractor } from '@dudousxd/nestjs-agent-rag-media';
+import pdfParse from 'pdf-parse';
+
+const extractor = defaultTextExtractor().register('application/pdf', async (bytes) =>
+  (await pdfParse(bytes)).text,
+);
+
+AgentMediaIngestionModule.forRoot({ store, embedder, readFile, extractor });
+```
+
+## Observability
+
+Each file emits an `aviary:rag:media.*` diagnostics event — `media.ingested` (with chunk count),
+`media.removed`, `media.skipped` (`unsupported-type` / `too-large` / `empty-text`), `media.failed`.
+The Telescope bridge captures them automatically.
+
+## Related
+
+- [`@dudousxd/nestjs-agent-rag`](/docs/agent/packages/rag) — the RAG package this builds on
+- [RAG guide](/docs/agent/guides/rag) — modes, citations, hybrid + reranking, owner scoping
+- [`@dudousxd/nestjs-media`](/docs/media) — the upload library it ingests from

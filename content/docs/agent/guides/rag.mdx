@@ -16,7 +16,7 @@ in `-core`, so the agent runtime stays storage-agnostic.
 
 - **`EmbeddingProvider`** (core SPI) — text → vectors. `aiSdkEmbedding(model)` implements it over any
   Vercel AI SDK embedding model.
-- **`VectorStore`** (`-rag`) — `upsert` + `search`. Ships `MemoryVectorStore` (in-JS cosine) and
+- **`VectorStore`** (`-rag`) — `upsert` + `search` + `remove`. Ships `MemoryVectorStore` (in-JS cosine) and
   `PgVectorStore` (pgvector). The extension point for Qdrant/Pinecone/etc.
 - **`Retriever`** (core SPI) — `retrieve(query) → Passage[]`. `EmbeddingRetriever` bridges an
   embedder + a vector store into one.
@@ -172,7 +172,40 @@ await store.ensureSchema(); // FT.CREATE — HNSW cosine index
 ```
 
 Swap `MemoryVectorStore` for either in the wiring above; nothing else changes. For any other backend
-(Qdrant, Pinecone, Weaviate), implement the `VectorStore` SPI — it's `upsert` + `search`.
+(Qdrant, Pinecone, Weaviate), implement the `VectorStore` SPI — `upsert` + `search` + `remove`.
+
+## Ingesting uploads automatically
+
+If your app already stores files with [`@dudousxd/nestjs-media`](/docs/media), the
+[`@dudousxd/nestjs-agent-rag-media`](/docs/agent/packages/rag-media) package turns every upload into
+searchable knowledge with no glue: attach a file and it's extracted, chunked, embedded, and indexed —
+scoped to its owner, and removed again on delete.
+
+```ts
+import { AgentMediaIngestionModule } from '@dudousxd/nestjs-agent-rag-media';
+
+AgentMediaIngestionModule.forRoot({
+  store,                           // the same VectorStore you retrieve from
+  embedder,
+  collections: ['knowledge-base'],
+  readFile: (disk, path) => media.disk(disk).get(path),
+});
+```
+
+It couples to media purely through the `aviary:media:*` diagnostics channel (no hard dependency), and
+stamps each chunk with the owner from the **server-side** attach record. That last part is what makes
+per-user RAG a real boundary — wrap the retriever with `FilteredRetriever`:
+
+```ts
+import { EmbeddingRetriever, FilteredRetriever } from '@dudousxd/nestjs-agent-rag';
+
+const forThisUser = new FilteredRetriever(new EmbeddingRetriever(embedder, store), {
+  ownerId: actor.id,
+});
+```
+
+See the [rag-media package reference](/docs/agent/packages/rag-media) for custom extractors
+(PDF/DOCX), durable ingestion, and the emitted diagnostics.
 
 ## Related
 

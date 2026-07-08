@@ -8,6 +8,7 @@
     "react",
     "data",
     "rag",
+    "rag-media",
     "dashboard",
     "store-mikro-orm",
     "store-drizzle",
