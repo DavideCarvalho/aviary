@@ -68,6 +68,8 @@ members — see the source for full JSDoc.
 | `TokenStreamSink` + `SinkWriter` | The data plane — live token transport decoupled from durability, keyed by `runId`. | Sink: `open(runId)` / `subscribe(runId): AsyncIterable<Uint8Array>` / `close(runId)`. Writer: `write(chunk)` / `end()`. |
 | `QuotaStore` | Per-actor/day token budget. | `check(actorRef, day): Promise<QuotaState>` / `bump(actorRef, day, tokens): Promise<void>`. |
 | `AgentRunner` | Runs a turn — the inline or durable strategy. | `start(input: AgentRunInput): Promise<{ runId }>` / `signal(runId, toolCallId, decision)` / `cancel(runId)`. |
+| `Retriever` | RAG retrieval seam — vector/keyword search behind the agentic tool or inject mode. | `retrieve(query: string, options?: RetrieveOptions): Promise<Passage[]>`. |
+| `EmbeddingProvider` | Text → vectors, for retrieval + ingestion. | `embed(texts: string[]): Promise<number[][]>`. |
 
 <Callout type="warn" title="A ModelProvider never executes tools">
 `runTurn` streams text and returns requested tool calls — it must not run them. The loop runs every

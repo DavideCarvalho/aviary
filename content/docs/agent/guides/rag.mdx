@@ -1,0 +1,128 @@
+---
+title: RAG
+description: Ground the agent in your documents — agentic retrieval as a tool (default) or always-on prompt injection, with citations flowing through the tool-call mechanism.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+Retrieval-Augmented Generation grounds the agent's answers in your own documents: retrieve the
+passages relevant to a question, and let the model answer from them. The
+[`@dudousxd/nestjs-agent-rag`](/docs/agent/packages/rag) package ships the batteries — chunking,
+ingestion, an embedding-backed retriever, and vector stores — while the retrieval seam itself lives
+in `-core`, so the agent runtime stays storage-agnostic.
+
+## The pieces
+
+- **`EmbeddingProvider`** (core SPI) — text → vectors. `aiSdkEmbedding(model)` implements it over any
+  Vercel AI SDK embedding model.
+- **`VectorStore`** (`-rag`) — `upsert` + `search`. Ships `MemoryVectorStore` (in-JS cosine) and
+  `PgVectorStore` (pgvector). The extension point for Qdrant/Pinecone/etc.
+- **`Retriever`** (core SPI) — `retrieve(query) → Passage[]`. `EmbeddingRetriever` bridges an
+  embedder + a vector store into one.
+
+```ts
+import { EmbeddingRetriever, MemoryVectorStore, ingestDocuments } from '@dudousxd/nestjs-agent-rag';
+import { aiSdkEmbedding } from '@dudousxd/nestjs-agent-ai-sdk';
+import { openai } from '@ai-sdk/openai';
+
+const embedder = aiSdkEmbedding(openai.embedding('text-embedding-3-small'));
+const store = new MemoryVectorStore();
+
+// chunk → embed → upsert. Chunk ids are `${doc.id}#${n}`, so re-ingesting overwrites in place.
+await ingestDocuments(
+  [{ id: 'refunds', text: refundPolicyText, source: 'docs/refunds' }],
+  { embedder, store, chunkSize: 800 },
+);
+
+const retriever = new EmbeddingRetriever(embedder, store);
+```
+
+## Two modes
+
+<Tabs items={['Agentic (tool) — default', 'Inject (always-on)']}>
+<Tab value="Agentic (tool) — default">
+
+The retriever becomes a `search_knowledge(query)` tool. Each turn the **model decides** whether and
+what to search — no wasted embedding on "hi, thanks!", refined queries, multiple searches when it
+needs them. This is the modern default.
+
+```ts
+import { createRetrievalTool } from '@dudousxd/nestjs-agent-rag';
+import { provideAgentTool } from '@dudousxd/nestjs-agent';
+
+@Module({
+  imports: [AgentModule.forRoot({ /* … */ })],
+  providers: [provideAgentTool(createRetrievalTool(retriever))],
+})
+export class AppModule {}
+```
+
+Best for chat assistants and mixed conversations, and when you're running a capable model that
+tool-calls reliably.
+
+</Tab>
+<Tab value="Inject (always-on)">
+
+Before the model runs, the loop embeds the **user's message verbatim**, retrieves the top-K
+passages, and folds them into the system prompt. The model always sees retrieved context — no
+decision, guaranteed grounding.
+
+```ts
+AgentModule.forRoot({
+  // …model, store, actorResolver…
+  retrieval: { mode: 'inject', retriever, topK: 5 },
+});
+```
+
+Best for "answer strictly from these docs" bots (support KBs, document Q&A), weaker models that
+won't reliably call a tool, or when you must guarantee retrieval every turn. The cost: it embeds and
+searches on every message, using the raw message as the query.
+
+</Tab>
+</Tabs>
+
+<Callout type="info" title="Which one?">
+  Rule of thumb: **`tool` = the model searches when it decides it needs to, with the query it forms;
+  `inject` = the library always searches, using the user's message as the query, before generating.**
+  Default to `tool`; reach for `inject` when you need deterministic grounding.
+</Callout>
+
+## Citations
+
+Retrieved passages carry a `source`, and they surface as **citations through the tool-call
+mechanism** — no new message field:
+
+- **Agentic mode:** the `search_knowledge` tool's output *is* the passages. It persists as a tool
+  call and renders as a tool part in the chat UI, and shows up in the `-telescope` Agent tab.
+- **Inject mode:** the loop records a synthetic `auto_executed` `retrieve` tool call (output =
+  passages) against the assistant message it informed — the same surface, so citations render
+  identically.
+
+Either way, each retrieval also emits an `aviary:agent:retrieved` diagnostics event
+(`{ runId, query, count }`) — subscribe for retrieval metrics without instrumenting your code.
+
+## Production storage: pgvector
+
+`MemoryVectorStore` is for tests and small corpora. For scale, `PgVectorStore` uses pgvector over an
+injected `PgClient` (bring your own `pg` / `postgres.js`):
+
+```ts
+import { Pool } from 'pg';
+import { PgVectorStore } from '@dudousxd/nestjs-agent-rag';
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const store = new PgVectorStore(
+  { query: (sql, params) => pool.query(sql, params).then((r) => r.rows) },
+  { dimensions: 1536 }, // match your embedding model
+);
+await store.ensureSchema(); // vector extension + table + HNSW cosine index
+```
+
+Swap `MemoryVectorStore` for it in the ingestion + retriever wiring above; nothing else changes.
+
+## Related
+
+- [`@dudousxd/nestjs-agent-rag`](/docs/agent/packages/rag) — the package reference
+- [Tools](/docs/agent/guides/tools) — `read` tools, which is what agentic retrieval rides on
+- [Governed SQL](/docs/agent/guides/governed-sql) — the other read seam; a `VectorStore` can ride the same `-data` pool

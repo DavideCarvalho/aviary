@@ -1,0 +1,76 @@
+---
+title: '@dudousxd/nestjs-agent-rag'
+description: Retrieval-Augmented Generation — chunking, ingestion, an embedding-backed Retriever, and in-memory + pgvector stores. Framework-agnostic, core-only dep.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+RAG for the agent. It's framework-agnostic (depends only on `-core`): you bring an embedding model
+and, for pgvector, a Postgres driver. Ships chunking, ingestion, an embedding-backed `Retriever`,
+and two `VectorStore` adapters — in-memory and pgvector.
+
+For the full walkthrough (agentic vs inject mode, citations, how it plugs into the loop) see the
+[RAG guide](/docs/agent/guides/rag). This page is the package reference.
+
+## Install
+
+```bash
+pnpm add @dudousxd/nestjs-agent-rag @dudousxd/nestjs-agent-core
+```
+
+## API
+
+| Export | What it is |
+|---|---|
+| `chunkText(text, { chunkSize?, overlap? })` | Overlapping, boundary-aware chunks (defaults 800 / 100). |
+| `ingestDocuments(docs, { embedder, store, chunkSize?, overlap? })` | Chunk → embed (batched) → upsert. Returns the chunk count. Deterministic ids (`${doc.id}#${n}`) so re-ingest overwrites. |
+| `EmbeddingRetriever(embedder, store)` | The core `Retriever` from an `EmbeddingProvider` + `VectorStore`. |
+| `MemoryVectorStore` | In-JS cosine `VectorStore` — tests + small/embedded corpora. |
+| `PgVectorStore(client, { table?, dimensions? })` | pgvector `VectorStore` over an injected `PgClient`. `ensureSchema()` creates the extension, table, and HNSW cosine index. |
+| `createRetrievalTool(retriever, { name?, description?, topK? })` | The agentic-retrieval tool (`{ spec, handler }`) — pass to `provideAgentTool`. |
+
+## Building blocks
+
+```ts
+import {
+  EmbeddingRetriever,
+  MemoryVectorStore,
+  ingestDocuments,
+} from '@dudousxd/nestjs-agent-rag';
+import { aiSdkEmbedding } from '@dudousxd/nestjs-agent-ai-sdk';
+import { openai } from '@ai-sdk/openai';
+
+const embedder = aiSdkEmbedding(openai.embedding('text-embedding-3-small'));
+const store = new MemoryVectorStore();
+
+await ingestDocuments(
+  [{ id: 'refund-policy', text: '…', source: 'docs/refunds' }],
+  { embedder, store, chunkSize: 800 },
+);
+
+const retriever = new EmbeddingRetriever(embedder, store);
+```
+
+## pgvector
+
+`PgVectorStore` takes an injected `PgClient` — adapt your own `pg` / `postgres.js`, so the package
+pulls in no driver of its own (the same "bring your own client" shape as `-transport-redis` and the
+store adapters).
+
+```ts
+import { Pool } from 'pg';
+import { PgVectorStore } from '@dudousxd/nestjs-agent-rag';
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const store = new PgVectorStore(
+  { query: (sql, params) => pool.query(sql, params).then((r) => r.rows) },
+  { dimensions: 1536 },
+);
+await store.ensureSchema();
+```
+
+<Callout type="info" title="Custom vector stores">
+  `VectorStore` (`upsert` / `search`) is the extension point — implement it over Qdrant, Pinecone,
+  Weaviate, or your own `-data` SQL seam, and pair it with any `EmbeddingProvider` via
+  `EmbeddingRetriever`.
+</Callout>

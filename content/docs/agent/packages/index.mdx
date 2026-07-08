@@ -20,6 +20,7 @@ module, the React frontend). Which tables, which tenant column, which roles, whi
 | [`-ai-sdk`](/docs/agent/packages/ai-sdk) | `aiSdkModel(model)` adapts any Vercel AI SDK v7 `LanguageModel` to `ModelProvider` — zero provider code. |
 | [`-react`](/docs/agent/packages/react) | `useAgentChat` + styling-agnostic chat components for a browser frontend. |
 | [`-data`](/docs/agent/packages/data) | `createExecuteSqlTool` — governed, read-only SQL as a prebuilt tool. |
+| [`-rag`](/docs/agent/packages/rag) | Retrieval-Augmented Generation — chunking, ingestion, an embedding-backed `Retriever`, and in-memory + pgvector stores. |
 | [`-dashboard`](/docs/agent/packages/dashboard) | Standalone AI-gateway governance console (bundled SPA + API), no Telescope required. |
 | [`-store-mikro-orm`](/docs/agent/packages/store-mikro-orm) | `AgentStore` + `AgentGovernanceQueries` + `AgentPricingStore` on MikroORM. |
 | [`-store-drizzle`](/docs/agent/packages/store-drizzle) | `AgentStore` + `AgentGovernanceQueries` + `AgentPricingStore` on Drizzle. |
@@ -40,6 +41,7 @@ module, the React frontend). Which tables, which tenant column, which roles, whi
                               -authz ────────────────────────────────────┤  RolesPolicy
                               -transport-redis ────────────────────────────┤  TokenStreamSink
                               -data (createExecuteSqlTool) ───────────────────┤  a read-kind ToolSpec + ToolHandler
+                              -rag ─────────────────────────────────────────────┤  Retriever + EmbeddingProvider (RAG tool / inject)
         -dashboard / -telescope ──────────────────────────────────────────────┘  consume AgentGovernanceQueries
 ```
 

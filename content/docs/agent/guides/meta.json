@@ -5,6 +5,7 @@
     "identity-and-authorization",
     "human-in-the-loop-and-durability",
     "multi-agent",
+    "rag",
     "cost-and-governance",
     "persistence",
     "frontend",

@@ -18,6 +18,7 @@ import { Callout } from 'fumadocs-ui/components/callout';
 | `run.failed` | `runId: string`; `code: string`; `message: string` | `publishAgentRunFailed` |
 | `run.finished` | `runId: string`; `threadId: string`; `steps: number`; `inputTokens: number`; `outputTokens: number` | `publishAgentRunFinished` |
 | `delegated` | `runId: string`; `fromAgent?: string`; `toAgent: string` | `publishAgentDelegated` |
+| `retrieved` | `runId: string`; `query: string`; `count: number` | `publishAgentRetrieved` |
 
 <Callout type="info" title="tool-call's toolType is narrower than ToolKind">
   `AgentToolCallEvent.toolType` is `'read' | 'action'` — it does not include the `'agent'` kind that `ToolSpec.kind` supports for delegation. Delegation gets its own `delegated` event instead.
