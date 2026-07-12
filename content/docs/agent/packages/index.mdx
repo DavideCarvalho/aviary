@@ -21,6 +21,7 @@ module, the React frontend). Which tables, which tenant column, which roles, whi
 | [`-react`](/docs/agent/packages/react) | `useAgentChat` + styling-agnostic chat components for a browser frontend. |
 | [`-data`](/docs/agent/packages/data) | `createExecuteSqlTool` — governed, read-only SQL as a prebuilt tool. |
 | [`-rag`](/docs/agent/packages/rag) | Retrieval-Augmented Generation — chunking, ingestion, an embedding-backed `Retriever`, and in-memory + pgvector stores. |
+| [`-rag-media`](/docs/agent/packages/rag-media) | Auto-ingest `nestjs-media` uploads into agent RAG — extract, chunk, embed, index, owner-scoped, delete-synced. |
 | [`-dashboard`](/docs/agent/packages/dashboard) | Standalone AI-gateway governance console (bundled SPA + API), no Telescope required. |
 | [`-store-mikro-orm`](/docs/agent/packages/store-mikro-orm) | `AgentStore` + `AgentGovernanceQueries` + `AgentPricingStore` on MikroORM. |
 | [`-store-drizzle`](/docs/agent/packages/store-drizzle) | `AgentStore` + `AgentGovernanceQueries` + `AgentPricingStore` on Drizzle. |
@@ -42,6 +43,7 @@ module, the React frontend). Which tables, which tenant column, which roles, whi
                               -transport-redis ────────────────────────────┤  TokenStreamSink
                               -data (createExecuteSqlTool) ───────────────────┤  a read-kind ToolSpec + ToolHandler
                               -rag ─────────────────────────────────────────────┤  Retriever + EmbeddingProvider (RAG tool / inject)
+                              -rag-media (auto-ingest via diagnostics channel) ──┤  feeds -rag's VectorStore, no hard dep
         -dashboard / -telescope ──────────────────────────────────────────────┘  consume AgentGovernanceQueries
 ```
 
@@ -57,6 +59,7 @@ either, both, or neither.
   <Card title="AI SDK adapter" href="/docs/agent/packages/ai-sdk" description="aiSdkModel — zero provider code for any Vercel AI SDK v7 model." />
   <Card title="React" href="/docs/agent/packages/react" description="useAgentChat and styling-agnostic chat components." />
   <Card title="Data" href="/docs/agent/packages/data" description="Governed, read-only SQL as a prebuilt tool." />
+  <Card title="RAG media" href="/docs/agent/packages/rag-media" description="Auto-ingest nestjs-media uploads into agent RAG." />
   <Card title="Dashboard" href="/docs/agent/packages/dashboard" description="The standalone AI-gateway governance console." />
   <Card title="Store (MikroORM)" href="/docs/agent/packages/store-mikro-orm" description="AgentStore + AgentGovernanceQueries + AgentPricingStore on MikroORM." />
   <Card title="Store (Drizzle)" href="/docs/agent/packages/store-drizzle" description="AgentStore + AgentGovernanceQueries + AgentPricingStore on Drizzle." />

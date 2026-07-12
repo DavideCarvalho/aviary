@@ -276,6 +276,17 @@ read, fork, delete, or cancel another actor's state by guessing an id.
 
 ---
 
+## The same resolver backs the approvals console
+
+Chat isn't the only surface that needs to know who's acting. `@dudousxd/nestjs-agent-dashboard`'s
+approvals inbox (see [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability#approving-from-a-console-not-just-chat))
+stamps who decided an approval via an `approvalActorRef` dashboard option that defaults to the
+module-configured `ActorResolver` — the same one resolving chat's actor. A console whose auth matches
+chat's needs zero extra identity wiring; supply `approvalActorRef` only when the console's request
+shape differs from chat's (a different guard, a different header set).
+
+---
+
 ## Related
 
 - [Tools](/docs/agent/guides/tools) — the `@AiTool` surface where `roles` / `ability` and `kind` are declared

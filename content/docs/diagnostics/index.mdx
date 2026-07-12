@@ -36,6 +36,8 @@ interface DiagnosticEvent<TPayload = unknown> {
 
 `durationMs` is **optional** and only present when the emitter measured how long the operation took (see [Getting Started](/docs/diagnostics/getting-started#timing-an-operation)). Events that don't describe a timed operation omit it entirely, so the common envelope stays free of an `undefined`-valued key.
 
+For an operation with a real start/end/error shape rather than a single point-in-time event, `trace(lib, event, fn, payload?, opts?)` is the other half of the surface: it publishes a matched `start`/`end`/`asyncStart`/`asyncEnd`/`error` sequence sharing one `spanId`, instead of a single envelope on the base channel. See [Tracing an operation](/docs/diagnostics/getting-started#tracing-an-operation) — and, on the consumer side, [how a completed span becomes one recorded entry](/docs/diagnostics/consumers#telescope-batteries-included).
+
 ## Quickstart
 
 <Steps>

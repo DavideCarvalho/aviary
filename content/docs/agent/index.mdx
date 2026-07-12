@@ -18,10 +18,16 @@ Out of the box the turn runs on an **inline** runner — in-process, no extra de
 `@dudousxd/nestjs-durable` and flip `durable: true` and each turn instead runs as a durable
 workflow: every model and tool call becomes a checkpointed step, so a crash mid-turn replays from
 cache, and human-in-the-loop approval becomes a durable **signal** — the run suspends in the state
-store instead of holding a connection, and resumes when a human approves. Either way live tokens
-flow on a separate data plane (a `TokenStreamSink`), so streaming and durability compose instead of
-fighting. The wire protocol your frontend speaks is identical, so you develop inline and flip to
-durable in production without touching your tools or UI.
+store instead of holding a connection, and resumes when a human approves. Under `durable: true`,
+the turn's model call and tool executions are, by default, **dispatched** as routed durable steps
+(`AgentRunSteps.llm` / `AgentRunSteps.tool`) rather than pinned to the pod that started the run —
+either can land on any worker in the fleet (opt out with `dispatchedSteps: false`). Either way live
+tokens flow on a separate data plane (a `TokenStreamSink`), so streaming and durability compose
+instead of fighting — but a dispatched turn needs that sink to be **cross-process** (e.g.
+`RedisTokenStreamSink`), since the worker executing the step may not be the pod holding the SSE
+connection. The wire protocol your frontend speaks is identical, so you develop inline and flip to
+durable in production without touching your tools or UI. See
+[Architecture](/docs/agent/concepts/architecture) for the full control/data-plane picture.
 </Callout>
 
 ## What you get
@@ -38,7 +44,11 @@ durable in production without touching your tools or UI.
 - **Streaming** — SSE with resume; reconnect replays the buffered tokens.
 - **Inline or durable** — an in-process runner by default, or opt into the durable runner (add
   `@dudousxd/nestjs-durable`, set `durable: true`) for checkpointed, replay-safe turns — one
-  `AgentRunner` SPI, identical wire protocol.
+  `AgentRunner` SPI, identical wire protocol. Durable turns dispatch their model/tool steps across
+  the worker fleet by default (`AgentRunSteps.llm`/`.tool`).
+- **Run reliability + tracing** — every run's start/end is durably recorded (`agent_run`, with a
+  `promptHash` of the resolved system prompt) and every turn emits diagnostics spans
+  (`traceId = runId`) that Telescope renders as a waterfall in its TRACES tab.
 - **Multi-agent** — an orchestrator delegates to named sub-agents via a synthesized `ask_<name>`
   tool; each delegation is a durable child run.
 - **The data satellite** — `@dudousxd/nestjs-agent-data` packages governed, read-only SQL
@@ -51,21 +61,26 @@ durable in production without touching your tools or UI.
 
 ## The four glue points
 
-- **Diagnostics** — emits `aviary:agent:*` (`run.started`, `message`, `tool-call`, `delegated`,
-  `quota.exceeded`, `run.failed`, `run.finished`) on Node's `diagnostics_channel`.
+- **Diagnostics** — emits `aviary:agent:*` point events (`run.started`, `message`, `tool-call`,
+  `delegated`, `retrieved`, `quota.exceeded`, `run.failed`, `run.finished`) on Node's
+  `diagnostics_channel`, plus tracing **spans** (`llm.turn`, `tool.execution`, `retrieval`,
+  `follow-ups`) correlated by `traceId = runId`.
 - **Telescope** — `@dudousxd/nestjs-agent-telescope` adds an "Agent" tab with the governance
-  sections; runs also appear in the durable "Workflows" tab for free.
+  sections (including Reliability and Approvals); runs also appear in the durable "Workflows" tab
+  for free, and each run's spans render as a nested waterfall in Telescope's TRACES tab.
 - **Codegen** — a `@dudousxd/nestjs-agent-codegen` extension injects `api.agent.*` into the unified
   typed client.
 - **Module convention** — `forRoot` / `forRootAsync` / `forFeature` and `Symbol.for` capabilities.
 
 <Callout type="warn" title="Status">
 Early development (`0.x`). The full family ships today — core, the NestJS module (inline + durable
-runners), MikroORM and Drizzle persistence (including model pricing), the governance read-model, the
-standalone dashboard, the telescope extension, governed SQL (`-data`), the React frontend (`-react`),
-the AI SDK model adapter (`-ai-sdk`), codegen, a Redis-backed multi-replica token sink
-(`-transport-redis`), and a runnable fully-offline end-to-end demo. The package surface and SPIs are
-still stabilizing.
+runners, the latter dispatching model/tool steps across the fleet by default), MikroORM and Drizzle
+persistence (including model pricing and run reliability), the governance read-model (spend, run
+reliability, tool stats, a cross-thread approvals inbox, paginated/filterable lists), the standalone
+dashboard, the telescope extension (including run tracing), governed SQL (`-data`), the React
+frontend (`-react`), the AI SDK model adapter (`-ai-sdk`), codegen, a Redis-backed multi-replica
+token sink (`-transport-redis`), and a runnable fully-offline end-to-end demo. The package surface
+and SPIs are still stabilizing.
 </Callout>
 
 ## Where to go next
@@ -79,4 +94,5 @@ still stabilizing.
   <Card title="Cost & Governance" href="/docs/agent/guides/cost-and-governance" description="The usage ledger, reported-cost-wins, cache-aware pricing, and the console." />
   <Card title="Persistence" href="/docs/agent/guides/persistence" description="The AgentStore SPI on MikroORM or Drizzle — threads, messages, usage, pricing." />
   <Card title="Frontend" href="/docs/agent/guides/frontend" description="useAgentChat, styling-agnostic components, and the markdown renderer." />
+  <Card title="Bring your own UI" href="/docs/agent/guides/bring-your-own-ui" description="No shipped components: build a chat on the headless hook, own every pixel." />
 </Cards>

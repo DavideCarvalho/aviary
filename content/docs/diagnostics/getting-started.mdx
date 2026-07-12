@@ -91,17 +91,44 @@ export class AiService {
 `durationMs` is set on the envelope **only when you pass it** — omit it for events that aren't tied to a timed operation, and the key won't appear at all. There's no need to send `0` or a placeholder.
 </Callout>
 
+## Tracing an operation
+
+`emit` is for a single fire-and-forget event. When the thing you want to observe has a real start/end/error shape — an outbound call, a durable step — wrap it in `trace(lib, event, fn, payload?, opts?)` instead of hand-rolling matching `emit` calls at both ends:
+
+```ts
+import { trace } from '@dudousxd/nestjs-diagnostics';
+
+async function chargeCard(orderId: string) {
+  return trace('billing', 'charge', () => paymentProvider.charge(orderId), { orderId });
+}
+```
+
+`trace` publishes on five sub-channels named `aviary:<lib>:<event>:<phase>` (`start`, `end`, `asyncStart`, `asyncEnd`, `error`) rather than the base channel `emit` uses — mirroring Node's own `tracingChannel()` semantics. A synchronous `fn` publishes `start` then `end` (or `error` on throw). An async `fn` (one returning a promise) publishes `start`, an `end` marking the synchronous portion completing, then `asyncStart` followed by `asyncEnd` (or `error`) once the promise settles. Every phase event of one call shares a `spanId`, and each terminal phase (`end`/`asyncEnd`/`error`) carries `durationMs`, measured from `start` with `performance.now()`.
+
+Trace id precedence mirrors `emit`: pass `opts.traceId` for an explicit id (resolved once at span start and stamped on every phase), otherwise it falls back to the registered context accessor.
+
+Like `emit`, `trace` costs almost nothing when unobserved — if none of the five sub-channels has a subscriber, it just calls `fn()` directly: no span id, no envelope built. `tracingChannel(lib, event)` returns a reusable `{ name, channels, trace(fn, payload?, opts?) }` bound to one `(lib, event)` pair, for a hot call site that always traces the same operation.
+
+<Callout type="info">
+See [Consumers → Telescope](/docs/diagnostics/consumers#telescope-batteries-included) for how the generic watcher turns a completed span into a single recorded entry.
+</Callout>
+
 ## API surface
 
 | Export | Description |
 | --- | --- |
 | `emit(lib, event, payload, opts?)` | Build + publish a `DiagnosticEvent` on `aviary:<lib>:<event>` (only when subscribed). `opts` accepts `traceId`, `durationMs`, and `sample`. |
+| `trace(lib, event, fn, payload?, opts?)` | Wrap an operation and publish span-like `start`/`end`/`asyncStart`/`asyncEnd`/`error` events (see [Tracing an operation](#tracing-an-operation)). `opts` accepts `traceId`. |
+| `tracingChannel(lib, event)` | A `trace` bound to one `(lib, event)` pair, reused across calls. |
+| `traceChannelNames(lib, event)` | The five `aviary:<lib>:<event>:<phase>` sub-channel names for a pair. |
 | `channelName(lib, event)` | The `aviary:<lib>:<event>` string. |
 | `getChannel(lib, event)` | The memoized `diagnostics_channel` for a pair (also registers its name). |
 | `CHANNEL_PREFIX` | `'aviary'`. |
 | `registeredChannels()` | Snapshot of every registered channel name. |
 | `onChannelRegistered(cb)` | Notified once per future channel registration; returns an unsubscribe. |
-| `setContextAccessor(accessor \| null)` | Register the accessor `emit` reads `traceId` from. |
+| `setContextAccessor(accessor \| null)` | Register the accessor `emit`/`trace` read `traceId` from. |
 | `CONTEXT_ACCESSOR` | Shared DI token for the optional context accessor. |
+| `claimDiagnostics(lib, events)` | Register `lib:event` keys in the process-global claim registry so a generic consumer skips them by default; returns a release function. See [Consumers → the claim registry](/docs/diagnostics/consumers#avoiding-duplicate-recording-the-claim-registry). |
+| `isDiagnosticClaimed(lib, event)` | Whether `lib:event` is currently claimed. |
 
 The `registeredChannels` / `onChannelRegistered` pair is what makes generic, wildcard-style observing possible — see [Consumers](/docs/diagnostics/consumers).

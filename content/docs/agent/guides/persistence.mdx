@@ -60,6 +60,32 @@ the [Cost & Governance](/docs/agent/guides/cost-and-governance) read-model rolls
 
 ---
 
+## Run reliability recording (optional)
+
+Beyond the five tables above, `AgentStore` carries three **optional** methods for a sixth concern —
+run outcomes, in `agent_run` — absent on an adapter, they're a graceful no-op, so an existing custom
+`AgentStore` keeps compiling untouched:
+
+```ts
+recordRunStart?(run: RecordRunStartInput): Promise<void>; // carries promptHash
+recordRunEnd?(end: RecordRunEndInput): Promise<void>;     // durationMs, errorCode/errorMessage on failure
+bumpRunRetries?(runId: string): Promise<void>;
+```
+
+The loop calls `recordRunStart` at the top of a turn as a checkpointed step, carrying the sha256 of
+the resolved system prompt as `promptHash` — computed **pre-RAG**, so it identifies the prompt
+*version* rather than the per-request, retrieval-augmented text, letting you correlate error-rate
+shifts with prompt changes. `recordRunEnd` is called on completion (with duration) and on failure
+(with an error code/message) by both runners — the durable workflow and the inline runner alike.
+
+Both bundled adapters (`-store-mikro-orm`, `-store-drizzle`) implement all three against a new
+`agent_run` table (autoSchema-managed, alongside the five tables above), and the same rows back
+`AgentGovernanceQueries`' reliability reads — `runMetrics`, `runsByAgent`, `runErrors`, `runTrend`,
+`recentRuns` (which surfaces each run's `promptHash`) — plus a paginated `runsPage`. See
+[Cost & Governance](/docs/agent/guides/cost-and-governance) for what those reads render.
+
+---
+
 ## Three tokens, bound together
 
 An adapter binds **three** DI tokens — the write side, the read side, and the pricing writer — so

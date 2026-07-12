@@ -60,9 +60,10 @@ members — see the source for full JSDoc.
 | SPI | Purpose | Key shape |
 |---|---|---|
 | `ModelProvider` | Wraps the actual LLM call. | `runTurn(args: ModelTurnArgs): Promise<ModelTurnResult>` — `args` carries `system`, `messages`, `tools`, a `sink: SinkWriter` for live deltas, `abortSignal`; the result carries `text`, `toolCalls`, `usage`, optional `modelId` and `costUsd`. |
-| `AgentStore` | ORM-agnostic persistence for threads, messages, tool calls, and usage. | `createThread` / `getThread` / `listThreads` / `forkThread` / `appendMessage` / `truncateFrom` / `recordToolCall` / `updateToolCall` / `recordUsage` / `quotaToday` / `ownerOfThread(threadId): Promise<string \| null>` / `ownerOfToolCall(toolCallId): Promise<string \| null>` / `runForToolCall(toolCallId): Promise<string \| null>` / `ownerOfActiveStream(runId): Promise<string \| null>`. |
+| `AgentStore` | ORM-agnostic persistence for threads, messages, tool calls, and usage. | `createThread` / `getThread` / `listThreads` / `forkThread` / `appendMessage` / `truncateFrom` / `recordToolCall` / `updateToolCall` / `recordUsage` / `quotaToday` / `ownerOfThread(threadId): Promise<string \| null>` / `ownerOfToolCall(toolCallId): Promise<string \| null>` / `runForToolCall(toolCallId): Promise<string \| null>` / `ownerOfActiveStream(runId): Promise<string \| null>` / optional `updateThread` / `activeRunForThread` / **optional `recordRunStart(input: RecordRunStartInput)` / `recordRunEnd(input: RecordRunEndInput)` / `bumpRunRetries(runId)`** — run reliability recording, absent = graceful no-op. |
 | `AgentPricingStore` | Write side of model pricing — the SPI that seeds the pricing table the cost estimate reads. | `upsertModelPrice(input: ModelPriceInput): Promise<void>` (atomic supersede — retires the model's current row, inserts a new current one) / `listCurrentPrices(): Promise<CurrentModelPrice[]>`. |
-| `AgentGovernanceQueries` | The read/analytics half of the store — the dashboard and Telescope tab both consume this one interface. | `spendByModel(range)` / `spendByActor(range)` / `usageTrend(range)` / `recentToolCalls(limit)` / `recentThreads(limit)`. |
+| `AgentGovernanceQueries` | The read/analytics half of the store — the dashboard and Telescope tab both consume this one interface. | Usage/spend: `spendByModel(range)` / `spendByActor(range)` / `spendByThread(range, limit)` / `usageTrend(range)` / `recentToolCalls(limit)` / `recentThreads(limit)`. Run reliability: `runMetrics(range)` / `runsByAgent(range)` / `runErrors(range)` / `runTrend(range)` / `recentRuns(limit)` — all REQUIRED; an adapter over a store that never records runs returns zeros/empty. Governance: `pendingApprovals(limit)` (the approvals inbox) / `toolStats(range)`. Paged, filterable variants for the dashboard's list tables: `toolCallsPage` / `threadsPage` / `runsPage` (each takes a `GovernancePageQuery<TWhere>` — `page`, `pageSize`, typed `where` — and returns a `GovernancePage<TRow>` with `total` for prev/next paging). |
+| `AgentApprovalPort` | Console-side HITL decisions — the approvals inbox routes through this instead of re-running chat's own approve/reject authorization. Optional: absent = the dashboard's approvals inbox 501s and renders read-only. | `approve(toolCallId, opts?: { executedByRef? })` / `reject(toolCallId, opts?: { executedByRef?, reason? })`. |
 | `ActorResolver` | Resolves the caller for an inbound request — the identity seam; no default fabricates one, and it's a required option — there's no throwing placeholder to fall back to. | `resolve(req: unknown): Actor \| Promise<Actor>`. |
 | `RolesPolicy` | Decides whether an actor may invoke a tool. | `can(actor: Actor, tool: ToolSpec): boolean \| Promise<boolean>`. |
 | `TokenStreamSink` + `SinkWriter` | The data plane — live token transport decoupled from durability, keyed by `runId`. | Sink: `open(runId)` / `subscribe(runId): AsyncIterable<Uint8Array>` / `close(runId)`. Writer: `write(chunk)` / `end()`. |
@@ -71,6 +72,16 @@ members — see the source for full JSDoc.
 | `Retriever` | RAG retrieval seam — vector/keyword search behind the agentic tool or inject mode. | `retrieve(query: string, options?: RetrieveOptions): Promise<Passage[]>`. |
 | `EmbeddingProvider` | Text → vectors, for retrieval + ingestion. | `embed(texts: string[]): Promise<number[][]>`. |
 | `Reranker` | Second-stage RAG precision — re-scores retrieved passages against the query. | `rerank(query: string, passages: Passage[], options?: RerankOptions): Promise<Passage[]>`. |
+
+<Callout type="info" title="Run reliability recording">
+Every run is durably recorded: the loop calls `AgentStore.recordRunStart` (with a `promptHash` — the
+sha256 of the run's resolved, pre-RAG system prompt, so a governance read can correlate an error-rate
+shift with a prompt change) as a checkpointed step, then `recordRunEnd` on completion or failure
+(duration, error code/message). Both bundled store adapters (MikroORM, Drizzle) ship an `agent_run`
+table (autoSchema-managed) backing this; a custom `AgentStore` that omits these three methods just
+gets zeros/empty back from the `runMetrics`/`runsByAgent`/`runErrors`/`runTrend`/`recentRuns`/`runsPage`
+reads instead of a crash.
+</Callout>
 
 <Callout type="warn" title="A ModelProvider never executes tools">
 `runTurn` streams text and returns requested tool calls — it must not run them. The loop runs every
@@ -88,6 +99,8 @@ tool call as its own step so a turn stays replay-safe when it's executing as a d
 | `MessageUsage` | `{ inputTokens, outputTokens, cacheWriteTokens?, cacheReadTokens?, reasoningTokens? }` — the cache-aware usage shape behind cost accounting. |
 | `AgentDefinition` | `{ name, systemPrompt?, tools?, delegatesTo?, personas?, defaultPersona?, modelId?, maxSteps? }` — one named agent (the default one, or a `forFeature`-registered one). |
 | `ModelPriceInput` | `{ modelId, inputPricePer1m, outputPricePer1m, cacheWritePricePer1m?, cacheReadPricePer1m? }` — the shape `AgentPricingStore.upsertModelPrice` accepts. |
+| `Decision` | `{ approved: boolean, reason?: string, executedByRef?: string }` — a human decision on a pending action tool call. `executedByRef` is who decided; absent means the run's own actor decided (the chat approve/reject flow). The dashboard's approvals inbox stamps this from its `approvalActorRef` option (or the configured `ActorResolver` by default) when routing through `AgentApprovalPort`. |
+| `RecordRunStartInput` / `RecordRunEndInput` | `{ runId, threadId, actorRef, agentName?, promptHash? }` / `{ runId, status: 'completed' \| 'failed', durationMs?, errorCode?, errorMessage? }` — what `AgentStore.recordRunStart`/`recordRunEnd` accept. |
 
 ## Also exported
 
@@ -97,6 +110,18 @@ tool call as its own step so a turn stays replay-safe when it's executing as a d
 seed a pricing table at boot), and the `aviary:agent:*` diagnostics helpers — re-exported by the
 umbrella package too, so an app importing `@dudousxd/nestjs-agent` never needs a direct dependency on
 `-core`.
+
+<Callout type="info" title="Dispatched-step plumbing (advanced)">
+Most apps never touch this — it exists so `@dudousxd/nestjs-agent`'s durable module can route a
+turn's model/tool step to any worker in a fleet instead of running it in-process. `-core` exports the
+serializable `LlmStepEnvelope`/`ToolStepEnvelope` shapes those steps carry over the wire, the optional
+`AgentLoopHooks.dispatchLlm`/`dispatchTool` hooks the loop calls when dispatching is enabled (absent =
+identical in-process behavior), `AgentLoopHooks.isControlFlowError` (so a durable suspend/continue-as-new
+signal escapes the loop's tool-failure catch instead of being mispersisted as a real failure),
+`traceLlmTurn`/`traceToolExecution` (the diagnostics spans, emitted from wherever the step actually
+executes), and `withToolTimeout`. See [`@dudousxd/nestjs-agent`](/docs/agent/packages/nestjs) — the
+"Durable subpath" section — for how the nestjs package wires these into `AgentRunSteps.llm`/`.tool`.
+</Callout>
 
 See [Getting Started](/docs/agent/getting-started) to wire the loop into a NestJS app, or
 [Concepts → Architecture](/docs/agent/concepts/architecture) for how the SPIs above compose into a

@@ -190,6 +190,14 @@ sub-agent's HITL pause is held open in memory, not checkpointed. See
 [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability).
 </Callout>
 
+<Callout type="info" title="A child run dispatches its steps too">
+`dispatchedSteps` defaults to ON under `durable: true`, and a delegated child run is still an
+`agent.run` workflow — so a sub-agent's own model call and tool executions dispatch through the same
+`AgentRunSteps.llm` / `.tool` worker groups as a top-level run, landing on whichever worker in the
+fleet picks them up rather than staying pinned to the pod that started the parent. See
+[Dispatched steps](/docs/agent/guides/human-in-the-loop-and-durability#dispatched-steps-the-run-isnt-pinned-to-a-pod).
+</Callout>
+
 ---
 
 ## Observing delegation

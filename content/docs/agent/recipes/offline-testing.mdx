@@ -15,7 +15,7 @@ governance — so a full `AgentModule.forRoot` boots and runs turns in a plain N
 
 ```ts
 // src/app.e2e.spec.ts
-import { AgentModule, AgentService, AiTool, HeaderActorResolver } from '@dudousxd/nestjs-agent';
+import { Agent, AgentModule, AgentService, AiTool, HeaderActorResolver } from '@dudousxd/nestjs-agent';
 import {
   FakeModelProvider,
   InMemoryAgentStore,
@@ -39,6 +39,11 @@ class GetWeatherTool {
     return { tempC: 21, city: input.city };
   }
 }
+
+// Agents are `@Agent`-decorated providers, discovered at boot — not a `defaultAgent` config object.
+@Agent({ name: 'default', systemPrompt: 'test agent' })
+@Injectable()
+class TestAgent {}
 
 async function collect(iterable: AsyncIterable<Uint8Array>): Promise<string> {
   const decoder = new TextDecoder();
@@ -72,10 +77,9 @@ it('auto-executes a read tool then answers', async () => {
         sink: new InMemoryTokenStreamSink(),
         quota: new InMemoryQuotaStore(200_000),
         actorResolver: new HeaderActorResolver(),
-        defaultAgent: { modelId: 'fake-1', systemPrompt: 'test agent' },
       }),
     ],
-    providers: [GetWeatherTool],
+    providers: [GetWeatherTool, TestAgent],
   }).compile();
 
   const app = moduleRef.createNestApplication();

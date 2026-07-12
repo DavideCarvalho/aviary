@@ -7,8 +7,9 @@ import { Callout } from 'fumadocs-ui/components/callout';
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
 The agent's controllers live in `node_modules`, where `@dudousxd/nestjs-codegen`'s static AST
-discovery can't see them. This extension injects the JSON REST routes directly — threads, personas,
-tool-call approve/reject, quota, cancel — so they show up in your unified generated client.
+discovery can't see them. This extension injects the JSON REST routes directly — the agents catalog,
+threads (incl. rename/promote/fork/truncate), tool-call approve/reject, quota, cancel — so they show
+up in your unified generated client.
 
 <Tabs items={['pnpm', 'npm']}>
 <Tab value="pnpm">
@@ -67,18 +68,21 @@ transport) for those — see [Frontend](/docs/agent/guides/frontend).
 
 | Export | Kind | Purpose |
 |---|---|---|
-| `nestjsAgentCodegen(options?)` | function → `CodegenExtension` | Injects the agent's JSON REST routes (threads, personas, tool-call approve/reject, quota, cancel) into the codegen route set |
+| `nestjsAgentCodegen(options?)` | function → `CodegenExtension` | Injects the agent's JSON REST routes (agents catalog, threads incl. rename/promote/fork/truncate, tool-call approve/reject, quota, cancel) into the codegen route set |
 | `AgentCodegenOptions` | type | `{ basePath?: string; name?: string }` — the mount prefix (default `''`) and the client namespace (default `'agent'`, i.e. `api.agent.*`) |
 
 ## Routes it injects
 
 | Method & path | Generated name |
 |---|---|
+| `GET /agent/agents` | `agent.agents.list` |
 | `GET /agent/threads` | `agent.threads.list` |
-| `GET /agent/threads/personas/catalog` | `agent.personas` |
 | `GET /agent/threads/:id` | `agent.threads.get` |
 | `DELETE /agent/threads/:id` | `agent.threads.remove` |
 | `POST /agent/threads/:id/fork-from/:messageId` | `agent.threads.fork` |
+| `PATCH /agent/threads/:id` | `agent.threads.rename` |
+| `POST /agent/threads/:id/promote` | `agent.threads.promote` |
+| `DELETE /agent/threads/:id/from/:messageId` | `agent.threads.truncate` |
 | `POST /agent/tool-call/approve` | `agent.toolCall.approve` |
 | `POST /agent/tool-call/reject` | `agent.toolCall.reject` |
 | `GET /agent/quota/today` | `agent.quota` |

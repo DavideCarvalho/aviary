@@ -25,7 +25,7 @@ an answer:
 | `AgentGovernanceQueries` | Spend/usage read-model (the analytics path) | Same MikroORM/Drizzle store packages; `InMemoryGovernanceQueries` (`-testing`) |
 | `ActorResolver` | Who's calling | `HeaderActorResolver` (`-nestjs`, gateway-only) — required, no default; you must supply one |
 | `RolesPolicy` | May this actor call this tool | `DefaultRolesPolicy` (role set-intersection, `-core`); `AuthzRolesPolicy` (`-authz`, delegates to a `nestjs-authz` Gate) |
-| `TokenStreamSink` | Live token transport (the data plane) | `InProcessTokenStreamSink` (`-nestjs`, the module default); for multi-replica, `RedisTokenStreamSink` (`-transport-redis`) via `forRoot({ sink })` |
+| `TokenStreamSink` | Live token transport (the data plane) | `InProcessTokenStreamSink` (`-nestjs`, the module default); for multi-pod fleets — required under `durable: true`, whose steps dispatch across the fleet by default — `RedisTokenStreamSink` (`-transport-redis`) via `forRoot({ sink })` |
 | `QuotaStore` | Per-actor daily token budget | `LedgerQuotaStore` (`-core`, ledger-backed — turns on with `quotaLimitTokens`, no shared state needed); `InMemoryQuotaStore` (`-testing`); omit both to skip quota checking |
 | `AgentRunner` | Executing a turn | `InlineAgentRunner` (`-nestjs`, the module default); the durable runner from `AgentDurableModule` |
 
@@ -47,15 +47,86 @@ The loop's checkpointed state (model calls, tool calls, approvals) and its live 
 on two different planes, and they don't fight each other:
 
 - **Control plane** — the model turn and every tool call run as **checkpointed steps** under
-  whichever `AgentRunner` is active. Under the durable runner that's a literal durable `@Step`; under
-  the inline runner it's just an awaited call. Either way this is what makes an `action` tool's
-  approval pause safe to suspend.
+  whichever `AgentRunner` is active. Under the inline runner that's just an awaited call. Under the
+  durable runner, bookkeeping steps (persisting a message, bumping quota, stream start/finish
+  markers) are `ctx.localStep`s — checkpointed, but pinned to the workflow's own worker, since
+  dispatching a few-millisecond DB write through a queue buys nothing. This is what makes an
+  `action` tool's approval pause safe to suspend either way.
 - **Data plane** — tokens the model streams mid-turn flow through the `TokenStreamSink` (`open` /
   `subscribe` / `close`), independent of the control plane's checkpoints. A dropped SSE connection
   reconnects and replays the buffer; a durable suspend doesn't touch it at all.
 
 This split is why streaming and durability compose instead of trading off — see
 [The agent loop](/docs/agent/concepts/the-agent-loop) and [Runners](/docs/agent/concepts/runners).
+
+## Dispatched steps: the turn's two long operations are routed, not pinned
+
+The model call and each tool execution are the turn's two genuinely long-running operations — under
+the durable runner they are **dispatched as routed durable steps** by default
+(`AgentRunSteps.llm` / `AgentRunSteps.tool`), not run as `ctx.localStep`s on whichever pod happens to
+be hosting the workflow:
+
+<AgentFlow variant="dispatched" caption="The API pod that starts agent.run and holds the SSE connection is rarely the pod that runs AgentRunSteps.llm/.tool — a cross-process sink (Redis pub/sub) is what gets tokens and tool output back to the client." />
+
+- `AgentRunSteps.llm` (`@Step({ retries: 3 })`) re-resolves the model, sink, and tool definitions
+  from the **serving worker's own DI** and streams from wherever it actually runs — a live schema
+  instance (a tool's Zod input) can't cross the wire, so the envelope carries only serializable data
+  (`LlmStepEnvelope`) and the handler re-derives the tool set from the actor.
+- `AgentRunSteps.tool` (no retries — tool idempotency is the app's own concern) rebuilds the tool
+  `ctx` handler-side and applies the tool timeout there too.
+- Both worker groups are **always registered** by `AgentDurableModule`, regardless of configuration —
+  only whether the workflow *dispatches* to them is controlled by the `dispatchedSteps` option
+  (`AgentModuleOptions.dispatchedSteps`, default `true` under `durable: true`; set `false` to keep
+  the turn's steps as `ctx.localStep`s instead, the pre-dispatch behavior).
+
+The practical consequence: a dispatched turn is **not pinned to the pod that started it**. The
+model call or a tool execution can land on any worker in the fleet, which is exactly why a
+multi-pod deployment needs a **cross-process** `TokenStreamSink` — the worker that ends up running
+`AgentRunSteps.llm` streams tokens through the sink, and that sink has to reach whichever pod is
+still holding the client's SSE connection. `InProcessTokenStreamSink` (the module default) cannot
+do this; wire `RedisTokenStreamSink` (`-transport-redis`) instead. A boot warning fires when
+`dispatchedSteps` is effectively on with the default in-process sink still bound.
+
+<Callout type="info" title="This is orthogonal to durable: true itself">
+Even with `dispatchedSteps: false`, a turn under `durable: true` already runs on whichever worker
+picks up the `agent.run` workflow — which may not be the pod that received the original HTTP
+request. The cross-process-sink requirement is a property of `durable: true`, not specifically of
+dispatched steps; dispatching just widens *which* steps can move mid-turn, from "the whole run" to
+"the model call and every tool call, individually."
+</Callout>
+
+## Run reliability: every run's outcome is durably recorded
+
+Run outcomes are recorded independently of thread/message history, on an optional `AgentStore` SPI
+surface (`recordRunStart` / `recordRunEnd` / `bumpRunRetries` — absent on a store implementation
+degrades to a graceful no-op, not an error):
+
+- The loop records **start** and **completed** (with duration) as checkpointed steps; the durable
+  workflow and the inline runner each record a **failure** with its error code/message on their own
+  catch path.
+- Both bundled store adapters (MikroORM, Drizzle) ship the recording as an `agent_run` table
+  (autoSchema-managed), including a **`promptHash`** — the sha256 of the run's resolved, pre-RAG
+  system prompt, so you can correlate an error-rate shift with a prompt change across runs.
+- `AgentGovernanceQueries` exposes the aggregated view (`runMetrics`, `runsByAgent`, `runErrors`,
+  `runTrend`, `recentRuns`, plus a paginated `runsPage`) — see
+  [Governance](/docs/agent/concepts/governance) for the read-model's shape and
+  [Cost & Governance](/docs/agent/guides/cost-and-governance) for using it.
+
+## Observability: tracing a turn as spans
+
+Every run also emits diagnostics **spans** — not just the point events on `aviary:agent:*` — so a
+single turn can be reconstructed as a nested waterfall instead of a flat event list:
+
+- Four span events: `llm.turn`, `tool.execution`, `retrieval`, `follow-ups` — each correlated by
+  **`traceId = runId`**, emitted from *inside* the checkpointed step body that does the real work
+  (including from `AgentRunSteps.llm`/`.tool` when a step is dispatched, so a span comes from
+  whichever worker actually executed it). A replayed (cached) step never re-emits its span.
+- Payloads are metadata-only — model id, token counts, tool name/type, step index — never prompt or
+  output text, matching the point events' redaction posture.
+- `@dudousxd/nestjs-agent-telescope` renders the waterfall in Telescope's TRACES tab (requires a
+  span-aware diagnostics bridge and a `RecordInput.traceId`-aware Telescope build); without those,
+  the spans are emitted but simply unobserved — zero cost either way, since the phase envelopes are
+  gated on subscriber presence.
 
 ## Where to go next
 

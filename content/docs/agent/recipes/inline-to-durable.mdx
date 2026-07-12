@@ -1,23 +1,34 @@
 ---
 title: Inline → durable
-description: Swap the in-process runner for the durable one — add @dudousxd/nestjs-durable, flip durable to true, and every model/tool call becomes a checkpointed step, with an identical wire protocol so your frontend and tools don't change.
+description: "Durable is the production default — dispatchedSteps routes every model/tool call as a checkpointed, worker-served step the moment durable is true. This recipe covers getting to durable: true, and the dispatchedSteps: false escape hatch for a simple in-process case."
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-You started with the default in-process runner — no extra dependency, nothing to configure. Now you
-want a turn to survive a crash mid-stream, or an `action` tool's approval pause to be a real durable
-suspend instead of a held-open connection. Getting there is one dependency and one flag; nothing
-about your tools, your store, or your frontend changes.
+`durable: true` is one dependency and one flag away from the default in-process runner, and once it's
+on, **`dispatchedSteps` defaults to `true` with it** — the turn's two long steps (the model call and
+each tool execution) are routed as durable steps (`AgentRunSteps.llm` / `AgentRunSteps.tool`) served by
+whichever worker picks them up, not pinned to the pod that started the run. That's the correct
+production posture: the llm step gets engine retry, and the run isn't stuck if its originating pod
+dies. Nothing about your tools, your store, or your frontend changes either way.
 
 ---
 
 ## Before — inline (default)
 
 ```ts
+// src/agents/ops.agent.ts
+import { Agent } from '@dudousxd/nestjs-agent';
+
+@Agent({ name: 'ops', systemPrompt: 'You are a helpful ops assistant.' })
+export class OpsAgent {}
+```
+
+```ts
 // src/app.module.ts
 import { AgentModule, HeaderActorResolver } from '@dudousxd/nestjs-agent';
 import { Module } from '@nestjs/common';
+import { OpsAgent } from './agents/ops.agent.js';
 import { myAgentStore } from './store.js';
 import { myModelProvider } from './model.js';
 
@@ -27,9 +38,9 @@ import { myModelProvider } from './model.js';
       model: myModelProvider,
       store: myAgentStore,
       actorResolver: new HeaderActorResolver(),
-      defaultAgent: { systemPrompt: 'You are a helpful ops assistant.' },
     }),
   ],
+  providers: [OpsAgent],
 })
 export class AppModule {}
 ```
@@ -39,7 +50,7 @@ turn, and an `action` tool's approval pause is just a connection held open in me
 
 ---
 
-## After — durable
+## After — durable, with dispatched steps ON by default
 
 Add `@dudousxd/nestjs-durable`, then spread the one-import `agentDurable(options)` helper into
 `imports` alongside a configured `DurableModule`:
@@ -50,6 +61,7 @@ import { agentDurable } from '@dudousxd/nestjs-agent/durable';
 import { HeaderActorResolver } from '@dudousxd/nestjs-agent';
 import { DurableModule } from '@dudousxd/nestjs-durable';
 import { Module } from '@nestjs/common';
+import { OpsAgent } from './agents/ops.agent.js';
 import { myStateStore, myTransport } from './durable-infra.js';
 import { myAgentStore } from './store.js';
 import { myModelProvider } from './model.js';
@@ -61,13 +73,17 @@ import { myModelProvider } from './model.js';
       model: myModelProvider,
       store: myAgentStore,
       actorResolver: new HeaderActorResolver(),
-      defaultAgent: { systemPrompt: 'You are a helpful ops assistant.' },
-      // same AgentModuleOptions as before, minus `durable` — agentDurable sets it for you
+      // same AgentModuleOptions as before, minus `durable` — agentDurable sets it for you.
+      // dispatchedSteps isn't set here either — it defaults to `true` under durable: true.
     }),
   ],
+  providers: [OpsAgent],
 })
 export class AppModule {}
 ```
+
+That's it — no separate flag to flip for dispatching. `AgentRunSteps` (the `llm`/`tool` worker groups)
+is always registered by `AgentDurableModule` regardless, so the routed steps are never left unserved.
 
 `agentDurable(options)` is exactly the longhand below, collapsed to one import — from
 [`agent-durable.ts`](https://github.com/dudousxd/nestjs-agent/blob/main/packages/nestjs/src/durable/agent-durable.ts):
@@ -104,20 +120,52 @@ together.
 
 ---
 
+## Opting out of dispatched steps
+
+If you want durable's checkpointing and real HITL suspend but *not* the model/tool calls leaving
+their pod — a single-pod deployment, or a turn whose tools have external side effects you'd rather
+keep close to the caller for now — set `dispatchedSteps: false`. The turn's steps stay in-process
+`ctx.localStep`s instead of being routed through `AgentRunSteps`:
+
+```ts
+...agentDurable({
+  model: myModelProvider,
+  store: myAgentStore,
+  actorResolver: new HeaderActorResolver(),
+  dispatchedSteps: false,
+}),
+```
+
+<Callout type="warn" title="The cross-process sink requirement doesn't go away">
+  Multi-pod fleets need a cross-process `TokenStreamSink` (e.g.
+  `@dudousxd/nestjs-agent-transport-redis`'s `RedisTokenStreamSink`) under `durable: true` regardless
+  of `dispatchedSteps` — the turn already runs on whichever worker takes `agent.run`, which may not be
+  the pod holding the SSE connection. A boot warning fires when `durable: true` is on with the default
+  in-process sink, naming `dispatchedSteps: false` as the (incomplete) alternative — it isn't a
+  substitute for wiring a real cross-process sink on more than one pod.
+</Callout>
+
+Setting `dispatchedSteps: true` explicitly without `durable: true` is a config error and throws at
+module build — there's no worker group to route to without the durable workflow underneath it.
+
+---
+
 ## Same wire protocol, same frontend
 
-Nothing downstream of `AgentModule` needs to know which runner is active. The `POST /agent/chat`
-SSE stream, the `POST /agent/tool-call/approve` / `/reject` endpoints, and `useAgentChat` on the
-frontend are identical either way — only *how* the pause and the checkpoint are implemented differs:
+Nothing downstream of `AgentModule` needs to know which runner — or which `dispatchedSteps` setting —
+is active. The `POST /agent/chat` SSE stream, the `POST /agent/tool-call/approve` / `/reject`
+endpoints, and `useAgentChat` on the frontend are identical across all three: only *how* the pause,
+the checkpoint, and the model/tool execution are implemented differs.
 
-| | Inline (default) | Durable (`durable: true`) |
-|---|---|---|
-| The pause on an `action` tool | an in-process runner holds the turn open | a real durable **suspend** via `waitForSignal`, checkpointed to the state store |
-| Surviving a restart | no — the pending turn is lost | yes — resumes from cache on approval |
-| Wire protocol | identical | identical |
+| | Inline (default) | Durable, `dispatchedSteps: false` | Durable, dispatched (default under `durable: true`) |
+|---|---|---|---|
+| The pause on an `action` tool | an in-process runner holds the turn open | a real durable **suspend** via `waitForSignal`, checkpointed to the state store | same as the middle column |
+| Surviving a restart | no — the pending turn is lost | yes — resumes from cache on approval | yes |
+| Where the model/tool call runs | the pod that started the run | the pod that started the run (`localStep`) | whichever worker serves `AgentRunSteps.llm`/`.tool` — may not be the originating pod |
+| Wire protocol | identical | identical | identical |
 
-So you can develop against the inline runner locally and flip `durable: true` for production without
-touching a single tool or frontend component.
+So you can develop against the inline runner locally and get to the production default —
+`durable: true` with dispatched steps — without touching a single tool or frontend component.
 
 ---
 
@@ -125,6 +173,10 @@ touching a single tool or frontend component.
 
 - [Runners](/docs/agent/concepts/runners) — `AgentRunner` as the SPI seam, and what "checkpointed
   step" means under the hood.
+- [Configuration](/docs/agent/reference/configuration) — the full `dispatchedSteps` contract and
+  every other durable-related option.
+- [Diagnostics events](/docs/agent/reference/diagnostics-events) — the `llm.turn`/`tool.execution`
+  trace spans, emitted from whichever worker actually executes a dispatched step.
 - [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability) — the full
   approval flow, the durable signal, and resuming a dropped SSE stream.
 - [Offline testing](/docs/agent/recipes/offline-testing) — exercising the inline runner (the

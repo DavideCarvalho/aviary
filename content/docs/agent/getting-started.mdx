@@ -90,6 +90,7 @@ import { GetWeatherTool } from './tools/get-weather.tool.js';
       actorResolver: new HeaderActorResolver(), // who's calling — see below
       // path: 'agent',                // route prefix (default 'agent')
       // durable: true,                // run each turn as the durable `agent.run` workflow
+      // dispatchedSteps: false,       // under durable:true this defaults to true — opt out to keep steps in-process
       defaultAgent: {
         systemPrompt: 'You are a helpful ops assistant.',
       },
@@ -99,6 +100,17 @@ import { GetWeatherTool } from './tools/get-weather.tool.js';
 })
 export class AppModule {}
 ```
+
+<Callout type="warn" title="durable: true dispatches the turn across your worker fleet by default">
+With `durable: true`, the turn's model call and tool executions are — by default — routed durable
+steps (`AgentRunSteps.llm` / `AgentRunSteps.tool`), so the run isn't pinned to the pod that started
+it; set `dispatchedSteps: false` to keep them as in-process steps instead. Either way, a multi-pod
+deployment under `durable: true` needs a cross-process `TokenStreamSink` (e.g.
+`RedisTokenStreamSink` from `@dudousxd/nestjs-agent-transport-redis`) so the pod that ends up
+executing the step can still reach whichever pod holds the client's SSE connection — a boot warning
+fires if it's missing. See [Architecture](/docs/agent/concepts/architecture) and
+[Runners](/docs/agent/concepts/runners).
+</Callout>
 
 <Callout type="warn" title="There is no insecure default identity">
 The agent never invents a caller. Every request's actor — `{ id, roles?, tenantRef? }` — comes from

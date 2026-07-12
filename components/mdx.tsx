@@ -3,6 +3,7 @@ import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import { TypeTable } from "fumadocs-ui/components/type-table";
 import defaultMdxComponents from "fumadocs-ui/mdx";
 import type { MDXComponents } from "mdx/types";
+import { AgentFlow } from "@/components/agent-flow";
 import { AgentLoop } from "@/components/agent-loop";
 import { CodeFlow } from "@/components/code-flow";
 import { DlqSim, RetrySim } from "@/components/failure-sims";
@@ -22,6 +23,7 @@ export function getMDXComponents(components?: MDXComponents) {
     Step,
     Steps,
     TypeTable,
+    AgentFlow,
     AgentLoop,
     CodeFlow,
     AdaptiveSim,

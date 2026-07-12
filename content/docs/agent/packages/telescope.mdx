@@ -8,8 +8,9 @@ import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
 The first-class `@dudousxd/nestjs-telescope` extension for nestjs-agent. It adds an "Agent" tab fed
 by two sources: the `aviary:agent:*` diagnostics channel (live runs, tool calls) via a watcher, and
-the `AGENT_GOVERNANCE_QUERIES` read-model (historical spend/usage) via a set of dashboard data
-providers.
+the `AGENT_GOVERNANCE_QUERIES` read-model (historical spend/usage, run reliability, tool stats, the
+approvals inbox, and paginated runs/tool-calls/threads tables) via a set of dashboard data providers.
+Run detail also correlates into the TRACES tab (see [Tracing](#tracing) below).
 
 <Tabs items={['pnpm', 'npm']}>
 <Tab value="pnpm">
@@ -58,27 +59,65 @@ absent, those panels render an empty state; the live watcher-fed panels (runs, t
 working regardless, since they depend only on the diagnostics channel.
 </Callout>
 
-<Callout type="info" title="Runs also show up in the Workflows tab, for free">
-Under the durable runner (`AgentModule.forRoot({ durable: true })`), each turn is a durable workflow,
-so it already appears in `@dudousxd/nestjs-durable`'s Telescope "Workflows" tab with no extra wiring
-— the Agent tab's governance sections are additive, not a replacement.
-</Callout>
-
 ## Exports
 
 | Export | Kind | Purpose |
 |---|---|---|
-| `agentTelescopeExtension()` | function → `TelescopeExtension` | The extension: registers the watcher, the `agent` entry type, the "Agent" dashboard, and every data provider below |
-| `AgentTelescopeWatcher` | class (`Watcher`) | Subscribes to `aviary:agent:*` diagnostics (`run.started`, `message`, `tool-call`, `quota.exceeded`, `run.failed`, `run.finished`) and records each as a Telescope entry of type `agent` |
-| `agentDashboard()` | function | The "Agent" dashboard definition (panels wired to the data providers) |
-| `agentRunsProvider`, `agentTokensProvider`, `agentToolsProvider`, `agentToolStatusProvider` | data providers | Live activity panels, sourced from watcher-recorded entries |
-| `agentSpendTotalProvider`, `agentTokensTotalProvider`, `agentSpendByModelProvider`, `agentModelSpendTableProvider`, `agentSpendByActorProvider`, `agentActorSpendTableProvider`, `agentUsageTrendProvider` | data providers | Governance panels, sourced from `AGENT_GOVERNANCE_QUERIES` |
+| `agentTelescopeExtension(opts?)` | function → `TelescopeExtension` | The extension: registers the watcher, the `agent` entry type, the "Agent" dashboard, and every data provider below. `opts.threadHref`/`opts.runHref` are URL templates (`{threadId}`/`{runId}`) that deep-link a table row's thread/run cell out to the host's own viewer — `runId` defaults to the in-app trace waterfall (`#/traces/{runId}`, see Tracing below) when `runHref` is omitted |
+| `AgentTelescopeWatcher` | class (`Watcher`) | Subscribes to all 8 point events on `aviary:agent:*` (`run.started`, `message`, `tool-call`, `quota.exceeded`, `run.finished`, `run.failed`, `delegated`, `retrieved` — driven off core's `AGENT_DIAGNOSTIC_EVENTS`, so a future point event is picked up automatically) and records each as a Telescope entry of type `agent`. Has a `dispose()` to detach cleanly on module teardown |
+| `agentDashboard(opts?)` | function | The "Agent" dashboard definition (panels wired to the data providers, paginated list tables — see below) |
+| `agentRunsProvider`, `agentTokensProvider`, `agentToolStatusProvider` | data providers | Live activity panels, sourced from watcher-recorded entries |
+| `agentSpendTotalProvider`, `agentTokensTotalProvider`, `agentSpendByModelProvider`, `agentModelSpendTableProvider`, `agentSpendByActorProvider`, `agentActorSpendTableProvider`, `agentUsageTrendProvider`, `agentTopThreadsTableProvider` | data providers | Spend/usage governance panels, sourced from `AGENT_GOVERNANCE_QUERIES` |
+| `agentRunsTotalProvider`, `agentRunsSuccessRateProvider`, `agentRunsFailedProvider`, `agentRunsRetriesProvider`, `agentRunsDurationProvider`, `agentRunsByAgentTableProvider`, `agentRunErrorsProvider`, `agentRunsTrendProvider`, `agentRecentRunsTableProvider` | data providers | Reliability governance panels (success/error rate, p50/p95 duration, failure breakdown, recent runs) |
+| `agentRecentToolCallsTableProvider`, `agentToolStatsTableProvider` | data providers | Tool governance panels (recent calls, per-tool calls/failed/rejected + p95 executionMs) |
+| `agentRecentThreadsTableProvider`, `agentPendingApprovalsCountProvider`, `agentPendingApprovalsTableProvider` | data providers | Recent threads and the HITL approvals inbox (count + table) |
+| `agentRunsPagedTableProvider`, `agentToolCallsPagedTableProvider`, `agentThreadsPagedTableProvider` | data providers | Paginated runs/tool-calls/threads tables (reads `AgentGovernanceQueries`' `runsPage`/`toolCallsPage`/`threadsPage`), backing the Agent tab's prev/next tables — requires `@dudousxd/nestjs-telescope >=1.18` for the renderer's `paged: true` support |
 | `resolveRange`, `shiftUtcDay` | functions | Range/day-bucketing helpers shared by the governance providers |
 | `toActorSpendRows`, `toActorSpendSegments`, `toModelSpendRows`, `toModelSpendSegments`, `totalCostUsd`, `totalTokens`, `toUsageTrendRows` | functions | Pure row/segment shaping helpers behind the governance panels |
 
+<Callout type="info" title="Automatic dedup with the generic diagnostics bridge">
+`AgentTelescopeWatcher.register()` claims every `agent:*` diagnostics key it records via
+`@dudousxd/nestjs-diagnostics`' claim registry (`claimDiagnostics`, diagnostics 0.7+) and releases the
+claim in `dispose()`. `@dudousxd/nestjs-diagnostics-telescope`'s generic bridge checks the registry
+before recording a `diagnostic` entry, so it skips every key this watcher already owns — no
+hand-written `exclude: [agentDiagnosticKey(...)]` list needed to avoid double-recording the same
+event under two entry types.
+</Callout>
+
+## Tracing
+
+Every agent run also emits diagnostics **spans** — `llm.turn`, `tool.execution`, `retrieval`,
+`follow-ups` (core's `AGENT_SPAN_EVENTS`) — correlated by `traceId = runId`. With a span-aware bridge
+these render in Telescope's **TRACES** tab as a nested waterfall for the run: one row per model call,
+tool execution, RAG retrieval, or follow-up-suggestions call, each with its duration and, on failure,
+an error phase. Span payloads are metadata-only (model id, token counts, tool name/type, step index)
+— never prompt or output text — and are emitted from inside the checkpointed step bodies, so a
+replayed (cached) step never re-emits its span.
+
+Rendering requires:
+
+- `@dudousxd/nestjs-agent-core >=0.7.0` (emits the spans; already satisfied by this package's peer).
+- `@dudousxd/nestjs-diagnostics-telescope >=0.7` — the span-aware diagnostics bridge that turns
+  `:start`/`:end`/`:asyncStart`/`:asyncEnd`/`:error` sub-channel traffic into Telescope spans.
+- `@dudousxd/nestjs-telescope >=1.17` — the version that added explicit `RecordInput.traceId` support.
+
+Without both bridge versions the spans are still emitted (cheaply — the phase envelopes are gated on
+subscriber presence) but simply go unobserved; nothing breaks. Once wired, a run/thread table's
+`runId` cell defaults to a `#/traces/{runId}` deep link into that waterfall (override via
+`agentTelescopeExtension({ runHref })` if the host has its own run viewer).
+
+<Callout type="info" title="Runs also show up in the Workflows tab, for free">
+Under the durable runner (`AgentModule.forRoot({ durable: true })`), each turn is a durable workflow,
+so it already appears in `@dudousxd/nestjs-durable`'s Telescope "Workflows" tab with no extra wiring
+— the Agent tab's governance sections and the trace waterfall are additive, not a replacement. Since
+`dispatchedSteps` now defaults ON under `durable: true`, the `llm.turn`/`tool.execution` spans for a
+given run may originate from whichever worker actually executed that dispatched step, not necessarily
+the pod that started the run — the trace still stitches them together by `traceId = runId`.
+</Callout>
+
 ## Peer dependencies
 
-`@dudousxd/nestjs-telescope` (`>=1.15.0`).
+`@dudousxd/nestjs-telescope` (`>=1.18.0`).
 
 ## When to use it
 

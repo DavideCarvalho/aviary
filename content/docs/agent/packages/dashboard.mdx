@@ -20,8 +20,10 @@ import { Callout } from 'fumadocs-ui/components/callout';
 </Tabs>
 
 `AgentDashboardModule` mounts a bundled React SPA and its JSON + SSE API at their own route — spend
-per model/actor, a usage trend, and live tool-call/thread activity — without needing
-`@dudousxd/nestjs-telescope` installed at all.
+per model/actor, a usage trend, run reliability, an approvals inbox, tool governance stats, and live
+tool-call/thread activity — without needing `@dudousxd/nestjs-telescope` installed at all. The SPA is
+a single page that routes its sections client-side via URL hash (`/ai-gateway#/reliability`,
+`#/approvals`, …) — deep-linkable, no server routing, no extra dependency.
 
 ```ts
 import { Module } from '@nestjs/common';
@@ -39,13 +41,23 @@ export class AppModule {}
 |---|---|---|
 | `basePath` | `/ai-gateway` | Where the SPA is served — a page route, kept out of any `/api` prefix. |
 | `apiBasePath` | `<basePath>/api` | Where the JSON + SSE API is mounted (what the SPA fetches). Set it under your app's own `/api` prefix so it inherits your auth/proxy rules while the UI stays at `basePath`. |
+| `guards` | none | `Type<CanActivate>[]` stamped on both the SPA and API controllers (`@UseGuards`, REPLACE semantics) — the first-class way to front the console. |
+| `imports` | none | Extra module imports so a guard's own dependencies (e.g. your `AuthModule`) resolve — the dashboard has no application context of its own to pull them from. |
+| `approvalActorRef` | the configured `ActorResolver` | `(req) => string \| undefined` — override for WHO is recorded as deciding a HITL approval (`Decision.executedByRef`). Default: the `AgentModule`-configured actor resolver (`AGENT_ACTOR_RESOLVER`) is consulted, same identity seam chat uses. Set this only when console auth differs from chat auth. |
 
 It requires `AGENT_GOVERNANCE_QUERIES` to already be bound — import it alongside your
 `AgentModule.forRoot(...)` and a store adapter (MikroORM or Drizzle) that provides the read-model.
 
-<Callout type="warn" title="Front it with your own guard">
-The mounted controllers are path-relative and carry no built-in authentication. Guard `basePath` (and
-`apiBasePath`) the same way you'd guard any other admin surface in your app.
+<Callout type="warn" title="Guard it, don't leave it open">
+Prefer the `guards`/`imports` options above over a hand-rolled reverse-proxy rule — they front both the
+SPA and its API with real DI-resolved guards. If you don't pass `guards`, the routes carry no built-in
+authentication; front `basePath` (and `apiBasePath`) another way (a global guard, your proxy).
+</Callout>
+
+<Callout type="info" title="Inertia hosts">
+The console is a full-page app, not an Inertia page. An in-app `<Link>` visit to `basePath` is bounced
+with Inertia's own external-redirect mechanism (`409` + `X-Inertia-Location`) so the client does a full
+page load instead of rendering the SPA's HTML inside its own error modal.
 </Callout>
 
 ## Subpath `/client` — a dependency-free typed client
@@ -69,7 +81,7 @@ const stop = agentClient.streamEvents((event) => console.log(event.event, event.
 
 | Method | Returns |
 |---|---|
-| `agentClient.spend(range: GovernanceRange)` | `{ byModel, byActor, trend }` for the day range. |
+| `agentClient.spend(range: GovernanceRange)` | `{ byModel, byActor, trend }` for the day range — `byModel`/`byActor` rows carry an `actorLabel: string \| null` when an `ActorDirectory` (`AGENT_ACTOR_DIRECTORY`) is bound server-side. |
 | `agentClient.toolCalls(limit = 50)` | Most recent tool-call activity rows. |
 | `agentClient.threads(limit = 50)` | Most recent thread activity rows. |
 | `agentClient.streamEvents(onEvent)` | Live-tails `aviary:agent:*` over SSE; returns a function that closes the stream. |
@@ -77,6 +89,47 @@ const stop = agentClient.streamEvents((event) => console.log(event.event, event.
 The client reads `window.__AGENT_BASE__` / `window.__AGENT_API__` (injected by the UI controller) to
 find its API base, falling back to `/ai-gateway` / `/ai-gateway/api` — so the bundled SPA needs no
 build-time configuration, and an external frontend can set those globals itself to point elsewhere.
+
+## Reliability, approvals, and tool governance
+
+Beyond spend/usage, the console has three more sections, all fed by the same
+`AGENT_GOVERNANCE_QUERIES` read-model documented in [`-core`](/docs/agent/packages/core#the-spis):
+
+- **Reliability** (`#/reliability`) — success/error rate, retries, p50/p95 run duration, a run/failure
+  trend, failure breakdown by error code, and a recent-runs table with `promptHash` chips (correlate an
+  error-rate shift with a prompt change) and a 500-char-capped error message. Backed by `GET
+  <api>/reliability?from&to` and `GET <api>/runs?limit` (paginated variant: `GET <api>/runs-page`).
+- **Approvals** (`#/approvals`) — the cross-thread HITL inbox: every tool call sitting
+  `pending_approval`, oldest first, with a nav badge showing the pending count. Approve/reject posts
+  `POST <api>/approvals/:toolCallId` (`{ approved, reason? }`), which routes through the same decision
+  path chat approvals use — **without** re-running chat's own thread-ownership check, since a console
+  caller is already authorized by the dashboard's own guards.
+- **Tools** (`#/tools`) — per-tool governance rollup (`GET <api>/tools`): calls, failures, rejections,
+  and p95 execution time.
+
+<Callout type="warn" title="501 read-only mode">
+Mutating endpoints 501 (and the corresponding SPA section renders read-only) when their backing port
+isn't bound:
+
+- `POST <api>/approvals/:toolCallId` 501s with no `AGENT_APPROVAL_PORT` bound. In practice this is
+  bound automatically the moment `AgentModule` is imported anywhere in the app (see
+  [`-nestjs`](/docs/agent/packages/nestjs)) — it only 501s if the dashboard is mounted in a process
+  that never imports `AgentModule` at all (e.g. a read-replica/reporting app wired only against
+  `AGENT_GOVERNANCE_QUERIES`).
+- `GET`/`POST <api>/pricing` 501 with no `AGENT_PRICING_STORE` bound.
+
+Both cases are logged 501s, not crashes — the rest of the console keeps working.
+</Callout>
+
+## Paginated, filterable tables
+
+Tool calls, threads, and runs are each backed by a paged read (`toolCallsPage` / `threadsPage` /
+`runsPage` on `AgentGovernanceQueries`) exposed over HTTP as `GET <api>/tool-calls-page`, `GET
+<api>/threads-page`, `GET <api>/runs-page`. The wire grammar mirrors the rest of the ecosystem: `page`
+(1-based), `limit` (clamped to 200 server-side), and `where[field]=value` filters (an unknown field
+400s). The SPA's list sections use these for prev/next pagination with debounced per-column filters;
+the older `recentToolCalls`/`recentThreads`/`recentRuns` latest-N reads remain in place for the
+Telescope bridge, which only needs the tail.
 
 ## When to use it
 

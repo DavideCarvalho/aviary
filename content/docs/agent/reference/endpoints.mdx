@@ -11,7 +11,7 @@ All routes below assume the default `path: 'agent'` (set via [`AgentModule.forRo
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| `POST` | `/agent/chat` | `{ message: string; threadId?: string; agent?: string; persona?: string; pageContext?: PageContext; regenerate?: boolean }` | SSE stream (see below) |
+| `POST` | `/agent/chat` | `{ message: string; threadId?: string; agent?: string; attachments?: MessageAttachment[]; pageContext?: PageContext; regenerate?: boolean; transient?: boolean }` | SSE stream (see below) |
 | `GET` | `/agent/chat/:runId/stream` | — | SSE stream — reconnect to an in-flight run |
 | `POST` | `/agent/chat/:runId/cancel` | — | `{ aborted: boolean }` |
 
@@ -27,17 +27,29 @@ own the run — `403` if it belongs to someone else, `404` if the run doesn't ex
   `POST /agent/chat` responds `Content-Type: text/event-stream` with headers `X-Agent-Run-Id` and `X-Agent-Thread-Id`. The first frame is `event: meta` carrying `data: { runId, threadId }`, followed by `data: { delta: string }` frames as tokens arrive, and a closing `event: done`. `GET /agent/chat/:runId/stream` pipes the same format to resume/tail a run (its `meta` frame's `threadId` is `undefined`, since the thread isn't re-resolved on reconnect). A failed run (e.g. quota exceeded) ends the stream with `event: error` carrying `data: { code, message }` (`code` is `quota_exceeded` or `run_failed`) instead of appending error text to the assistant message.
 </Callout>
 
+## Agents
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `GET` | `/agent/agents` | — | `AgentCatalogEntry[]` (`{ name; description; isDefault? }`) — the discovered `@Agent` classes, for a client picker instead of a hardcoded list |
+
 ## Threads
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
 | `GET` | `/agent/threads` | — | `ThreadSummary[]` for the resolved actor |
-| `GET` | `/agent/threads/personas/catalog` | — | `{ id: string; label: string }[]` |
 | `GET` | `/agent/threads/:id` | — | `ThreadDetail \| null` |
+| `PATCH` | `/agent/threads/:id` | `{ title?: string; defaultAgent?: string \| null }` | `{ ok: boolean }` — renames the thread and/or sets its default agent (`defaultAgent: null` clears it; the key must be present in the body to change it at all — JSON has no `undefined`, so presence vs. absence is how "leave it alone" is distinguished from "clear it") |
 | `DELETE` | `/agent/threads/:id` | — | `{ ok: boolean }` (soft-delete) |
 | `POST` | `/agent/threads/:id/fork-from/:messageId` | — | `ThreadSummary` — a new thread branched at `messageId` |
+| `POST` | `/agent/threads/:id/promote` | — | `{ ok: boolean }` — promotes a `transient` thread (see the chat body above) to a persisted one |
+| `DELETE` | `/agent/threads/:id/from/:messageId` | — | `{ ok: boolean }` — truncates the thread from `messageId` onward |
 
-The three `:id` routes are ownership-scoped: they resolve the acting actor and check they own the thread — `403` if it belongs to someone else, `404` if it doesn't exist.
+<Callout type="info" title="No more personas/catalog">
+  The old `GET /agent/threads/personas/catalog` endpoint is gone — there's no persona system anymore. `GET /agent/agents` (above) is the picker catalog now.
+</Callout>
+
+All `:id` routes are ownership-scoped: they resolve the acting actor and check they own the thread — `403` if it belongs to someone else, `404` if it doesn't exist.
 
 ## Tool-calls
 
@@ -60,13 +72,30 @@ Approving/rejecting signals the run's `AgentRunner` (`approved: true`, or `appro
 
 ## Dashboard JSON API
 
-Mounted by `AgentDashboardModule.forRoot({ apiBasePath })` (default `/ai-gateway/api`, i.e. `<basePath>/api` under the default `/ai-gateway` UI base). Requires `AGENT_GOVERNANCE_QUERIES` to be bound by a store adapter (e.g. `MikroOrmAgentStoreModule`).
+Mounted by `AgentDashboardModule.forRoot({ apiBasePath })` (default `/ai-gateway/api`, i.e. `<basePath>/api` under the default `/ai-gateway` UI base). Requires `AGENT_GOVERNANCE_QUERIES` to be bound by a store adapter (e.g. `MikroOrmAgentStoreModule`). The console's sections now live on hash routes (`/ai-gateway#/reliability`, `#/approvals`, …), deep-linkable on full page load.
 
-| Method | Path | Query | Returns |
+| Method | Path | Query / Body | Returns |
 |---|---|---|---|
 | `GET` | `/ai-gateway/api/spend` | `from?`, `to?` (`YYYY-MM-DD`, default last 30 days) | `SpendOverview` — `{ byModel: ModelSpendRow[]; byActor: ActorSpendRow[]; trend: UsageTrendPoint[] }` |
+| `GET` | `/ai-gateway/api/top-threads` | `from?`, `to?`, `limit?` (default 10, max 200) | `ThreadSpendRowWithLabel[]` — top threads by cost |
+| `GET` | `/ai-gateway/api/reliability` | `from?`, `to?` | `ReliabilityOverview` — `{ metrics, byAgent, errors, trend }` (success/error rate, retries, p95 duration, run/failure trend, failure breakdown by error code) |
+| `GET` | `/ai-gateway/api/runs` | `limit?` (default 50, max 200) | `RecentRunRow[]` — latest-N reads, feeds the telescope bridge |
+| `GET` | `/ai-gateway/api/runs-page` | `page?` (default 1), `limit?` (default 25, max 200), `where[agentName\|status\|errorCode\|fromDay\|toDay]` | `GovernancePage<RecentRunRow>` — paginated, filterable runs for the Reliability table |
 | `GET` | `/ai-gateway/api/tool-calls` | `limit?` (default 50, max 200) | `ToolCallActivityRow[]` |
-| `GET` | `/ai-gateway/api/threads` | `limit?` (default 50, max 200) | `ThreadActivityRow[]` |
+| `GET` | `/ai-gateway/api/tool-calls-page` | `page?`, `limit?` (default 25, max 200), `where[toolName\|toolType\|status\|threadId\|fromDay\|toDay]` | `GovernancePage<ToolCallActivityRow>` — paginated, filterable tool-call activity |
+| `GET` | `/ai-gateway/api/tools` | `from?`, `to?` | `ToolStatRow[]` — per-tool calls/failed/rejected + p95 executionMs |
+| `GET` | `/ai-gateway/api/threads` | `limit?` (default 50, max 200) | `ThreadActivityRowWithLabel[]` |
+| `GET` | `/ai-gateway/api/threads-page` | `page?`, `limit?` (default 25, max 200), `where[actorRef\|title\|fromDay\|toDay]` (`title` is a case-insensitive substring match) | `GovernancePage<ThreadActivityRowWithLabel>` |
+| `GET` | `/ai-gateway/api/approvals` | `limit?` (default 50, max 200) | `PendingApprovalRow[]` — tool calls sitting `pending_approval`, oldest first |
+| `POST` | `/ai-gateway/api/approvals/:toolCallId` | `{ approved: boolean; reason?: string }` | `204 No Content` — decides a pending HITL tool call, attributed to the resolved decider (see below) |
+| `GET` | `/ai-gateway/api/pricing` | — | `CurrentModelPrice[]` |
+| `POST` | `/ai-gateway/api/pricing` | `{ modelId; inputPricePer1m; outputPricePer1m; cacheWritePricePer1m?; cacheReadPricePer1m? }` | sets a model's current price; `400` on a malformed body |
 | `GET` | `/ai-gateway/api/stream` | — | SSE — `{ data: LiveAgentEvent }`, one frame per `aviary:agent:*` diagnostics event |
 
-`LiveAgentEvent` is `{ event: string; ts: number; payload: Record<string, unknown> }` — see [Diagnostics events](/docs/agent/reference/diagnostics-events) for the `event` names and `payload` shapes.
+`GovernancePage<T>` is `{ rows: T[]; page: number; pageSize: number; total: number }` (real `COUNT` + offset, deterministic id tiebreaks); an unknown `where` field `400`s naming it. `LiveAgentEvent` is `{ event: string; ts: number; payload: Record<string, unknown> }` — see [Diagnostics events](/docs/agent/reference/diagnostics-events) for the `event` names and `payload` shapes.
+
+<Callout type="warn" title="Two surfaces degrade to 501 / read-only when their port isn't bound">
+  `POST /ai-gateway/api/approvals/:toolCallId` returns `501` — and the SPA's Approvals section renders read-only — when no `AGENT_APPROVAL_PORT` is bound (see [DI tokens](/docs/agent/reference/di-tokens)). Likewise, `GET`/`POST /ai-gateway/api/pricing` 501 when no `AGENT_PRICING_STORE` is bound. Every other route above only needs `AGENT_GOVERNANCE_QUERIES`.
+
+  Who gets recorded as the decider on an approval: an explicit `approvalActorRef` dashboard option wins outright; otherwise the same `AGENT_ACTOR_RESOLVER` chat requests use (its `.id`) — a resolver that throws just omits the decider rather than failing the request, since the decision itself was already authorized by the dashboard's own guards.
+</Callout>

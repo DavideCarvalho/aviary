@@ -29,6 +29,7 @@ the `TokenStreamSink` data plane, not through this call. See
 |---|---|---|
 | The pause | an in-process runner holds the turn open | a real durable **suspend** — the run is checkpointed to the state store |
 | Surviving a restart | no — the pending turn is lost | yes — the run resumes from cache on approval |
+| Where the turn executes | the pod that received the request, start to finish | whichever worker picks up the `agent.run` workflow — and, by default, the model call and each tool call can each land on a *different* worker again (see below) |
 | Requires | nothing extra | `@dudousxd/nestjs-durable` + `AgentDurableModule` + a configured `DurableModule` |
 | Wire protocol | identical | identical |
 
@@ -46,6 +47,29 @@ set — inline is the real, zero-dependency default, not a fallback.
 
 Because the `AgentRunner` SPI is the only seam, you can develop against inline and flip to durable in
 production by changing configuration, not code.
+
+## Dispatched steps: the durable runner's default posture
+
+Under `durable: true`, the workflow's bookkeeping (persisting a message, bumping quota, stream
+markers) checkpoints as `ctx.localStep` — pinned to whichever worker is running the workflow. But
+the turn's two genuinely *long* operations — the model call and each tool execution — are, **by
+default**, dispatched as separately-routed durable steps instead (`AgentRunSteps.llm` /
+`AgentRunSteps.tool`), so a turn isn't pinned to one pod for however long the model takes to
+respond or a tool takes to run. Set `dispatchedSteps: false` (requires `durable: true`) to opt back
+into the pre-dispatch behavior and keep those two steps as `ctx.localStep`s as well.
+
+Both worker groups are always registered by `AgentDurableModule` regardless of this flag — only
+whether the workflow actually *routes* to them is controlled by `dispatchedSteps` — so a fleet
+never ends up with an unserved worker group after a config change either way.
+
+<Callout type="warn" title="Multi-pod fleets need a cross-process sink">
+Because a dispatched step can execute on any worker, the pod that streams tokens for `llm` may not
+be the pod holding the client's SSE connection. Wire a cross-process `TokenStreamSink` (e.g.
+`RedisTokenStreamSink` from `-transport-redis`) for any multi-pod deployment under `durable: true`
+— dispatched or not, since the run itself is already not pinned to the requesting pod. A boot
+warning fires when dispatching is effectively on with the default in-process sink still bound. See
+[Architecture](/docs/agent/concepts/architecture) for the full control/data-plane picture.
+</Callout>
 
 ## The one-import shortcut
 

@@ -1,6 +1,6 @@
 ---
 title: '@dudousxd/nestjs-agent-store-drizzle'
-description: Drizzle AgentStore adapter — threads, messages, tool calls, usage — over an app-owned SQLite-dialect handle.
+description: Drizzle AgentStore adapter — threads, messages, tool calls, usage, and run reliability — over an app-owned SQLite-dialect handle.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -74,12 +74,20 @@ migration files" path for tests, demos, and first boot.
 | Export | Kind | Purpose |
 |---|---|---|
 | `DrizzleAgentStoreModule` | `DynamicModule` factory | `.forRoot({ db })` binds `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` + `AGENT_PRICING_STORE` globally over your db handle |
-| `DrizzleAgentStore` | class | `AgentStore` implementation — the write side |
-| `DrizzleGovernanceQueries` | class | `AgentGovernanceQueries` implementation — the read-model (spend by model/actor, usage trend, recent activity) |
+| `DrizzleAgentStore` | class | `AgentStore` implementation — the write side, including the optional `recordRunStart`/`recordRunEnd`/`bumpRunRetries` run-reliability hooks the loop and durable runners call |
+| `DrizzleGovernanceQueries` | class | `AgentGovernanceQueries` implementation — the full read-model: spend by model/actor/thread, usage trend, recent activity, run reliability (`runMetrics`/`runsByAgent`/`runErrors`/`runTrend`/`recentRuns`), the approvals inbox (`pendingApprovals`), per-tool stats (`toolStats`), and paged/filterable reads (`toolCallsPage`/`threadsPage`/`runsPage`) |
 | `DrizzlePricingStore` | class | `AgentPricingStore` implementation — `upsertModelPrice` / `listCurrentPrices`, the write side of model pricing (see [Cost & Governance](/docs/agent/guides/cost-and-governance#seeding-prices)) |
-| `agentSchema` | Drizzle schema object | The five agent tables (`agentThread`, `agentMessage`, `agentToolCall`, `agentTokenUsage`, `agentModelPricing`) |
-| `ensureAgentSchema(db)` | function | Idempotent `CREATE TABLE IF NOT EXISTS` DDL for all five tables |
+| `agentSchema` | Drizzle schema object | The six agent tables (`agentThread`, `agentMessage`, `agentToolCall`, `agentTokenUsage`, `agentModelPricing`, `agentRun`) |
+| `ensureAgentSchema(db)` | function | Idempotent `CREATE TABLE IF NOT EXISTS` DDL for all six tables |
 | `AgentDrizzleDb` | type | The db handle shape (`drizzle(client, { schema: agentSchema })`) the module and store expect |
+| `AgentRunRow` / `AgentThreadRow` / `AgentMessageRow` | type | `$inferSelect` row shapes for the `agentRun`/`agentThread`/`agentMessage` tables |
+
+<Callout type="info" title="agent_run — the reliability + approvals table">
+Every turn is recorded as a run in `agentRun` (status, duration, error code/message, retry count, a
+`promptHash` for correlating error-rate shifts with prompt changes). `DrizzleGovernanceQueries` reads
+it for the dashboard's Reliability section and for `pendingApprovals`/`toolStats` — no separate table
+or wiring needed, it's created by `ensureAgentSchema` like the other five.
+</Callout>
 
 ## Peer dependencies
 

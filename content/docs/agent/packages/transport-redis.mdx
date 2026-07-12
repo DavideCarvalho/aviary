@@ -123,6 +123,16 @@ to work no matter which instance handles the reconnect. Single-replica deploymen
 many small production deployments — are fine on the default `InProcessTokenStreamSink` and don't need
 this package at all.
 
+<Callout type="warn" title="durable: true now dispatches the turn's steps by default">
+The umbrella's `dispatchedSteps` option (under `AgentModule.forRoot({ durable: true, ... })`)
+defaults to **ON** — opt out with `dispatchedSteps: false`. With it on, the model call and each tool
+execution run as routed durable steps, so they can execute on a *different* worker process than the
+one that opened the stream — this is true even in a "single replica" web app paired with a separate
+durable worker pool, not just multi-pod fleets. A cross-process sink like `RedisTokenStreamSink`
+is required whenever the process that streams a chunk may differ from the one a client reconnects
+through; a boot warning fires when `dispatchedSteps` is on with the default in-process sink.
+</Callout>
+
 ## Related
 
 - [Architecture](/docs/agent/concepts/architecture) — the control plane / data plane split this sink lives on

@@ -1,6 +1,6 @@
 ---
 title: '@dudousxd/nestjs-agent-store-mikro-orm'
-description: MikroORM AgentStore adapter — threads, messages, tool calls, usage — with safe auto-schema.
+description: MikroORM AgentStore adapter — threads, messages, tool calls, usage, and run reliability — with safe auto-schema.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -69,15 +69,23 @@ no re-binding. Do not import it more than once expecting scoped behavior.
 
 | Export | Kind | Purpose |
 |---|---|---|
-| `MikroOrmAgentStoreModule` | `DynamicModule` factory | `.forFeature()` registers the five entities and binds `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` + `AGENT_PRICING_STORE` globally |
-| `MikroOrmAgentStore` | class | `AgentStore` implementation — the write side (threads, messages, tool calls, usage) |
-| `MikroOrmGovernanceQueries` | class | `AgentGovernanceQueries` implementation — the read-model (spend by model/actor, usage trend, recent activity) |
+| `MikroOrmAgentStoreModule` | `DynamicModule` factory | `.forFeature()` registers the six entities and binds `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` + `AGENT_PRICING_STORE` globally |
+| `MikroOrmAgentStore` | class | `AgentStore` implementation — the write side (threads, messages, tool calls, usage), including the optional `recordRunStart`/`recordRunEnd`/`bumpRunRetries` run-reliability hooks the loop and durable runners call |
+| `MikroOrmGovernanceQueries` | class | `AgentGovernanceQueries` implementation — the full read-model: spend by model/actor/thread, usage trend, recent activity, run reliability (`runMetrics`/`runsByAgent`/`runErrors`/`runTrend`/`recentRuns`), the approvals inbox (`pendingApprovals`), per-tool stats (`toolStats`), and paged/filterable reads (`toolCallsPage`/`threadsPage`/`runsPage`) |
 | `MikroOrmPricingStore` | class | `AgentPricingStore` implementation — `upsertModelPrice` / `listCurrentPrices`, the write side of model pricing (see [Cost & Governance](/docs/agent/guides/cost-and-governance#seeding-prices)) |
 | `ensureAgentSchema(orm, opts?)` | function | Non-destructive `schema.update({ safe: true })` — create + add-column, never drop or alter |
-| `AGENT_ENTITIES` | `EntitySchema[]` | The five agent entity schemas, pre-stamped with `utf8mb4_unicode_ci` for MySQL parity |
+| `agentManagedTables()` | function → `string[]` | The six agent table names, for a host's own MikroORM schema-diff `skipTables` — mirrors `durableManagedTables()`/`telescopeManagedTables()` |
+| `AGENT_ENTITIES` | `EntitySchema[]` | The six agent entity schemas, pre-stamped with `utf8mb4_unicode_ci` for MySQL parity |
 | `agentEntities({ collation? })` | function | Builds the entity schemas with a custom (or no) collation, e.g. for SQLite |
 | `AGENT_COLLATION` | `'utf8mb4_unicode_ci'` | The default collation baked into `AGENT_ENTITIES` |
-| entity classes (`AgentThread`, `AgentMessage`, `AgentToolCall`, `AgentTokenUsage`, `AgentModelPricing`) | `EntitySchema`-backed classes | The five tables — `agent_thread`, `agent_message`, `agent_tool_call`, `agent_token_usage`, `agent_model_pricing` |
+| entity classes (`AgentThread`, `AgentMessage`, `AgentToolCall`, `AgentTokenUsage`, `AgentModelPricing`, `AgentRun`) | `EntitySchema`-backed classes | The six tables — `agent_thread`, `agent_message`, `agent_tool_call`, `agent_token_usage`, `agent_model_pricing`, `agent_run` |
+
+<Callout type="info" title="agent_run — the reliability + approvals table">
+Every turn is recorded as a run in `agent_run` (status, duration, error code/message, retry count, a
+`promptHash` for correlating error-rate shifts with prompt changes). `MikroOrmGovernanceQueries` reads
+it for the dashboard's Reliability section and for `pendingApprovals`/`toolStats` — created and
+healed by `ensureAgentSchema` like the other five tables, no separate wiring needed.
+</Callout>
 
 ## Peer dependencies
 
@@ -87,7 +95,7 @@ no re-binding. Do not import it more than once expecting scoped behavior.
 ## When to use it
 
 Reach for this adapter when MikroORM is already your app's ORM — `MikroOrmModule.forRoot(...)`
-owns the connection, and `forFeature()` just registers the agent's five entities alongside your own.
+owns the connection, and `forFeature()` just registers the agent's six entities alongside your own.
 If you'd rather bring an already-opened handle and skip MikroORM entirely, see
 [`store-drizzle`](/docs/agent/packages/store-drizzle).
 

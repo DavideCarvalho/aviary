@@ -1,0 +1,305 @@
+---
+title: Bring your own UI
+description: The package ships no components by design — build a chat entirely on useAgentChat, AgentChatTransport, and the stored-history mappers, owning every pixel yourself.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+[Frontend](/docs/agent/guides/frontend) covers `MessageList` / `ChatInput` — the optional,
+styling-agnostic reference components. This guide is for the common case in a product with its own
+design system: skip the components entirely and render straight off `useAgentChat`'s return value.
+Nothing here is a fallback path or an escape hatch — it's the same headless surface the reference
+components are themselves built on.
+
+---
+
+## The headless split
+
+`@dudousxd/nestjs-agent-react` is three layers, and only the top one renders anything:
+
+| Layer | What it owns | Ships a UI? |
+|---|---|---|
+| `AgentClient` | The REST calls — threads, quota, attachments, approve/reject | No |
+| `AgentChatTransport` + `useAgentChat` | SSE parsing, resume/reconnect, thread state, HITL routing — the AI SDK v7 `ChatTransport`/`useChat` contract | No |
+| `MessageList` / `ChatInput` / `AgentMarkdown` | A reference chat UI over the two layers above | Yes — and it's optional |
+
+A host that never imports `MessageList` still gets everything below it: streaming, thread CRUD,
+quota, cancel, regenerate, and human-in-the-loop, all through plain callbacks and state. Bubble
+layout, tool-call cards, composer design, upload-progress affordances, and theming are 100% the
+host's — the library never assumes a design system, a CSS framework, or even that you're rendering
+HTML at all.
+
+<Callout type="info" title="A real host owns all of this">
+Products built on this hook typically own every visual surface — message bubbles, tool-result
+cards branched by tool name, a composer with per-file upload progress, loading skeletons — and
+never import a single component from the package. That's the intended shape, not a workaround.
+</Callout>
+
+---
+
+## `useAgentChat` on its own
+
+The options that matter for a custom chat screen:
+
+```tsx
+import { useAgentChat } from '@dudousxd/nestjs-agent-react';
+import { isTextUIPart, isToolUIPart } from 'ai';
+
+function CustomChat({ threadId }: { threadId?: string }) {
+  const chat = useAgentChat({
+    baseUrl: '/agent',
+    // Omit the key entirely when absent — `UseAgentChatOptions` is built with
+    // `exactOptionalPropertyTypes`, so an explicit `threadId: undefined` doesn't type-check.
+    ...(threadId !== undefined ? { threadId } : {}),
+    agent: 'support',
+    initialMessages: [], // seed from storedThreadToUiMessages() when reopening a thread — see below
+    // Reattach to a turn still streaming when the page loaded — survives a refresh.
+    resume: true,
+    getHeaders: () => ({ 'x-actor-id': currentUser.id }),
+    onThreadCreated: (newThreadId) => router.replace(`/chat/${newThreadId}`),
+    // Fires once per run when the SERVER is done writing (title + terminal state persisted) —
+    // the right signal to refetch a thread list/sidebar; `onFinish` only means "a turn rendered".
+    onRunSettled: ({ status }) => {
+      if (status === 'completed') refetchThreadList();
+    },
+  });
+
+  return (
+    <div className="my-chat-shell">
+      {chat.messages.map((message) => (
+        <div
+          key={message.id}
+          className={message.role === 'user' ? 'my-bubble-user' : 'my-bubble-assistant'}
+        >
+          {message.parts.map((part, i) => {
+            if (isTextUIPart(part)) return <p key={i}>{part.text}</p>;
+            if (isToolUIPart(part)) return <MyToolCard key={i} part={part} />;
+            return null;
+          })}
+        </div>
+      ))}
+      <MyComposer
+        disabled={chat.status === 'streaming'}
+        onSubmit={(text) => chat.sendMessage({ text })}
+      />
+    </div>
+  );
+}
+```
+
+`chat` is the AI SDK v7 `useChat` return value (`messages`, `status`, `sendMessage`, `stop`, `error`,
+…) spread together with the agent extras: `runId` / `activeRunId` (the `resume`-fetched thread's
+active run, or `null` once resolved with none), `client` (the raw `AgentClient`, usable standalone),
+thread CRUD (`threads`, `loadThreads`, `loadThread`, `deleteThread`, `forkThread`, `renameThread`,
+`promoteThread`, `truncateFromMessage`), `quota` / `loadQuota`, `cancel`, HITL `approve` / `reject`,
+and `regenerate`.
+
+The options worth knowing beyond the basics (`baseUrl`, `getHeaders`, `threadId`):
+
+| Option | Type | Why it matters |
+|---|---|---|
+| `initialMessages` | `UIMessage[]` | Seeds `useChat` on mount only — pair with `storedThreadToUiMessages` for a reopened thread. |
+| `resume` | `boolean` | On mount, if the bound `threadId`'s thread has an in-flight run (`activeRunId` non-null), auto-attaches to its stream — the reload-survival case. A no-op without `threadId`. |
+| `resumeRunId` | `string` | The lower-level primitive `resume` builds on: wire a known run id directly (e.g. from a thread you already fetched) to reconnect without the hook doing its own fetch. |
+| `onThreadCreated` | `(threadId: string) => void` | Fires once when a threadless chat's first send makes the backend mint a thread — the hook also remembers the id internally, so subsequent sends reuse it even before you act on the callback. |
+| `onRunSettled` | `({ runId, status }) => void` | Fires once per run when its stream **settles** server-side (title + terminal state persisted) — including a resumed stream's own completion. This is the signal to refetch a sidebar/thread list; `onFinish` only means a turn rendered client-side. Skipped if the initial POST failed before any run id was learned. |
+| `getPageContext` | `() => Record \| null` | Read at every send to attach a page snapshot (page-assistant use cases). |
+
+<Callout type="warn" title="onFinish vs onRunSettled">
+`onFinish` is the AI SDK's own per-turn callback — it fires once a turn's UI stops updating. It
+does **not** mean the server has finished persisting the title or the run's terminal status.
+`onRunSettled` is the agent-specific signal for that; reach for it whenever you're refetching
+anything server-derived (thread title, list ordering, quota).
+</Callout>
+
+---
+
+## The transport, standalone
+
+`AgentChatTransport` is a plain AI SDK v7 `ChatTransport`. Wire it straight into the SDK's own
+`useChat` for the SSE plumbing alone, with none of `useAgentChat`'s thread/quota/approval state —
+useful when a host already has its own thread/quota management and only wants the wire protocol:
+
+```ts
+import { useChat } from '@ai-sdk/react';
+import { AgentChatTransport } from '@dudousxd/nestjs-agent-react';
+
+const transport = new AgentChatTransport({
+  baseUrl: '/agent',
+  getHeaders: () => ({ 'x-actor-id': currentUser.id }),
+  onMeta: ({ runId, threadId }) => console.log('turn started', runId, threadId),
+});
+const chat = useChat({ transport });
+```
+
+---
+
+## Rendering tool parts: read vs. action cards
+
+Every tool call arrives as a `ToolUIPart` (or `DynamicToolUIPart` for tools registered at runtime) on
+the assistant message. Both narrow under `isToolUIPart` / `isDynamicToolUIPart` from `ai`; the
+package re-exports the union as `AnyToolUIPart` for a shared prop type across your card components.
+
+The field that decides whether a tool call renders as a plain "read" card or needs an
+approve/reject affordance is `part.toolMetadata?.toolKind` — `'read'` or `'action'`, forwarded from
+the tool's own `@AiTool({ kind })` declaration (see [Tools](/docs/agent/guides/tools)):
+
+```tsx
+function MyToolCard({ part }: { part: AnyToolUIPart }) {
+  const isAction = part.toolMetadata?.toolKind === 'action';
+  const awaitingDecision = isAction && part.state === 'input-available';
+
+  return (
+    <div className={isAction ? 'tool-card tool-card--action' : 'tool-card tool-card--read'}>
+      <code>{part.type}</code>
+      <pre>{JSON.stringify(part.input, null, 2)}</pre>
+      {awaitingDecision ? <ApprovalActions toolCallId={part.toolCallId} /> : null}
+      {part.state === 'output-available' ? <pre>{JSON.stringify(part.output, null, 2)}</pre> : null}
+    </div>
+  );
+}
+```
+
+<Callout type="info" title="toolKind is omitted, not undefined, on older backends">
+`toolMetadata` is only attached when the backend reports a `toolKind` at all — an older backend
+that predates the field simply omits the whole `toolMetadata` key rather than sending it as
+`undefined`. Guard with `part.toolMetadata?.toolKind`, not a truthy check on `toolMetadata` alone,
+and treat a missing value as "render like a read tool" (the safe default — no card should silently
+claim approval isn't needed when it can't tell).
+</Callout>
+
+---
+
+## Human-in-the-loop: approve / reject
+
+Wire the buttons straight to the hook's `approve` / `reject` — both resolve by `toolCallId` alone,
+so they work from any component, not just the one that rendered the pending call:
+
+```tsx
+function ApprovalActions({ toolCallId }: { toolCallId: string }) {
+  return (
+    <div className="tool-actions">
+      <button onClick={() => chat.approve({ toolCallId })}>Approve</button>
+      <button onClick={() => chat.reject({ toolCallId, reason: 'Not now' })}>Reject</button>
+    </div>
+  );
+}
+```
+
+`approve` resolves the durable suspend and the run resumes streaming; `reject` (with an optional
+`reason`) feeds the decline back to the model. See
+[Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability) for what
+backs the pause — an in-process hold under the inline runner, a real durable **signal** under the
+durable one. The wire protocol, and everything above it, is identical either way.
+
+---
+
+## Stored-history parity: `storedThreadToUiMessages`
+
+A reloaded thread's `StoredMessage[]` (from `client.getThread(threadId)`) needs converting to
+`UIMessage[]` before it can seed `initialMessages`. The naive per-row mapper
+(`storedMessageToUiMessage`) is exact for a single already-atomic row, but the agent loop persists
+**one store row per model iteration** — a turn with tool calls appends a "thinking…" row plus tool
+calls, then a separate final-answer row. Mapped 1:1, that reloads as 2-3 assistant bubbles for what
+the live stream rendered as one continuous turn.
+
+`storedThreadToUiMessages` closes that gap: it groups consecutive assistant rows (no user message
+between them) into **one** `UIMessage`, concatenating their parts in row order — the same
+`[text?, tools?, text?, tools?, …]` sequence the live transport streams for that turn — and stamps
+`metadata.usage` with the summed tokens/cost across the merged rows whenever an actual merge (2+
+rows) happened:
+
+```ts
+import { storedThreadToUiMessages } from '@dudousxd/nestjs-agent-react';
+
+const detail = await chat.client.getThread(threadId);
+const initialMessages = storedThreadToUiMessages(detail.messages);
+// Feed into useAgentChat({ threadId, initialMessages, resume: true }) on the mount that owns
+// this thread — `initialMessages` is only read once, on mount.
+```
+
+The grouped message's `id` is the **last** row's id — the final-answer row, since it's the one
+carrying `followUps` and the natural key for turn-level actions like fork or regenerate. A lone
+assistant row with nothing to merge comes back byte-for-byte identical to
+`storedMessageToUiMessage` — no `metadata` added either, so single-iteration turns are unaffected.
+
+```ts
+// Read the aggregated cost/tokens off a merged turn, same shape as a single row's usage:
+const usage = (message.metadata as { usage?: AggregatedTurnUsage } | undefined)?.usage;
+```
+
+`costUsd` on the aggregate is `null` only when **every** merged row reports an unknown cost (no
+pricing store bound, or an unpriced model) — a row with a real `0` mixed with unknown rows still
+sums to a real number, so only an all-unknown turn reports `null`.
+
+---
+
+## Attachments
+
+`uploadAttachment` and the rest of `AgentClient` work outside `useAgentChat` too — from a
+file-picker, a drag-and-drop zone, or a standalone screen that never touches the chat state:
+
+```ts
+const attachment = await chat.client.uploadAttachment(file); // → MessageAttachment
+await chat.sendMessage({ text: 'what is in this?' }, { body: { attachments: [attachment] } });
+```
+
+`uploadAttachment` is a single multipart POST to `/agent/attachments` — the library gives you the
+one round-trip and its typed result, not a queue or a progress event. A composer with **per-file**
+upload states (queued → uploading → done/error, a progress percentage, a retry button) is host UI:
+track that state yourself, e.g. one entry per file keyed by a local id, resolved to a
+`MessageAttachment` on success or a failure marker on rejection, and only call `sendMessage` once
+every attached file has settled:
+
+```ts
+type UploadState =
+  | { status: 'uploading' }
+  | { status: 'done'; attachment: MessageAttachment }
+  | { status: 'error'; message: string };
+
+const [uploads, setUploads] = useState<Record<string, UploadState>>({});
+
+async function attach(localId: string, file: File) {
+  setUploads((current) => ({ ...current, [localId]: { status: 'uploading' } }));
+  try {
+    const attachment = await chat.client.uploadAttachment(file);
+    setUploads((current) => ({ ...current, [localId]: { status: 'done', attachment } }));
+  } catch (error) {
+    setUploads((current) => ({
+      ...current,
+      [localId]: { status: 'error', message: error instanceof Error ? error.message : 'Upload failed' },
+    }));
+  }
+}
+```
+
+This is exactly the shape a product-grade composer needs — per-file rows, a spinner or progress bar
+per row, a way to retry or remove a failed file before sending — and none of it is in the package,
+because the right shape is a product decision, not a library one.
+
+---
+
+## What the host owns vs. what the library owns
+
+| | The library (`useAgentChat` / `AgentClient` / `AgentChatTransport`) | The host |
+|---|---|---|
+| Streaming | SSE parsing, chunking, resume/reconnect | — |
+| Threads | List/get/delete/fork/rename/promote/truncate | Sidebar layout, empty states, sorting |
+| Attachments | The upload round-trip, the typed result | Per-file progress UI, drag-and-drop, previews |
+| Tool calls | `toolMetadata.toolKind`, part state (`input-available` / `output-available` / …) | Bubble layout, tool-specific cards, icons |
+| HITL | `approve` / `reject` wired to the current run | The Approve/Reject affordance itself |
+| History | `storedThreadToUiMessages` turn-grouping + aggregated usage | Skeletons, virtualization, date separators |
+| Errors | `chat.error` (SSE `event: error`), `AgentHttpError.status` on REST calls | Toasts, inline banners, retry buttons |
+| Everything visual | Nothing | Bubbles, composer, theming, design tokens |
+
+---
+
+## Related
+
+- [Frontend](/docs/agent/guides/frontend) — `MessageList` / `ChatInput`, the optional reference
+  components built on this same hook
+- [Tools](/docs/agent/guides/tools) — declaring `read` vs. `action` tools, the source of `toolKind`
+- [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability) — the durable
+  suspend behind `approve` / `reject`
+- [Persistence](/docs/agent/guides/persistence) — the `StoredMessage` shape `storedThreadToUiMessages` consumes
+- [Cost & Governance](/docs/agent/guides/cost-and-governance) — the usage figures behind `AggregatedTurnUsage`

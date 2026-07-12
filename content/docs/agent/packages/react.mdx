@@ -52,10 +52,61 @@ function Assistant() {
 | `MessageItem` | A single message, if you want to lay out the list yourself. |
 | `useSpeechRecognition` | Browser dictation hook backing `ChatInput`'s optional mic button. |
 | `SPEECH_LANGUAGES` / `DEFAULT_SPEECH_LANG` | The dictation language catalog and default. |
+| `storedThreadToUiMessages(messages)` | Converts a thread's full `StoredMessage[]` history into `UIMessage[]` for hydrating a reloaded chat — see [Hydrating from history](#hydrating-from-history) below. |
+| `storedMessageToUiMessage` | The 1:1 row → message adapter `storedThreadToUiMessages` is built on; use it directly if you don't want turn-merging. |
 
 Subpath `@dudousxd/nestjs-agent-react/markdown` exports `AgentMarkdown` — a streaming-aware GFM +
 KaTeX + Mermaid renderer for `renderText`, behind its own peers so a plain-text app never pulls them
 in.
+
+## Hydrating from history
+
+`storedMessageToUiMessage` maps one persisted `StoredMessage` row to one `UIMessage`, but the loop
+persists one row per model iteration — a turn with tool calls is 2-3 rows (a "checking that..." row,
+tool-call rows, a final-answer row). Loading a thread with that adapter renders 2-3 separate
+assistant bubbles, each with its own cost/tokens footer, for what the live stream rendered as one
+continuous response.
+
+`storedThreadToUiMessages(messages)` merges consecutive assistant rows (no user message between
+them) into a single `UIMessage` per turn, concatenating parts in step order — a reloaded thread
+matches the live stream bubble-for-bubble. The merged message carries `metadata.usage` with summed
+tokens and cost (`costUsd` is `null` only when every merged row's cost is unknown — unknown is never
+coerced to `0`). Use it to seed `initialMessages`:
+
+```tsx
+const thread = await client.getThread(threadId);
+const chat = useAgentChat({
+  threadId,
+  initialMessages: storedThreadToUiMessages(thread.messages),
+});
+```
+
+## Reconciling after a run settles
+
+`useAgentChat({ onRunSettled })` fires exactly once per run — `{ runId, status: 'completed' | 'failed' }`
+— when its stream settles, on both the send and the `resume` paths. By the time it fires the server
+has already persisted the thread's title and the run's terminal state, which is the signal `onFinish`
+doesn't give you: `onFinish` only means "a turn rendered here," not "the server is done writing." Use
+it to refetch thread/list queries so a header or sidebar showing "Untitled" picks up the derived
+title:
+
+```tsx
+const chat = useAgentChat({
+  threadId,
+  onRunSettled: ({ status }) => {
+    if (status === 'completed') queryClient.invalidateQueries({ queryKey: threadListQueryKey });
+  },
+});
+```
+
+This matters more than it used to: under a durable backend, `AgentModule.forRoot({ durable: true })`
+now dispatches a turn's model call and tool executions as routed durable steps by default
+(`dispatchedSteps` defaults ON, opt out with `dispatchedSteps: false`) — the actual LLM/tool work can
+run on a different worker than the pod holding this SSE connection, and results flow back through a
+cross-process token sink (e.g. Redis) instead of an in-process buffer. The `/agent/chat` SSE contract
+this package speaks doesn't change, but a run can keep progressing, or finish, on infrastructure this
+tab has no direct line to — `onRunSettled` (and `resume`, for reattaching to a run still in flight on
+mount) are the client-side hooks that make that invisible.
 
 ## Peer dependencies
 

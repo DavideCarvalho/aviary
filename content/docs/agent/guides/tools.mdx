@@ -150,6 +150,17 @@ wire; a human hits `POST /agent/tool-call/approve` (or `/reject`) to continue. U
 `durable: true` that pause is a real durable suspend — checkpointed to the state store and
 resumable across restarts. Either way, `execute` runs only after approval.
 
+<Callout type="info" title="Where a tool actually runs under durable: true">
+By default under `durable: true`, every tool call — `read` or `action` — executes as a dispatched
+`AgentRunSteps.tool` step rather than in-process: whichever worker in the fleet picks the step up
+rebuilds the `AiToolCtx` and re-resolves your tool from its own DI, then calls `execute`. This is
+transparent to the handler — the same `ToolHandler` interface, the same `ctx` shape — but it does
+mean a tool's dependencies (a DB pool, an HTTP client) need to be resolvable from every worker in the
+fleet, not just the one that received the original chat request. `toolTimeoutMs` is applied inside
+the handler either way (`withToolTimeout`), not as a separate durable step timeout. Opt out fleet-wide
+with `dispatchedSteps: false`; see [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability#dispatched-steps-the-run-isnt-pinned-to-a-pod).
+</Callout>
+
 <Callout type="warn" title="Pick the kind by side effects, not by convenience">
 `read` tools run without a human in the loop, so a tool that mutates or spends must be `action`.
 The gate is the `kind`, not the name — a `read` tool that quietly writes is a governance hole. The

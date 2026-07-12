@@ -11,7 +11,7 @@ import { Callout } from 'fumadocs-ui/components/callout';
 
 | Event | Payload fields | Publisher |
 |---|---|---|
-| `run.started` | `runId: string`; `threadId: string`; `actorId: string`; `persona?: string` | `publishAgentRunStarted` |
+| `run.started` | `runId: string`; `threadId: string`; `actorId: string`; `agentName?: string` | `publishAgentRunStarted` |
 | `message` | `runId: string`; `threadId: string`; `role: 'user' \| 'assistant'`; `textLength: number` | `publishAgentMessage` |
 | `tool-call` | `runId: string`; `toolName: string`; `toolType: 'read' \| 'action'`; `status: string`; `durationMs?: number` | `publishAgentToolCall` |
 | `quota.exceeded` | `actorId: string`; `usedTokens: number`; `limitTokens: number` | `publishAgentQuotaExceeded` |
@@ -20,8 +20,43 @@ import { Callout } from 'fumadocs-ui/components/callout';
 | `delegated` | `runId: string`; `fromAgent?: string`; `toAgent: string` | `publishAgentDelegated` |
 | `retrieved` | `runId: string`; `query: string`; `count: number` | `publishAgentRetrieved` |
 
+These 8 are the **point events**, exported as a stable, compile-time-checked `AGENT_DIAGNOSTIC_EVENTS`
+array with a matching `agentDiagnosticKey(event)` helper that composes the telescope bridge's
+`agent:<event>` key — pass those keys to `nestjsDiagnosticsTelescope({ exclude: [...] })` to mute a
+channel already recorded elsewhere (the generic bridge now records all 8, including `run.failed`,
+`delegated`, and `retrieved`, which used to be silently dropped).
+
 <Callout type="info" title="tool-call's toolType is narrower than ToolKind">
   `AgentToolCallEvent.toolType` is `'read' | 'action'` — it does not include the `'agent'` kind that `ToolSpec.kind` supports for delegation. Delegation gets its own `delegated` event instead.
+</Callout>
+
+## Trace spans (`traceId = runId`)
+
+Every run also emits four **span-only** events — never as point events on the base channel, only via
+`trace()` on the `:start`/`:end`/`:asyncStart`/`:asyncEnd`/`:error` sub-channels, correlated by
+`traceId = runId`. This is what lets the Telescope TRACES tab render a turn as a nested waterfall
+(llm calls, tool executions, retrieval, follow-ups) with durations and error phases. They're emitted
+from *inside* the checkpointed step bodies, so a replayed (cached) step never re-emits — and, for
+dispatched turns (see [Inline → durable](/docs/agent/recipes/inline-to-durable)), from whichever
+worker actually executes the step.
+
+| Span event | START payload fields |
+|---|---|
+| `llm.turn` | `runId: string`; `step: number` (zero-based model-call index) |
+| `tool.execution` | `runId: string`; `toolCallId: string`; `toolName: string`; `toolType: 'read' \| 'action'` |
+| `retrieval` | `runId: string`; `queryLength: number`; `topK: number` |
+| `follow-ups` | `runId: string`; `step: number`; `count: number` |
+
+Payloads are metadata-only — model id, token counts, tool name/type, step index, query *length* —
+never prompt or output text. `traceLlmTurn`/`traceToolExecution` are exported for remote execution
+sites that need to emit the same span shape.
+
+<Callout type="warn" title="Spans need the span-aware bridge">
+  Rendering these as a waterfall requires `@dudousxd/nestjs-diagnostics-telescope` 0.7+ and
+  `@dudousxd/nestjs-telescope` 1.17+ (explicit `RecordInput.traceId`). Without them the spans are
+  still emitted but unobserved — zero cost, since the phase envelopes are gated on subscriber
+  presence. Span events are deliberately excluded from `AGENT_DIAGNOSTIC_EVENTS`: the point-event
+  watcher has nothing to subscribe to on their base channels.
 </Callout>
 
 ## How to subscribe

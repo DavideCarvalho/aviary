@@ -46,7 +46,32 @@ TelescopeModule.forRoot({
 });
 ```
 
-Each event lands tagged `lib:<lib>` / `event:<event>`, with `content` = the payload and the envelope's `traceId` for correlation. When an emitter stamped a [`durationMs`](/docs/diagnostics/getting-started#timing-an-operation) onto the event, the watcher forwards it to the recorder — so the [Telescope OTel exporter](/docs/telescope) can feed it into a duration histogram instead of only a counter.
+Each `emit`-produced event lands tagged `lib:<lib>` / `event:<event>`, with `content` = the payload and the envelope's `traceId` for correlation. When an emitter stamped a [`durationMs`](/docs/diagnostics/getting-started#timing-an-operation) onto the event, the watcher forwards it to the recorder — so the [Telescope OTel exporter](/docs/telescope) can feed it into a duration histogram instead of only a counter.
+
+The same watcher also records [`trace()`](/docs/diagnostics/getting-started#tracing-an-operation) spans, tagged `kind:span`: **one entry per completed span**, not one per phase. For every `(lib, event)` pair it subscribes only the three terminal sub-channels — `end`, `asyncEnd`, `error` — and builds the entry from whichever one fires, carrying `spanId`, `phase`, and `result` (success) or `error` (failure). `start`/`asyncStart` are never subscribed, so their envelopes aren't even built for an unwatched span. An async `trace()` call also fires `end` early, as a "synchronous portion done" marker with no `result` key; the watcher filters that premature marker out (it isn't a terminal completion) so a span is never recorded twice. `durationMs` and `traceId` are forwarded from the envelope, and `startedAt` is derived as the terminal timestamp minus the duration, so the entry's recorded start lines up with the span's real start for the [Traces waterfall](/docs/telescope) to nest it correctly. That `traceId` is passed explicitly via `RecordInput.traceId`, which wins over whatever ambient trace context Telescope's Recorder would otherwise infer — so a span always lands under the producer-chosen trace even without an active OTel span.
+
+## Avoiding duplicate recording: the claim registry
+
+If a library ships its own Telescope watcher that already records its `aviary:<lib>:<event>` traffic as a first-class, typed entry (nestjs-agent's and nestjs-media's watchers do this), the generic `DiagnosticWatcher` above would otherwise record the same event a second time as a plain `diagnostic` entry. The claim registry lets the lib-specific watcher opt its events out of that generic recording without any config on the consumer side:
+
+```ts
+import { claimDiagnostics } from '@dudousxd/nestjs-diagnostics';
+
+// inside the lib-specific watcher's own registration:
+const release = claimDiagnostics('agent', ['chat-request', 'tool-call']);
+// ... and on cleanup:
+release();
+```
+
+`claimDiagnostics(lib, events)` marks each `lib:event` key as claimed in a process-global, refcounted registry (a `Map<string, number>` behind `Symbol.for('aviary:diagnostics:claims')`), and returns a release function that undoes exactly what that call claimed. The generic watcher calls `isDiagnosticClaimed(lib, event)` **at record time** — when an event actually publishes, not when the watcher subscribes — which is what makes claiming order-independent: a lib-specific watcher can claim before or after the generic one has registered, and every event recorded from then on is skipped either way. Because the registry is refcounted, two watchers claiming the same key don't fight — releasing one doesn't un-claim it for the other.
+
+By default a claimed key is skipped; pass `recordClaimed: true` to record everything regardless of claims (e.g. to compare the raw feed against the typed one while debugging):
+
+```ts
+nestjsDiagnosticsTelescope({ recordClaimed: true })
+```
+
+This is independent from `exclude` (a `lib:event` list muting noisy events outright, e.g. `media:upload.progress`): `exclude` drops events nobody should see in Telescope at all, while claims only concern events another watcher already records elsewhere.
 
 ## OpenTelemetry
 

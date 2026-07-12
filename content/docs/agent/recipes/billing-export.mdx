@@ -36,11 +36,17 @@ interface AgentGovernanceQueries {
   usageTrend(range: GovernanceRange): Promise<UsageTrendPoint[]>;
   recentToolCalls(limit: number): Promise<ToolCallActivityRow[]>;
   recentThreads(limit: number): Promise<ThreadActivityRow[]>;
+  // ...plus reliability (runMetrics/runsByAgent/runErrors/runTrend/recentRuns), toolStats,
+  // pendingApprovals, and paginated toolCallsPage/threadsPage/runsPage — all REQUIRED members
+  // an external adapter must implement (see the source link above for the full, current shape).
 }
 ```
 
 Consumers inject it via the `AGENT_GOVERNANCE_QUERIES` token; whichever store adapter you configured
-(MikroORM, Drizzle, or `InMemoryGovernanceQueries` in tests) binds it.
+(MikroORM, Drizzle, or `InMemoryGovernanceQueries` in tests) binds it. The interface has grown a lot
+beyond spend/usage since this recipe was first written — this snippet keeps only the members a
+billing export actually reads; see [Endpoints](/docs/agent/reference/endpoints#dashboard-json-api)
+for what the rest feed.
 
 ---
 

@@ -80,6 +80,7 @@ The return value is the AI SDK `useChat` result (`messages`, `sendMessage`, `sta
 | `resumeRunId` | `string` | Reconnect to a buffered in-flight stream — wire it to the thread's `activeStreamId`. Its presence gates the resume and names the run; omit it and no resume request fires. |
 | `getPageContext` | `() => Record \| null` | Read at each send to attach a page snapshot (page-assistant). |
 | `onFinish` | `() => void` | Fired after each streamed turn (e.g. refetch the sidebar). |
+| `onRunSettled` | `(outcome: { runId, status: 'completed' \| 'failed' }) => void` | Fired exactly once per run when the stream settles (send **and** resume paths) — by then the server has persisted the thread's title and the run's outcome, so this is the right place to refetch thread/list queries (fixes a sidebar stuck on "Untitled"). |
 | `client` / `fetch` | `AgentClient` / `typeof fetch` | Inject an existing client or a custom fetch (tests / non-browser). |
 
 <Callout type="info" title="Only the latest message goes over the wire">
@@ -307,17 +308,27 @@ function Sidebar({ chat }: { chat: ReturnType<typeof useAgentChat> }) {
 }
 ```
 
-To reopen an existing thread, load its detail, seed the hook, and — if it reports a buffered stream —
-let the transport reconnect:
+To reopen an existing thread, load its detail, convert its stored history to `UIMessage[]`, seed the
+hook, and — if it reports a buffered stream — let the transport reconnect:
 
 ```tsx
+import { storedThreadToUiMessages } from '@dudousxd/nestjs-agent-react';
+
 const detail = await chat.loadThread(threadId);
 const reopened = useAgentChat({
   threadId,
-  initialMessages: detail.messages,
+  initialMessages: storedThreadToUiMessages(detail.messages),
   resumeRunId: detail.activeStreamId ?? undefined,
 });
 ```
+
+`storedThreadToUiMessages` merges consecutive assistant rows into one `UIMessage` per turn — the
+loop persists one row per model iteration, so a turn with tool calls appends a "thinking" row and a
+separate final-answer row; mapped 1:1 that's 2-3 fragmented bubbles, each with its own cost/token
+footer, for what the live stream renders as one continuous response. The merged turn carries
+`metadata.usage` with summed tokens and cost (`costUsd` stays `null` only when every merged row's
+cost is unknown — unknown is never treated as `$0`). For a single row that needs no merging, or for
+any other 1:1 conversion, `storedMessageToUiMessage` is still available and unchanged.
 
 <Callout type="info" title="No doomed resume GET">
 `resumeRunId` gates the reconnect: when a thread has no buffered stream (`activeStreamId` is
@@ -329,6 +340,7 @@ round-trip, so a normal mount never fires a resume request that 404s.
 
 ## Related
 
+- [Bring your own UI](/docs/agent/guides/bring-your-own-ui) — skip `MessageList`/`ChatInput` and render straight off `useAgentChat`, with a fully custom design system
 - [Getting Started](/docs/agent/getting-started) — install the module and stream your first turn
 - [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability) — the durable suspend behind approve/reject
 - [Identity & Authorization](/docs/agent/guides/identity-and-authorization) — how the backend resolves the actor your headers carry

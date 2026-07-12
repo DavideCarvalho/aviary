@@ -138,6 +138,81 @@ at once, rather than trading one for the other.
 
 ---
 
+## Dispatched steps: the run isn't pinned to a pod
+
+Under `durable: true`, the turn's two long steps — the model call and each tool execution — dispatch
+as routed durable steps (`AgentRunSteps.llm` / `AgentRunSteps.tool`) instead of running in-process.
+This is the **default** the moment `durable: true` is set; opt out with `dispatchedSteps: false` to
+keep them as in-process `ctx.localStep`s.
+
+```ts
+agentDurable({
+  model: myModelProvider,
+  store: myAgentStore,
+  actorResolver: new HeaderActorResolver(),
+  // dispatchedSteps: false, // opt out — keep the llm/tool steps in-process
+});
+```
+
+`AgentRunSteps.llm` and `.tool` are **always** registered as worker groups by `AgentDurableModule`
+regardless of this flag — the worker group is never left unserved — so the flag only decides whether
+the workflow dispatches to them or runs the equivalent step in-process with `ctx.localStep`. Each
+dispatched step re-resolves its own dependencies from whichever worker picks it up (its own DI, via
+`AGENT_DEPS_FACTORY.forAgent`), so a run can leave its originating pod for the model call and come
+back to a different one for a tool execution; the retry policy differs by step too — the `llm` step
+retries (`@Step({ retries: 3 })`), the `tool` step doesn't, since tool idempotency is your domain, not
+the runtime's.
+
+<Callout type="warn" title="Multi-pod fleets need a cross-process token sink">
+A dispatched step can run on any worker in the fleet — not necessarily the pod holding the SSE
+connection. Wire a cross-process `TokenStreamSink` (e.g. `RedisTokenStreamSink`) so streamed tokens
+reach the right connection regardless of which pod executes the step. A boot warning fires when
+`dispatchedSteps` is effectively on (the default under `durable: true`) with the default in-process
+sink.
+</Callout>
+
+<Callout type="info" title="A suspend is never mispersisted as a tool failure">
+The durable runner's suspend/continue-as-new signals — thrown when a `waitForSignal` (an `action`
+tool's approval pause, among others) fires — are recognized by the durable runtime's marker-based
+`isWorkflowControlFlowSignal` before they ever reach the loop's tool-catch handling. Earlier releases
+mis-detected this by `instanceof`, which broke under the BullMQ thin worker (a different `Suspend`
+class) and corrupted the run's history on resume; the marker check fixed that across every
+classification site (the workflow's own catch, the loop's `isControlFlowError` hook, and the runner's
+start-suspend swallow). This holds whether the suspending step ran in-process or dispatched, so you
+never need to special-case a suspend in your own tool code.
+</Callout>
+
+---
+
+## Approving from a console, not just chat
+
+Approve/reject don't have to originate from the chat UI watching the run. A separate surface — a
+governance console, an ops dashboard — can bind `AGENT_APPROVAL_PORT` (`AgentApprovalPort`), an SPI
+the agent runtime implements and provides, routing through the exact **same** decision path the chat
+endpoints use (the durable signal, or the inline in-memory resolution) **without** re-running the
+ownership check the chat endpoints do — the console's own guards are expected to front it instead.
+
+```ts
+interface AgentApprovalPort {
+  approve(toolCallId: string, opts?: { executedByRef?: string }): Promise<void>;
+  reject(toolCallId: string, opts?: { executedByRef?: string; reason?: string }): Promise<void>;
+}
+```
+
+<AgentFlow variant="hitl" caption="Chat and the dashboard's approvals inbox are two different callers of the same signal — AgentRunner.signal resolves the suspended tool call either way, and the decider on the resulting Decision is executedByRef when the console supplied one, the run's own actor otherwise." />
+
+`executedByRef` records who actually decided. It lands on the tool call's persisted decision
+(`decision.executedByRef ?? the run's own actor`) on both the executed and the rejected path, so a
+console operator's approval is attributable even though the run's own actor never touched the
+request. `@dudousxd/nestjs-agent-dashboard`'s approvals inbox stamps this from the live console
+request via an `approvalActorRef` dashboard option that — as of `@dudousxd/nestjs-agent` 0.7.0 —
+defaults to the same `ActorResolver` the agent module is already configured with, so a console whose
+auth matches chat auth needs no extra wiring; override `approvalActorRef` only when the console's
+request shape differs. See [Cost & Governance](/docs/agent/guides/cost-and-governance) for the
+approvals inbox itself (`pendingApprovals`, the dashboard section, the `501` a port-less console gets).
+
+---
+
 ## Resuming a stream
 
 Durability also covers the transport. A dropped SSE connection reconnects and replays the buffered

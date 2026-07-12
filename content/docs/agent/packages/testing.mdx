@@ -63,8 +63,8 @@ const model = new FakeModelProvider(script);
 | `FakeScript` | type | `(args: ModelTurnArgs, turnIndex: number) => FakeTurn` — a pure function of the turn history |
 | `FakeTurn` | type | `{ text: string; toolCall?: { name: string; input: unknown }; costUsd?: number }` |
 | `echoScript(reply?)` | function → `FakeScript` | Trivial script: stream a fixed reply, never call a tool |
-| `InMemoryAgentStore` | class (`AgentStore`) | Full in-memory store — threads, messages, tool calls, usage — no database |
-| `InMemoryGovernanceQueries` | class (`AgentGovernanceQueries`) | In-memory read-model over an `InMemoryAgentStore`; takes an optional pricing map |
+| `InMemoryAgentStore` | class (`AgentStore`) | Full in-memory store — threads, messages, tool calls, usage, and run outcomes (`recordRunStart`/`recordRunEnd`/`bumpRunRetries`) — no database |
+| `InMemoryGovernanceQueries` | class (`AgentGovernanceQueries`) | In-memory read-model over an `InMemoryAgentStore` — spend, usage trend, recent activity, run reliability (`runMetrics`, `runsByAgent`, `runErrors`, `runTrend`, `recentRuns`), the approvals inbox (`pendingApprovals`), tool stats (`toolStats`), and paged reads (`toolCallsPage`/`threadsPage`/`runsPage`); takes an optional pricing map |
 | `InMemoryModelPrice` | type | `{ inputPricePer1m; outputPricePer1m; cacheWritePricePer1m?; cacheReadPricePer1m? }` — one entry in the pricing map |
 | `InMemoryPricingStore` | class (`AgentPricingStore`) | In-memory `upsertModelPrice` / `listCurrentPrices` — the write side of model pricing, for tests that assert on `seedModelPrices` behavior without a database |
 | `InMemoryQuotaStore` | class (`QuotaStore`) | In-memory per-actor/day token budget; constructor takes an optional `limitTokens` (default `1_000_000`) |
@@ -85,6 +85,11 @@ const queries = new InMemoryGovernanceQueries(
   new Map([['claude-sonnet-4-6', { inputPricePer1m: 3, outputPricePer1m: 15 }]]),
 );
 ```
+
+`InMemoryAgentStore` records run start/end and retries the same way a real store does, so
+`queries.runMetrics(range)`, `.recentRuns(limit)`, and `.pendingApprovals(limit)` are assertable in a
+unit test with no database — useful for testing the Reliability/Approvals dashboard sections, or a
+tool's HITL approval flow, entirely offline.
 
 ## Peer dependencies
 

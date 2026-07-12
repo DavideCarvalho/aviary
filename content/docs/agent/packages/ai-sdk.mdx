@@ -65,10 +65,44 @@ A hand-rolled Standard Schema that implements neither still validates correctly 
 to a permissive `{ type: 'object', additionalProperties: true }` — the model has to guess the
 arguments. Implement `~standard.jsonSchema` on a custom schema to avoid that.
 
-<Callout type="info" title="Peer dependency: ai ^6.0.0">
+<Callout type="info" title="Peer dependency: ai ^7.0.0">
 `ai` is a peer, not a bundled dependency — bring the AI SDK version your app already uses. `@ai-sdk/*`
 provider packages (`@ai-sdk/anthropic`, `@ai-sdk/openai`, `@ai-sdk/amazon-bedrock`, …) are separate
 installs; pick whichever the model in `aiSdkModel(...)` needs.
+</Callout>
+
+## Downloading staged attachments
+
+`AiSdkModelOptions` (the adapter's second argument) accepts `experimental_download`, forwarded
+straight to the SDK's `streamText` call — its hook for fetching a message part's bytes before the
+model sees it. It matters for a chat turn's image/PDF `attachments` (core's `MessageAttachment`,
+rendered by this adapter as native `image`/`file` content parts): the AI SDK's *default* downloader
+refuses localhost/private hostnames as an SSRF guard, which kills the model call with
+`AI_DownloadError: URL with hostname localhost is not allowed` the moment an attachment's URL points
+at a non-public store — local MinIO in dev, a VPC-only S3 endpoint.
+
+`attachmentFetchDownloader(fetchImpl?)` is the ready-made fix: a plain fetch with **no** hostname
+policy, for hosts whose attachment staging presigns exactly that kind of non-public URL. URLs the
+model already supports natively are left to the provider unchanged; everything else is fetched and
+inlined as bytes. Errors carry the response status and hostname only — never the full (possibly
+presigned) URL, so a failure log can't leak a credentialed link.
+
+```ts
+import { aiSdkModel, attachmentFetchDownloader } from '@dudousxd/nestjs-agent-ai-sdk';
+import { anthropic } from '@ai-sdk/anthropic';
+
+AgentModule.forRoot({
+  model: aiSdkModel(anthropic('claude-sonnet-4-6'), {
+    experimental_download: attachmentFetchDownloader(),
+  }),
+  // …
+});
+```
+
+<Callout type="warn" title="Only safe for URLs the host itself generated">
+This bypasses the SDK's SSRF guard entirely, so it's safe only because agent attachment URLs come
+exclusively from the host's own `AGENT_ATTACHMENT_STAGING` presigner — never from user input. Don't
+point `attachmentFetchDownloader` at a downloader hook that might see a user-supplied URL.
 </Callout>
 
 ## Related

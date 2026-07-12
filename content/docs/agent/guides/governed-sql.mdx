@@ -249,6 +249,15 @@ bounded entirely by the four guardrails plus your read-only credentials, so a re
 kind. The `roles` and `tenantRef` it enforces come from the request's [actor](/docs/agent/guides/identity-and-authorization);
 if you omit `tenantScope`, be sure your `tableAccess` policy alone is enough isolation.
 
+<Callout type="warn" title="The runner must be reachable from every worker, under durable: true">
+By default under `durable: true`, tool execution — `executeSql` included — dispatches as an
+`AgentRunSteps.tool` step, which can land on any worker in the fleet, not just the one that received
+the chat request (see [Tools](/docs/agent/guides/tools#where-a-tool-actually-runs-under-durable-true)).
+Because the factory form above resolves `ReadOnlyPool` from DI at call time, that provider — and the
+read-only pool it wraps — needs to be constructible on every worker that can serve the `tool` worker
+group, not just an API-facing pod.
+</Callout>
+
 ---
 
 ## Related

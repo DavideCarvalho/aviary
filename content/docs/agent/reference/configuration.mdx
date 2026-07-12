@@ -1,6 +1,6 @@
 ---
 title: Configuration
-description: The full AgentModule.forRoot() options reference, forRootAsync, forFeature, and the AgentDefinition/Persona shapes.
+description: The full AgentModule.forRoot() options reference, forRootAsync, and how @Agent-decorated classes register into the AgentRegistry.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -18,6 +18,9 @@ Every option below is passed to `AgentModule.forRoot({ … })`. `model` and `act
 | `sink` | `TokenStreamSink` | in-memory sink | Live token transport. The default is single-process only — for multi-replica, use `@dudousxd/nestjs-agent-transport-redis`'s `RedisTokenStreamSink` instead. |
 | `tools` | `FunctionalTool[]` | `[]` | Static functional tools (`{ spec, handler }`) registered at boot. DI-dependent tools use `provideAgentTool(factory, inject)` in a module's `providers` instead. |
 | `toolTimeoutMs` | `number` | _none_ (no timeout) | Abort a single tool call that runs longer than this and record it as failed — the model gets the timeout as the tool's result and can adapt, instead of the turn hanging. See [Tools](/docs/agent/guides/tools#per-tool-timeout). |
+| `retrieval` | `{ mode: 'inject'; retriever: Retriever; topK?: number }` | _none_ (off) | Always-on RAG: before each turn, retrieve passages for the user message and augment the system prompt with them. For agentic retrieval (the model decides when to search) don't set this — expose a tool instead: `provideAgentTool(createRetrievalTool(retriever))`. |
+| `attachments` | `{ maxBytes?: number; allowedContentTypes?: string[]; upload?: boolean }` | `upload: false` | Bounds/allowlist for the optional `POST /agent/attachments` upload controller. `maxBytes` defaults to 20 MiB; `allowedContentTypes` defaults to common multimodal types (`image/png`, `image/jpeg`, `image/gif`, `image/webp`, `application/pdf`, `text/plain`, `text/csv`). `upload: true` is static, build-time wiring (controllers are wired at module build) — set it explicitly; it fails boot loudly if nothing is bound to `AGENT_ATTACHMENT_STAGING`. |
+| `guards` | `Type<CanActivate>[]` | `[]` | Guard(s) stamped uniformly on every controller this module mounts (chat, threads, tool-call, quota, agents, and — when `attachments.upload` is set — attachments) via `@nestjs/common`'s `@UseGuards`, with REPLACE semantics — a repeated registration never accumulates guards. Without this, every route is open beyond whatever `actorResolver` itself enforces. Guard classes are added to the module's `providers` for DI. |
 
 ### Identity & authz
 
@@ -45,20 +48,39 @@ Every option below is passed to `AgentModule.forRoot({ … })`. `model` and `act
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `durable` | `boolean` | `false` | Run each turn as a durable workflow instead of in-process. Requires importing `AgentDurableModule` from `@dudousxd/nestjs-agent/durable` alongside a configured `DurableModule` — otherwise boot throws a clear error instead of an unresolved-dependency crash. |
+| `dispatchedSteps` | `boolean` | **`true`** when `durable: true`, otherwise inert | Dispatch the turn's model call and tool executions as routed durable steps (`AgentRunSteps.llm` / `AgentRunSteps.tool`) instead of in-process `ctx.localStep`s. Defaults ON under `durable: true` — the run leaves its pod during the two long steps and the llm step gets engine retry, which is the correct production posture; `AgentRunSteps` is always registered regardless of this flag, so the routed groups are never unserved. Set `false` to keep the turn's steps in-process `localStep`s instead. Setting it `true` without `durable: true` throws at module build. See [Inline → durable](/docs/agent/recipes/inline-to-durable). |
+
+<Callout type="warn" title="Multi-pod fleets still need a cross-process sink">
+  The cross-process-sink requirement is a property of `durable: true` itself, not of `dispatchedSteps` — even with `dispatchedSteps: false`, the turn already runs on whichever worker takes `agent.run`, which may not be the pod holding the SSE connection. Multi-pod fleets should wire a cross-process `TokenStreamSink` (e.g. `@dudousxd/nestjs-agent-transport-redis`'s `RedisTokenStreamSink`) either way; a boot warning fires when `durable: true` is on with the default in-process sink, naming `dispatchedSteps: false` as the (incomplete) alternative.
+</Callout>
 
 ### Follow-ups
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `followUps` | `boolean \| { count?: number }` | `false` | After the final turn, make one extra model call proposing short follow-up questions, stored on the assistant message's `followUps` and recorded as a `follow_ups` usage row. `true` proposes 3; pass `{ count }` to change that. Off by default — it costs an extra model call. See [Cost & Governance](/docs/agent/guides/cost-and-governance). |
+| `followUps` | `boolean \| { count: number }` | `false` | After the final turn, make one extra model call proposing short follow-up questions, stored on the assistant message's `followUps` and recorded as a `follow_ups` usage row. `true` proposes 3; pass `{ count }` to change that. Off by default — it costs an extra model call. See [Cost & Governance](/docs/agent/guides/cost-and-governance). |
 
 ### Default agent
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `defaultAgent` | `DefaultAgentOptions` | _none_ (bare assistant) | The implicit single agent's config — base prompt, tool allow-list, personas, model/step overrides. Additional named agents are added via `forFeature`. |
+| `defaultAgent` | `string` | _none_ | The name of the agent a turn uses when the caller doesn't select one explicitly. Omit → the single discovered `@Agent` (when there is exactly one), else `'default'` (a bare assistant if no `@Agent` is registered at all). |
 
-`DefaultAgentOptions` is `Omit<AgentDefinition, 'name'> & { name?: string }` — every field from `AgentDefinition` below except `name` is optional, defaulting `name` to `'default'`.
+<Callout type="warn" title="Agents are declared as classes, not as forRoot options">
+  There is no `forFeature(definitions)` and no inline agent-config object anymore — an agent is an ordinary Nest provider decorated `@Agent({ name, description?, systemPrompt?, model?, maxSteps?, tools?, handoff? })`, discovered at boot via `DiscoveryService` and registered into the shared `AgentRegistry`. Being a class means it gets constructor DI (its retriever, schema service, policy) instead of a static config blob. A dynamic prompt is a `@SystemPrompt()` method on the class instead of a string; a `@SystemPromptContributor()` method on *any* provider appends a section after every agent's base prompt app-wide. See [Multi-agent](/docs/agent/guides/multi-agent) for `@Agent({ handoff })` composing an orchestrator, and [Identity & authorization](/docs/agent/guides/identity-and-authorization) for `actorResolver`/`rolesPolicy`. There is no persona system — `GET /agent/agents` (backed by `AgentCatalogEntry[]`) is the picker catalog now, replacing the old personas catalog.
+</Callout>
+
+### `@Agent(options)`
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | `string` | Unique agent name. Referenced by the chat body's `agent`, `handoff`, and the `GET /agent/agents` catalog. |
+| `description` | `string` | Human-readable summary, shown to an orchestrator that may hand off to this agent and surfaced on the catalog entry. |
+| `systemPrompt` | `string` | A flat base prompt. For a dynamic prompt (reads services, the turn's `PromptContext`), add a `@SystemPrompt()` method instead — it takes precedence when present. |
+| `model` | `string` | Accounting label for the model this agent uses (the model provider itself is shared module-wide). |
+| `maxSteps` | `number` | Cap on model→tool iterations for this agent's turn. Default 8. |
+| `tools` | `string[]` | Allow-list of global tool names this agent may use. Omit → every tool its role allows. |
+| `handoff` | `Type[]` | Other `@Agent` classes this agent may hand off to — auto-exposed as handoff tools. Naming a non-`@Agent` class throws at boot. Delegation depth is capped at `MAX_DELEGATION_DEPTH` (5). |
 
 ## `AgentModule.forRootAsync(options)`
 
@@ -69,43 +91,15 @@ interface AgentModuleAsyncOptions {
   useFactory: (...args: never[]) => AgentModuleOptions | Promise<AgentModuleOptions>;
   path?: string;
   durable?: boolean;
+  dispatchedSteps?: boolean;
+  externalStore?: boolean;
+  guards?: Type<CanActivate>[];
+  attachmentsUpload?: boolean;
 }
 ```
 
-<Callout type="info" title="Why path (and durable) live outside the factory">
-  `path` and `durable` are static wiring metadata used to mount `RouterModule` and (when set) the durable subpath — both have to be known at import time, before the async factory resolves. Passing them on `AgentModuleAsyncOptions` (not inside the resolved `AgentModuleOptions`) is what makes that possible.
+<Callout type="info" title="Why these fields live outside the factory">
+  `path`, `durable`, `dispatchedSteps`, `guards`, and `attachmentsUpload` are all static wiring metadata — which controllers exist, which routes they expose, and how `AgentRunWorkflow` builds its hooks are all decided at module build time, before the async factory resolves. Passing them on `AgentModuleAsyncOptions` (not inside the resolved `AgentModuleOptions`) is what makes that possible. `dispatchedSteps: true` without `durable: true` throws at module build, same as `forRoot`.
 </Callout>
 
-`forRootAsync` always binds `AGENT_STORE` locally (its factory reads the resolved options), so the "omit `store` and import a store module" pattern is a `forRoot`-only path.
-
-## `AgentModule.forFeature(definitions)`
-
-Registers additional named agents — an orchestrator plus its sub-agents — against the same `AgentRegistry` the default agent lives in:
-
-```ts
-AgentModule.forFeature(definitions: AgentDefinition[])
-```
-
-### `AgentDefinition`
-
-| Field | Type | Description |
-|---|---|---|
-| `name` | `string` | Unique agent name. Referenced by `ctx.runAgent(name, task)`, the chat body's `agent`, and `delegatesTo`. |
-| `systemPrompt` | `string \| PromptBuilder` | Base prompt for this agent. A flat string, or a function resolved per turn from `PromptContext`. |
-| `tools` | `string[]` | Allow-list of tool names this agent may use (subset of all registered tools). |
-| `delegatesTo` | `string[]` | Names of other agents this agent may delegate to — auto-registered as `agent`-kind tools. Naming an unregistered agent throws at boot. Delegation depth is capped at `MAX_DELEGATION_DEPTH` (5). |
-| `personas` | `Persona[]` | Personas available to this agent. |
-| `defaultPersona` | `string` | Persona ID used when a turn doesn't specify one. |
-| `modelId` | `string` | Override the module-level model for this agent. |
-| `maxSteps` | `number` | Cap on tool-call/response steps per turn. |
-
-### `Persona`
-
-| Field | Type | Description |
-|---|---|---|
-| `id` | `string` | Unique persona ID within the agent. |
-| `label` | `string` | Display label (returned by `GET /threads/personas/catalog`). |
-| `systemPrompt` | `string \| PromptBuilder` | A flat prompt, or a builder composed per request that wraps/extends the agent's `basePrompt`. |
-| `allowedTools` | `string[]` | If set, only these tool names are offered (after role filtering already applied). |
-
-See [Multi-agent](/docs/agent/guides/multi-agent) for how `forFeature` + `delegatesTo` compose an orchestrator, and [Identity & authorization](/docs/agent/guides/identity-and-authorization) for `actorResolver`/`rolesPolicy`.
+`forRootAsync` always binds `AGENT_STORE` locally from the factory result (its factory reads the resolved options) unless `externalStore: true` — set that to defer to a globally-imported store module (e.g. `MikroOrmAgentStoreModule.forFeature()`) instead of returning `store` from `useFactory`.

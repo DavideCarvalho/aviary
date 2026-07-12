@@ -3,6 +3,7 @@ title: The agent loop
 description: One turn is model → tools → model, bounded by maxSteps, with a usage row appended every time the model is called.
 ---
 
+import { Callout } from 'fumadocs-ui/components/callout';
 import { Cards, Card } from 'fumadocs-ui/components/card';
 
 A **turn** is the unit of work behind one chat message: the model responds, the loop runs whatever
@@ -22,6 +23,16 @@ Each pass through the loop is one **step**:
    model as the next step's input.
 
 <AgentLoop />
+
+<Callout type="info" title="Same loop, whether or not a step is dispatched">
+This is the loop from its own point of view: step 1 (the model call) and step 4's tool executions
+happen exactly as described whether they run in-process or — under the durable runner's default
+`dispatchedSteps: true` — as routed steps that can execute on a different worker than the one
+running the turn. The loop's hooks (`step`, `dispatchLlm`, `dispatchTool`) are what change
+underneath it; the model → tools → model shape above doesn't. See
+[Architecture](/docs/agent/concepts/architecture) for what changes cross-process when a step is
+dispatched, and [Runners](/docs/agent/concepts/runners) for the `dispatchedSteps` flag itself.
+</Callout>
 
 ## `read` vs `action`
 
