@@ -1,4 +1,10 @@
 {
   "title": "Concepts",
-  "pages": ["architecture", "the-agent-loop", "runners", "governance"]
+  "icon": "Lightbulb",
+  "pages": [
+    "architecture",
+    "the-agent-loop",
+    "runners",
+    "governance"
+  ]
 }

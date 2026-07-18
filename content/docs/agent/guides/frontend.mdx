@@ -1,6 +1,7 @@
 ---
 title: Frontend
-description: Wire a React chat UI to the agent with useAgentChat — the AI SDK v7 transport, threads, personas, quota, cancel, HITL approve/reject, and styling-agnostic components.
+icon: MonitorSmartphone
+description: Wire a React chat UI to the agent with useAgentChat — the AI SDK v7 transport, threads, quota, cancel, HITL approve/reject, and styling-agnostic components.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -8,7 +9,7 @@ import { Callout } from 'fumadocs-ui/components/callout';
 `@dudousxd/nestjs-agent-react` connects a React app to the `/agent` endpoints. Its `useAgentChat`
 hook wraps the Vercel AI SDK v7 `useChat` with an `AgentChatTransport` that speaks the backend's
 `/agent/chat` SSE protocol, then layers on everything the REST surface exposes: thread history,
-personas, quota, cancel, regenerate, and the human-in-the-loop approve/reject. The components ship
+quota, cancel, regenerate, and the human-in-the-loop approve/reject. The components ship
 **no styles** — every action is a callback and every class is yours via `classNames`.
 
 ---
@@ -74,7 +75,6 @@ The return value is the AI SDK `useChat` result (`messages`, `sendMessage`, `sta
 | `getHeaders` | `() => headers \| Promise<headers>` | Resolved per request — for short-lived bearer tokens. Merged over `headers`. |
 | `credentials` | `RequestCredentials` | Forwarded to `fetch` so cookie auth / impersonation works. |
 | `agent` | `string` | Named agent to run each turn (multi-agent). |
-| `persona` | `string` | Active persona id sent on every turn. |
 | `threadId` | `string` | Bind the chat to a thread; omitted → backend creates one on first send. |
 | `initialMessages` | `UIMessage[]` | Persisted history to seed `useChat` (consumed on mount). |
 | `resumeRunId` | `string` | Reconnect to a buffered in-flight stream — wire it to the thread's `activeStreamId`. Its presence gates the resume and names the run; omit it and no resume request fires. |
@@ -271,7 +271,7 @@ thread or tool call) is easy to distinguish from a `404` or a `5xx`.
 
 ---
 
-## Threads, personas, quota, and cancel
+## Threads, quota, and cancel
 
 Beyond the streaming surface, the hook returns loaders and state for the rest of the REST API. Each
 loader calls the backend and caches the result in the paired state field.
@@ -284,7 +284,6 @@ loader calls the backend and caches the result in the paired state field.
 | `loadThread(id)` | `Promise<ThreadDetail>` | Fetch one thread's messages (to seed `initialMessages`). |
 | `deleteThread(id)` | `Promise<void>` | Delete a thread; drops it from `threads`. |
 | `forkThread(threadId, messageId)` | `Promise<ThreadSummary>` | Fork a new thread from a message. |
-| `personaCatalog` / `loadPersonaCatalog()` | `PersonaCatalogEntry[]` | Load the persona picker options. |
 | `quota` / `loadQuota()` | `QuotaToday \| null` | Today's token usage. |
 | `cancel()` | `Promise<void>` | Stop the current stream and abort the run server-side. |
 | `addToolResult({ tool, toolCallId, output })` | `Promise<void>` | Supply a client-side tool result to the SDK loop. |

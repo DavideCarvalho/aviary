@@ -1,5 +1,6 @@
 ---
 title: Getting Started
+icon: Rocket
 description: Stand up a governed AI agent in a NestJS app — install, declare a tool, register the module, and stream your first turn.
 ---
 
@@ -148,8 +149,8 @@ data: {"finishReason":"stop"}
 ```
 
 The model calls `getWeather` (a `read` tool, so it auto-executes), then streams its answer. In a
-browser, the [`-react` frontend](/docs/agent/guides/frontend) wraps all of this — threads, personas,
-quota, cancel, and approvals — in a single `useAgentChat` hook.
+browser, the [`-react` frontend](/docs/agent/guides/frontend) wraps all of this — threads, the agent
+catalog, quota, cancel, and approvals — in a single `useAgentChat` hook.
 
 ---
 
@@ -162,7 +163,7 @@ quota, cancel, and approvals — in a single `useAgentChat` hook.
 | `POST /agent/chat/:runId/cancel` | Cancel a run |
 | `POST /agent/tool-call/approve` · `/reject` | Human-in-the-loop decision for an `action` tool (ownership-scoped: `403` on someone else's tool call) |
 | `GET /agent/threads` · `/:id` · `DELETE /:id` · `POST /:id/fork-from/:messageId` | Thread history (`:id` routes are ownership-scoped: `403`/`404` outside your own threads) |
-| `GET /agent/threads/personas/catalog` · `GET /agent/quota/today` | Personas & quota |
+| `GET /agent/agents` · `GET /agent/quota/today` | Agent picker catalog & quota |
 
 ---
 

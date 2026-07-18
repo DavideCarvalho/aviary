@@ -1,5 +1,6 @@
 ---
 title: Tools
+icon: Wrench
 description: Declaring agent tools with @AiTool — the decorator surface, read vs action, the ToolHandler interface, and the per-invocation context.
 ---
 
@@ -113,7 +114,7 @@ sees the shape too.
 </Callout>
 
 There's a third kind, `agent`, but you never author it. The library synthesizes an `agent`-kind
-delegate tool for each `delegatesTo` edge in a multi-agent setup; the loop handles it directly and
+delegate tool for each `handoff` edge in a multi-agent setup; the loop handles it directly and
 your handler is never called. See [Multi-agent](/docs/agent/guides/multi-agent).
 
 ---
@@ -220,7 +221,7 @@ globals. It's the same context whether the turn runs inline or as a durable work
 | `threadId` | `string` | The conversation thread this turn belongs to. |
 | `runId` | `string` | This turn's run id. |
 | `requestId` | `string` | The originating request id. |
-| `persona` | `Persona?` | The active persona, if one was selected. |
+| `agentName` | `string?` | The name of the agent running this turn — provenance a tool can scope on (e.g. capability sets). |
 | `pageContext` | `PageContext?` | Host-supplied context about where the turn was started. |
 | `host` | `unknown?` | An optional host handle (e.g. an ORM `EntityManager`) the app threads through. |
 

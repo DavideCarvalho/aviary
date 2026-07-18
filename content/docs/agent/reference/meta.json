@@ -1,4 +1,10 @@
 {
   "title": "Reference",
-  "pages": ["configuration", "endpoints", "diagnostics-events", "di-tokens"]
+  "icon": "Library",
+  "pages": [
+    "configuration",
+    "endpoints",
+    "diagnostics-events",
+    "di-tokens"
+  ]
 }

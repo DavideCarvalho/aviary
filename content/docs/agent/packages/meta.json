@@ -1,5 +1,6 @@
 {
   "title": "Packages",
+  "icon": "Boxes",
   "pages": [
     "index",
     "core",

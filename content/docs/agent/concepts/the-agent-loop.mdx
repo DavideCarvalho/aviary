@@ -1,5 +1,6 @@
 ---
 title: The agent loop
+icon: Repeat
 description: One turn is model → tools → model, bounded by maxSteps, with a usage row appended every time the model is called.
 ---
 
@@ -58,8 +59,8 @@ for (let i = 0; i < maxSteps; i += 1) {
 }
 ```
 
-`maxSteps` comes from the `AgentDefinition` (`AgentModule.forRoot({ defaultAgent: { maxSteps } })`,
-or per named agent via `forFeature`) and **defaults to 8** when omitted. It exists to stop a
+`maxSteps` comes from the agent that runs the turn — set it per agent with `@Agent({ maxSteps })` —
+and **defaults to 8** when omitted. It exists to stop a
 model that keeps calling tools from running away with an unbounded turn — hitting the ceiling ends
 the turn with whatever text the last step produced.
 

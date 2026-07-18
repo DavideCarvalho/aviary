@@ -1,5 +1,6 @@
 ---
 title: "@dudousxd/nestjs-agent-core"
+icon: Box
 description: The framework-agnostic agent loop, tool registry, and every SPI a provider, store, or dashboard implements against.
 ---
 
@@ -72,6 +73,8 @@ members — see the source for full JSDoc.
 | `Retriever` | RAG retrieval seam — vector/keyword search behind the agentic tool or inject mode. | `retrieve(query: string, options?: RetrieveOptions): Promise<Passage[]>`. |
 | `EmbeddingProvider` | Text → vectors, for retrieval + ingestion. | `embed(texts: string[]): Promise<number[][]>`. |
 | `Reranker` | Second-stage RAG precision — re-scores retrieved passages against the query. | `rerank(query: string, passages: Passage[], options?: RerankOptions): Promise<Passage[]>`. |
+| `ActorDirectory` | Optional read-side lookup from opaque store `actorRef`s to human display labels — governance/dashboard surfaces resolve refs to names instead of rendering `u_8f21…`. Unbound → surfaces show the raw ref. Injected via `AGENT_ACTOR_DIRECTORY`. | `resolveDisplay(refs: readonly string[]): Promise<Record<string, string>>`. |
+| `AttachmentStagingStore` | Optional upload seam for message attachments (an image/PDF a user attaches before the model sees it) — turns an uploaded file into a model-reachable `MessageAttachment` URL (the lib never fetches bytes itself). Unbound → the `POST /agent/attachments` controller is never mounted. Injected via `AGENT_ATTACHMENT_STAGING`. | `stage(input: StageAttachmentInput): Promise<MessageAttachment>`. |
 
 <Callout type="info" title="Run reliability recording">
 Every run is durably recorded: the loop calls `AgentStore.recordRunStart` (with a `promptHash` — the
@@ -95,9 +98,9 @@ tool call as its own step so a turn stays replay-safe when it's executing as a d
 |---|---|
 | `Actor` | `{ id, roles?, tenantRef? }` — the caller, resolved by an `ActorResolver`. |
 | `ToolSpec` | `{ name, kind: 'read' \| 'action' \| 'agent', description, inputSchema, roles?, ability?, targetAgent? }` — the declared shape of a tool. |
-| `AiToolCtx` | `{ actor, threadId, runId, requestId, persona?, pageContext?, host? }` — handed to every `ToolHandler.execute`. |
+| `AiToolCtx` | `{ actor, threadId, runId, requestId, agentName?, pageContext?, host? }` — handed to every `ToolHandler.execute`. `agentName` is the agent running this turn (provenance a tool can scope on). |
 | `MessageUsage` | `{ inputTokens, outputTokens, cacheWriteTokens?, cacheReadTokens?, reasoningTokens? }` — the cache-aware usage shape behind cost accounting. |
-| `AgentDefinition` | `{ name, systemPrompt?, tools?, delegatesTo?, personas?, defaultPersona?, modelId?, maxSteps? }` — one named agent (the default one, or a `forFeature`-registered one). |
+| `AgentDefinition` | `{ name, description?, systemPrompt?, tools?, delegatesTo?, modelId?, maxSteps? }` — one named agent, authored as an `@Agent`-decorated class and populated into the `AgentRegistry` by discovery. |
 | `ModelPriceInput` | `{ modelId, inputPricePer1m, outputPricePer1m, cacheWritePricePer1m?, cacheReadPricePer1m? }` — the shape `AgentPricingStore.upsertModelPrice` accepts. |
 | `Decision` | `{ approved: boolean, reason?: string, executedByRef?: string }` — a human decision on a pending action tool call. `executedByRef` is who decided; absent means the run's own actor decided (the chat approve/reject flow). The dashboard's approvals inbox stamps this from its `approvalActorRef` option (or the configured `ActorResolver` by default) when routing through `AgentApprovalPort`. |
 | `RecordRunStartInput` / `RecordRunEndInput` | `{ runId, threadId, actorRef, agentName?, promptHash? }` / `{ runId, status: 'completed' \| 'failed', durationMs?, errorCode?, errorMessage? }` — what `AgentStore.recordRunStart`/`recordRunEnd` accept. |

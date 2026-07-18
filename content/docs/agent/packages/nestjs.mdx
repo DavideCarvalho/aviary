@@ -1,5 +1,6 @@
 ---
 title: "@dudousxd/nestjs-agent"
+icon: Package
 description: The umbrella NestJS module — AgentModule, @AiTool discovery, provideAgentTool, the inline runner, HeaderActorResolver, and the /durable subpath.
 ---
 
@@ -47,7 +48,10 @@ export class AppModule {}
 |---|---|
 | `forRoot(options: AgentModuleOptions)` | Register the module synchronously — model, store, sink, quota, rolesPolicy, actorResolver, path, durable, tools, defaultAgent. |
 | `forRootAsync(options: AgentModuleAsyncOptions)` | Register via a factory (`imports` / `inject` / `useFactory`); `path` stays static since routes mount before the factory resolves. |
-| `forFeature(definitions: AgentDefinition[])` | Register additional named agents beyond the implicit default one (for [multi-agent](/docs/agent/guides/multi-agent) delegation). |
+
+There is no `forFeature` — named agents beyond the default are declared as `@Agent`-decorated
+providers and discovered at boot (see [multi-agent](/docs/agent/guides/multi-agent)), not passed as a
+definition array.
 
 `model` and `actorResolver` are the two required fields — no safe default exists for either, so
 compile-time errors catch a forgotten one instead of a throwing placeholder at runtime. Everything

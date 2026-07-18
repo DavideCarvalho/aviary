@@ -1,5 +1,6 @@
 ---
 title: "@dudousxd/nestjs-agent-react"
+icon: Atom
 description: useAgentChat, the AgentChatTransport and AgentClient, styling-agnostic chat components, dictation, and the markdown subpath.
 ---
 
@@ -20,7 +21,7 @@ import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
 `@dudousxd/nestjs-agent-react` connects a React app to the `/agent` endpoints. `useAgentChat` wraps
 the Vercel AI SDK v7 `useChat` with a transport that speaks the backend's SSE protocol, then layers on
-threads, personas, quota, cancel, and human-in-the-loop approve/reject. Components ship unstyled —
+threads, quota, cancel, and human-in-the-loop approve/reject. Components ship unstyled —
 every class is yours via `classNames`.
 
 ```tsx
@@ -44,7 +45,7 @@ function Assistant() {
 
 | Export | What it is |
 |---|---|
-| `useAgentChat(options)` | The hook — the AI SDK `useChat` result plus threads/personas/quota/cancel/approve/reject. |
+| `useAgentChat(options)` | The hook — the AI SDK `useChat` result plus threads/quota/cancel/approve/reject. |
 | `AgentClient` | The framework-agnostic REST client the hook is built on; usable standalone. |
 | `AgentChatTransport` | The `useChat` transport implementing the `/agent/chat` SSE protocol. |
 | `ChatInput` | The composer — Enter submits, Shift+Enter newlines, optional dictation. |

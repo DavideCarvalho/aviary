@@ -1,5 +1,6 @@
 {
   "title": "Recipes",
+  "icon": "ChefHat",
   "pages": [
     "index",
     "custom-model-provider",

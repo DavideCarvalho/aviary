@@ -1,33 +1,55 @@
 ---
 title: Multi-agent
-description: Register named agents with forFeature, let an orchestrator delegate to sub-agents via delegatesTo, and run each delegation as a durable child run.
+icon: Waypoints
+description: Declare named agents as @Agent classes, let an orchestrator hand off to sub-agents via handoff, and run each delegation as a durable child run.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
 A single agent answers with its own prompt and tools. A **multi-agent** setup splits that into
-named specialists — an *orchestrator* that coordinates, and *sub-agents* it delegates to. You
-register each one with `AgentModule.forFeature`, declare which agents an orchestrator may call via
-`delegatesTo`, and the library does the wiring: it synthesizes an `ask_<name>` tool per edge, and
-when the model calls it the loop runs the sub-agent as a durable child run (or a nested in-process
-loop when you're not durable).
+named specialists — an *orchestrator* that coordinates, and *sub-agents* it hands off to. You
+declare each one as an `@Agent`-decorated provider, name which agents an orchestrator may call via
+`handoff`, and the library does the wiring: at boot it discovers the classes, synthesizes an
+`ask_<name>` tool per handoff edge, and when the model calls it the loop runs the sub-agent as a
+durable child run (or a nested in-process loop when you're not durable).
 
 The **mechanism** is the library; the roster — which agents exist, what each one is for, who may
 call whom — is policy you supply.
 
 ---
 
-## Register named agents
+## Declare named agents
 
-`forFeature` takes an array of `AgentDefinition`s and registers them in the agent registry. The
-default agent from `forRoot` still exists; these are *additional* named agents. Import the feature
-module anywhere alongside `AgentModule.forRoot`.
+An agent is an ordinary Nest provider decorated with `@Agent({ name, ... })`. Register the classes
+as providers alongside `AgentModule.forRoot`; a `DiscoveryService` sweep at boot reads their metadata
+and populates the shared `AgentRegistry`. There is no `forFeature([definitions])` and no inline
+config array — being a class means each agent gets constructor DI (its retriever, a schema service, a
+policy) instead of a static blob, and a dynamic prompt is a `@SystemPrompt()` method rather than a
+string.
 
 ```ts
 // src/app.module.ts
-import { Module } from '@nestjs/common';
-import { AgentModule, HeaderActorResolver } from '@dudousxd/nestjs-agent';
+import { Module, Injectable } from '@nestjs/common';
+import { Agent, AgentModule, HeaderActorResolver } from '@dudousxd/nestjs-agent';
 import { GetWeatherTool } from './tools/get-weather.tool.js';
+
+/** A focused specialist — restricted to the `getWeather` tool. */
+@Agent({
+  name: 'weather-analyst',
+  systemPrompt: 'You answer weather questions using the getWeather tool.',
+  tools: ['getWeather'],
+})
+@Injectable()
+class WeatherAnalystAgent {}
+
+/** An orchestrator that hands off to the specialist (via the synthesized `ask_weather_analyst`). */
+@Agent({
+  name: 'ops-orchestrator',
+  systemPrompt: 'You coordinate specialists. Delegate weather questions to weather-analyst.',
+  handoff: [WeatherAnalystAgent],
+})
+@Injectable()
+class OpsOrchestratorAgent {}
 
 @Module({
   imports: [
@@ -36,52 +58,43 @@ import { GetWeatherTool } from './tools/get-weather.tool.js';
       store: myAgentStore,
       defaultRoles: ['ADMIN'],
       actorResolver: new HeaderActorResolver(),
-      // durable: true,   // makes each delegation a durable child run — see below
+      defaultAgent: 'ops-orchestrator', // which agent an unqualified turn runs
+      // durable: true,   // makes each handoff a durable child run — see below
     }),
-    AgentModule.forFeature([
-      {
-        name: 'ops-orchestrator',
-        systemPrompt:
-          'You coordinate specialists. Delegate weather questions to weather-analyst.',
-        delegatesTo: ['weather-analyst'],
-      },
-      {
-        name: 'weather-analyst',
-        systemPrompt: 'You answer weather questions.',
-        tools: ['getWeather'],
-      },
-    ]),
   ],
-  providers: [GetWeatherTool],
+  providers: [GetWeatherTool, WeatherAnalystAgent, OpsOrchestratorAgent],
 })
 export class AppModule {}
 ```
 
 The orchestrator has no `tools` of its own — its only capability is delegation. The specialist has
-no `delegatesTo` — it's a leaf that answers with `getWeather`. Nothing stops an agent from having
-both.
+no `handoff` — it's a leaf that answers with `getWeather`. Nothing stops an agent from having both.
+`handoff` takes **class references**, not names, so a typo is a compile error rather than a runtime
+one. Set `defaultAgent` to pick which agent an unqualified turn runs; with more than one agent
+registered there's no single-agent fallback.
 
-<Callout type="info" title="forFeature is additive">
-Call `forFeature` as many times as you like (per feature module), or pass every definition in one
-array. Each call registers its definitions into the same shared `AgentRegistry`, so a later module's
-orchestrator can `delegatesTo` an agent registered by an earlier one.
+<Callout type="info" title="Dynamic prompts and app-wide prompt sections">
+Replace the flat `systemPrompt` string with a `@SystemPrompt()` method on the class to build the base
+prompt per turn from its `PromptContext` (actor, agent name, page context). A
+`@SystemPromptContributor()` method on *any* provider appends a section after **every** agent's base
+prompt app-wide — the way to inject a mentions legend or a schema hint without touching each agent.
 </Callout>
 
-<Callout type="warn" title="delegatesTo is validated at boot">
-Naming an agent in `delegatesTo` that isn't registered (by `forRoot`'s default agent or any
-`forFeature` call) throws at startup — it no longer silently creates a delegate to an unrestricted
-phantom agent. Agent-to-agent delegation depth is also capped at `MAX_DELEGATION_DEPTH` (5, exported
-from `@dudousxd/nestjs-agent-core`); an orchestrator chain deeper than that fails the same way.
+<Callout type="warn" title="handoff targets are validated at boot">
+Referencing an unregistered agent throws at startup — it no longer silently creates a handoff to an
+unrestricted phantom agent. Agent-to-agent delegation depth is also capped at `MAX_DELEGATION_DEPTH`
+(5, exported from `@dudousxd/nestjs-agent-core`); an orchestrator chain deeper than that fails the
+same way.
 </Callout>
 
 ---
 
 ## The synthesized `ask_<name>` tool
 
-Every entry in a `delegatesTo` list becomes a real `agent`-kind tool in the registry. The name is
-`ask_` + the target with non-alphanumeric runs collapsed to `_`:
+Every `handoff` target becomes a real `agent`-kind tool in the registry. The name is
+`ask_` + the target agent's name with non-alphanumeric runs collapsed to `_`:
 
-| `delegatesTo` entry | Synthesized tool | Input schema |
+| Target agent name | Synthesized tool | Input schema |
 |---|---|---|
 | `weather-analyst` | `ask_weather_analyst` | `{ task: string }` |
 | `billing.ops` | `ask_billing_ops` | `{ task: string }` |
@@ -96,9 +109,9 @@ tools:
 
 ```ts
 // effective allow-list for ops-orchestrator:
-['ask_weather_analyst']            // tools: [] + delegatesTo → [ask_weather_analyst]
+['ask_weather_analyst']            // tools: [] + handoff: [WeatherAnalystAgent]
 // for an agent with both:
-['refundOrder', 'ask_billing_ops'] // tools: ['refundOrder'] + delegatesTo: ['billing.ops']
+['refundOrder', 'ask_billing_ops'] // tools: ['refundOrder'] + handoff: [BillingOpsAgent]
 ```
 
 <Callout type="info" title="You never write the delegate tool">
@@ -122,7 +135,7 @@ curl -N http://localhost:3000/agent/chat \
 ```
 
 ```json
-{ "message": "…", "threadId": "…", "agent": "ops-orchestrator", "persona": "…" }
+{ "message": "…", "threadId": "…", "agent": "ops-orchestrator" }
 ```
 
 The orchestrator's model sees `ask_weather_analyst`, calls it with `{ "task": "weather in Lisbon" }`,
@@ -134,27 +147,25 @@ view it's one turn on one thread; the delegation happens inside the loop.
 
 ## What each agent gets
 
-Model, store, sink, and governance are shared from `forRoot`. Everything on the `AgentDefinition`
-is per-agent and overrides the shared defaults for that agent's turns:
+Model, store, sink, and governance are shared from `forRoot`. Everything on the `@Agent({ ... })`
+decorator is per-agent and overrides the shared defaults for that agent's turns:
 
-| Field | Type | Effect |
+| Option | Type | Effect |
 |---|---|---|
-| `name` | `string` | The identifier used in `agent` (body) and `delegatesTo`. Required. |
-| `systemPrompt` | `string \| PromptBuilder` | This agent's base prompt. A string is also surfaced in the `ask_` tool's description. |
-| `tools` | `string[]` | Allow-list of tool names this agent may use (a subset of all registered tools). |
-| `delegatesTo` | `string[]` | Other agents this agent may call; each becomes an `ask_<name>` tool. |
-| `modelId` | `string` | Accounting/label override for this agent's turns. |
-| `personas` | `Persona[]` | Per-agent persona catalog. |
-| `defaultPersona` | `string` | Persona used when the request names none. |
+| `name` | `string` | The identifier used in the `agent` body field and recorded as each message's provenance. Required. |
+| `description` | `string` | Human summary, shown to an orchestrator that may hand off to this agent, and surfaced in the `GET /agent/agents` catalog. |
+| `systemPrompt` | `string` | This agent's flat base prompt. For a dynamic prompt add a `@SystemPrompt()` method instead. A flat string is also surfaced in the `ask_` tool's description. |
+| `tools` | `string[]` | Allow-list of tool names this agent may use (a subset of all registered tools). Omit → every tool its role allows. |
+| `handoff` | `Type[]` | Other `@Agent` classes this agent may hand off to; each becomes an `ask_<name>` tool. |
+| `model` | `string` | Accounting/label override for this agent's turns (the model provider itself is shared). |
 | `maxSteps` | `number` | Tool-calling step cap for this agent's loop (default `8`). |
 
 So each agent runs its **own system prompt, its own model label, and its own tool allow-list** —
-and that allow-list is further **intersected with the active persona's** `allowedTools` and with the
-actor's role/ability gate on each tool. An agent can only reach tools it lists *and* the persona
-allows *and* the caller is authorized for.
+and that allow-list is further **intersected with the actor's role/ability gate** on each tool. An
+agent can only reach tools it lists *and* the caller is authorized for.
 
 <Callout type="info" title="Delegation respects the roster, not the actor's ambition">
-A sub-agent can't be reached unless some orchestrator lists it in `delegatesTo`, and it can only use
+A sub-agent can't be reached unless some orchestrator names it in `handoff`, and it can only use
 the tools *it* declares — not the orchestrator's. Scoping a specialist down to one tool is how you
 keep a broad orchestrator from smuggling capability into a narrow task.
 </Callout>
