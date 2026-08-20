@@ -80,13 +80,30 @@ function fetchRepo(src, tmp) {
   return tmp;
 }
 
-/** Rewrite root-absolute /docs links so they nest under the library slug. */
+// Every slug this site serves under /docs — what tells a cross-library link
+// (`/docs/telescope/...`, written by a library that means the telescope docs) apart
+// from a repo-local one (`/docs/getting-started`), which is the only kind that needs
+// the slug added.
+const SITE_SLUGS = new Set(sources.map((s) => s.slug));
+
+// Only touch real link targets: markdown `](/docs...)` and `href="/docs..."`. Captures
+// the first path segment so it can be tested against SITE_SLUGS.
+const DOCS_LINK = /(\]\(|href=")\/docs(\/[A-Za-z0-9._-]+)?/g;
+
+/**
+ * Rewrite root-absolute /docs links so they nest under the library slug.
+ *
+ * A link that already names a library (`/docs/durable/...`, including a cross-library
+ * one like `/docs/telescope`) is left alone; only a repo-local link gets the slug.
+ * Prefixing unconditionally would turn a library's link to its sibling into a 404
+ * under its own slug.
+ */
 function rewriteLinks(content, slug) {
-  // Only touch real link targets: markdown `](/docs...)` and `href="/docs..."`.
-  // Source docs assume they are the root, so /docs never already contains the slug.
-  return content
-    .replaceAll('](/docs', `](/docs/${slug}`)
-    .replaceAll('href="/docs', `href="/docs/${slug}`);
+  return content.replaceAll(DOCS_LINK, (_m, open, first) => {
+    const seg = first?.slice(1);
+    if (seg && SITE_SLUGS.has(seg)) return `${open}/docs${first}`;
+    return `${open}/docs/${slug}${first ?? ''}`;
+  });
 }
 
 /** Point root-absolute asset refs at the vendored per-library public dir. */

@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "sync:docs": "node scripts/sync-docs.mjs",
-    "prebuild": "node scripts/sync-docs.mjs",
+    "prebuild": "node scripts/sync-docs.mjs && node scripts/check-links.mjs",
     "build": "next build",
     "postbuild": "node scripts/postbuild-og.mjs",
     "predev": "node scripts/sync-docs.mjs",
@@ -13,7 +13,8 @@
     "types:check": "fumadocs-mdx && next typegen && tsc --noEmit",
     "postinstall": "fumadocs-mdx",
     "lint": "biome check",
-    "format": "biome format --write"
+    "format": "biome format --write",
+    "check:links": "node scripts/check-links.mjs"
   },
   "dependencies": {
     "@orama/orama": "^3.1.18",
