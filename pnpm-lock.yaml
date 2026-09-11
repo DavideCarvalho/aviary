@@ -40,7 +40,7 @@ importers:
         specifier: ^2.4.16
         version: 2.5.0
       '@tailwindcss/postcss':
-        specifier: ^4.3.0
+        specifier: ^4.3.1
         version: 4.3.1
       '@types/mdx':
         specifier: ^2.0.14
@@ -61,7 +61,7 @@ importers:
         specifier: ^14.2.6
         version: 14.2.6
       tailwindcss:
-        specifier: ^4.3.0
+        specifier: ^4.3.1
         version: 4.3.1
       typescript:
         specifier: ^6.0.3
