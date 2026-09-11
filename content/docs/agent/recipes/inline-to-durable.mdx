@@ -1,17 +1,18 @@
 ---
 title: Inline → durable
 icon: ArrowRightLeft
-description: "Durable is the production default — dispatchedSteps routes every model/tool call as a checkpointed, worker-served step the moment durable is true. This recipe covers getting to durable: true, and the dispatchedSteps: false escape hatch for a simple in-process case."
+description: "Durable is the production posture — every model call and tool execution becomes a checkpointed, worker-served step the moment durable is true. This recipe covers getting to durable: true, and what your tool handlers owe once their work leaves the pod."
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-`durable: true` is one dependency and one flag away from the default in-process runner, and once it's
-on, **`dispatchedSteps` defaults to `true` with it** — the turn's two long steps (the model call and
-each tool execution) are routed as durable steps (`AgentRunSteps.llm` / `AgentRunSteps.tool`) served by
-whichever worker picks them up, not pinned to the pod that started the run. That's the correct
-production posture: the llm step gets engine retry, and the run isn't stuck if its originating pod
-dies. Nothing about your tools, your store, or your frontend changes either way.
+`durable: true` is one dependency and one flag away from the default in-process runner, and it brings
+one thing with it that is not optional: **the turn's two long steps — the model call and each tool
+execution — are dispatched** as durable steps (`AgentRunSteps.llm` / `AgentRunSteps.tool`), served by
+whichever worker picks them up rather than pinned to the pod that started the run. The llm step gets
+engine retry, and the run isn't stuck if its originating pod dies. Your store and your frontend are
+unaffected; **your tool handlers are not** — see [What your tools
+owe](#what-your-tool-handlers-owe-once-the-work-leaves-the-pod) below.
 
 ---
 
@@ -75,7 +76,6 @@ import { myModelProvider } from './model.js';
       store: myAgentStore,
       actorResolver: new HeaderActorResolver(),
       // same AgentModuleOptions as before, minus `durable` — agentDurable sets it for you.
-      // dispatchedSteps isn't set here either — it defaults to `true` under durable: true.
     }),
   ],
   providers: [OpsAgent],
@@ -83,8 +83,9 @@ import { myModelProvider } from './model.js';
 export class AppModule {}
 ```
 
-That's it — no separate flag to flip for dispatching. `AgentRunSteps` (the `llm`/`tool` worker groups)
-is always registered by `AgentDurableModule` regardless, so the routed steps are never left unserved.
+That's it — there is no separate flag for dispatching, and no flag that turns it off. `AgentRunSteps`
+(the `llm`/`tool` worker groups) is registered by `AgentDurableModule` under every surface but
+`'http'`, so the routed steps are never left unserved.
 
 `agentDurable(options)` is exactly the longhand below, collapsed to one import — from
 [`agent-durable.ts`](https://github.com/dudousxd/nestjs-agent/blob/main/packages/nestjs/src/durable/agent-durable.ts):
@@ -121,52 +122,69 @@ together.
 
 ---
 
-## Opting out of dispatched steps
+## What your tool handlers owe once the work leaves the pod
 
-If you want durable's checkpointing and real HITL suspend but *not* the model/tool calls leaving
-their pod — a single-pod deployment, or a turn whose tools have external side effects you'd rather
-keep close to the caller for now — set `dispatchedSteps: false`. The turn's steps stay in-process
-`ctx.localStep`s instead of being routed through `AgentRunSteps`:
+A dispatched step is served by a worker that never entered the request that started the turn, so an
+`@AiTool` handler is in the same position as any `@Step` handler: nothing is ambient around it.
+Anything it resolves per invocation from its caller's execution context — a request-scoped ORM
+EntityManager, an AsyncLocalStorage tenant, a CLS transaction — it must establish itself. Under
+MikroORM that is `@CreateRequestContext()` (or `@EnsureRequestContext()`) on the handler:
 
 ```ts
-...agentDurable({
-  model: myModelProvider,
-  store: myAgentStore,
-  actorResolver: new HeaderActorResolver(),
-  dispatchedSteps: false,
-}),
+@AiTool({ name: 'closeWorkOrder', kind: 'action', description: '…', input: z.object({ id: z.string() }) })
+export class CloseWorkOrderTool implements ToolHandler<{ id: string }> {
+  constructor(private readonly em: EntityManager) {}
+
+  @CreateRequestContext()
+  async execute(input: { id: string }) {
+    /* … */
+  }
+}
 ```
 
-<Callout type="warn" title="The cross-process sink requirement doesn't go away">
-  Multi-pod fleets need a cross-process `TokenStreamSink` (e.g.
-  `@dudousxd/nestjs-agent-transport-redis`'s `RedisTokenStreamSink`) under `durable: true` regardless
-  of `dispatchedSteps` — the turn already runs on whichever worker takes `agent.run`, which may not be
-  the pod holding the SSE connection. A boot warning fires when `durable: true` is on with the default
-  in-process sink, naming `dispatchedSteps: false` as the (incomplete) alternative — it isn't a
-  substitute for wiring a real cross-process sink on more than one pod.
+<Callout type="warn" title="An action tool is where skipping this costs most">
+  HITL exists to promise that approving a call runs it. A handler that cannot resolve its context
+  throws inside the worker: the loop records the call `failed`, hands the error to the model, and the
+  turn completes — so a human's approval has been spent on an action that never happened. Under
+  MikroORM with `allowGlobalContext: false` that is exactly the failure you get, and it is reported
+  as an ordinary tool error rather than as a misconfiguration.
 </Callout>
 
-Setting `dispatchedSteps: true` explicitly without `durable: true` is a config error and throws at
-module build — there's no worker group to route to without the durable workflow underneath it.
+<Callout type="warn" title="Multi-pod fleets need a cross-process sink">
+  Wire a cross-process `TokenStreamSink` (e.g. `@dudousxd/nestjs-agent-transport-redis`'s
+  `RedisTokenStreamSink`) under `durable: true`: the turn runs on whichever worker takes `agent.run`
+  and dispatches its model call from there, so the process writing tokens is generally not the pod
+  holding the SSE connection. A boot warning fires when `durable: true` is on with the default
+  in-process sink.
+</Callout>
+
+<Callout type="info" title="A run journaled by an older release finishes the way it started">
+  Dispatching decides which checkpoint names a turn writes, so the answer comes from the run's own
+  journal (`ctx.patched('agent:dispatched-steps')`), never from configuration: a fresh run dispatches,
+  and a turn already recorded under the in-process `llm:<i>`/`tool:<callId>` names finishes on them.
+  In-flight turns survive the upgrade; what does not follow automatically is that your handlers
+  establish their own context, and that the workers serving the routed groups exist.
+</Callout>
 
 ---
 
 ## Same wire protocol, same frontend
 
-Nothing downstream of `AgentModule` needs to know which runner — or which `dispatchedSteps` setting —
-is active. The `POST /agent/chat` SSE stream, the `POST /agent/tool-call/approve` / `/reject`
-endpoints, and `useAgentChat` on the frontend are identical across all three: only *how* the pause,
-the checkpoint, and the model/tool execution are implemented differs.
+Nothing downstream of `AgentModule` needs to know which runner is active. The `POST /agent/chat` SSE
+stream, the `POST /agent/tool-call/approve` / `/reject` endpoints, and `useAgentChat` on the frontend
+are identical either way: only *how* the pause, the checkpoint, and the model/tool execution are
+implemented differs.
 
-| | Inline (default) | Durable, `dispatchedSteps: false` | Durable, dispatched (default under `durable: true`) |
-|---|---|---|---|
-| The pause on an `action` tool | an in-process runner holds the turn open | a real durable **suspend** via `waitForSignal`, checkpointed to the state store | same as the middle column |
-| Surviving a restart | no — the pending turn is lost | yes — resumes from cache on approval | yes |
-| Where the model/tool call runs | the pod that started the run | the pod that started the run (`localStep`) | whichever worker serves `AgentRunSteps.llm`/`.tool` — may not be the originating pod |
-| Wire protocol | identical | identical | identical |
+| | Inline (default) | Durable |
+|---|---|---|
+| The pause on an `action` tool | an in-process runner holds the turn open | a real durable **suspend** via `waitForSignal`, checkpointed to the state store |
+| Surviving a restart | no — the pending turn is lost | yes — resumes from cache on approval |
+| Where the model/tool call runs | the pod that started the run | whichever worker serves `AgentRunSteps.llm`/`.tool` — may not be the originating pod |
+| What a tool handler may assume | its caller's execution context | nothing; it establishes its own |
+| Wire protocol | identical | identical |
 
-So you can develop against the inline runner locally and get to the production default —
-`durable: true` with dispatched steps — without touching a single tool or frontend component.
+So you can develop against the inline runner locally and move to durable without touching a frontend
+component — and with your tool handlers responsible for their own execution context.
 
 ---
 
@@ -174,8 +192,8 @@ So you can develop against the inline runner locally and get to the production d
 
 - [Runners](/docs/agent/concepts/runners) — `AgentRunner` as the SPI seam, and what "checkpointed
   step" means under the hood.
-- [Configuration](/docs/agent/reference/configuration) — the full `dispatchedSteps` contract and
-  every other durable-related option.
+- [Configuration](/docs/agent/reference/configuration) — `durable` and every other durable-related
+  option.
 - [Diagnostics events](/docs/agent/reference/diagnostics-events) — the `llm.turn`/`tool.execution`
   trace spans, emitted from whichever worker actually executes a dispatched step.
 - [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability) — the full

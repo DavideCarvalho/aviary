@@ -20,9 +20,9 @@ Out of the box the turn runs on an **inline** runner — in-process, no extra de
 workflow: every model and tool call becomes a checkpointed step, so a crash mid-turn replays from
 cache, and human-in-the-loop approval becomes a durable **signal** — the run suspends in the state
 store instead of holding a connection, and resumes when a human approves. Under `durable: true`,
-the turn's model call and tool executions are, by default, **dispatched** as routed durable steps
+the turn's model call and tool executions are **dispatched** as routed durable steps
 (`AgentRunSteps.llm` / `AgentRunSteps.tool`) rather than pinned to the pod that started the run —
-either can land on any worker in the fleet (opt out with `dispatchedSteps: false`). Either way live
+either can land on any worker in the fleet, and there is no option that places them elsewhere. Live
 tokens flow on a separate data plane (a `TokenStreamSink`), so streaming and durability compose
 instead of fighting — but a dispatched turn needs that sink to be **cross-process** (e.g.
 `RedisTokenStreamSink`), since the worker executing the step may not be the pod holding the SSE

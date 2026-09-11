@@ -48,11 +48,14 @@ Every option below is passed to `AgentModule.forRoot({ … })`. `model` and `act
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `durable` | `boolean` | `false` | Run each turn as a durable workflow instead of in-process. Requires importing `AgentDurableModule` from `@dudousxd/nestjs-agent/durable` alongside a configured `DurableModule` — otherwise boot throws a clear error instead of an unresolved-dependency crash. |
-| `dispatchedSteps` | `boolean` | **`true`** when `durable: true`, otherwise inert | Dispatch the turn's model call and tool executions as routed durable steps (`AgentRunSteps.llm` / `AgentRunSteps.tool`) instead of in-process `ctx.localStep`s. Defaults ON under `durable: true` — the run leaves its pod during the two long steps and the llm step gets engine retry, which is the correct production posture; `AgentRunSteps` is always registered regardless of this flag, so the routed groups are never unserved. Set `false` to keep the turn's steps in-process `localStep`s instead. Setting it `true` without `durable: true` throws at module build. See [Inline → durable](/docs/agent/recipes/inline-to-durable). |
+| `durable` | `boolean` | `false` | Run each turn as a durable workflow instead of in-process. The turn's model call and each tool execution are dispatched steps (`AgentRunSteps.llm` / `AgentRunSteps.tool`) — see the callouts below. Requires importing `AgentDurableModule` from `@dudousxd/nestjs-agent/durable` alongside a configured `DurableModule` — otherwise boot throws a clear error instead of an unresolved-dependency crash. |
 
-<Callout type="warn" title="Multi-pod fleets still need a cross-process sink">
-  The cross-process-sink requirement is a property of `durable: true` itself, not of `dispatchedSteps` — even with `dispatchedSteps: false`, the turn already runs on whichever worker takes `agent.run`, which may not be the pod holding the SSE connection. Multi-pod fleets should wire a cross-process `TokenStreamSink` (e.g. `@dudousxd/nestjs-agent-transport-redis`'s `RedisTokenStreamSink`) either way; a boot warning fires when `durable: true` is on with the default in-process sink, naming `dispatchedSteps: false` as the (incomplete) alternative.
+<Callout type="warn" title="Your tool handlers run in a worker, with no caller context">
+  A dispatched step is served by whichever worker takes the routed group, so an `@AiTool` handler is in the same position as any `@Step` handler: nothing of the request that started the turn is ambient there. A handler that reaches for a request-scoped ORM EntityManager, an AsyncLocalStorage tenant or a CLS transaction must establish it — under MikroORM, `@CreateRequestContext()` / `@EnsureRequestContext()` on the handler. Skip it and the call is recorded `failed`, the error goes to the model and the turn completes: for an `action` tool, a human's approval spent on something that never ran. There is no option to place the work elsewhere; this is what `ctx.step` means in [`nestjs-durable`](/docs/durable), whose `ctx.localStep` is the named escape hatch for the workflow body's own bookkeeping.
+</Callout>
+
+<Callout type="warn" title="Multi-pod fleets need a cross-process sink">
+  The turn runs on whichever worker takes `agent.run`, and dispatches its model call from there, so the process writing tokens is generally not the pod holding the SSE connection. Multi-pod fleets must wire a cross-process `TokenStreamSink` (e.g. `@dudousxd/nestjs-agent-transport-redis`'s `RedisTokenStreamSink`); a boot warning fires when `durable: true` is on with the default in-process sink.
 </Callout>
 
 ### Follow-ups
@@ -112,7 +115,6 @@ interface AgentModuleAsyncOptions {
   useFactory: (...args: never[]) => AgentModuleOptions | Promise<AgentModuleOptions>;
   path?: string;
   durable?: boolean;
-  dispatchedSteps?: boolean;
   externalStore?: boolean;
   guards?: Type<CanActivate>[];
   attachmentsUpload?: boolean;
@@ -120,7 +122,7 @@ interface AgentModuleAsyncOptions {
 ```
 
 <Callout type="info" title="Why these fields live outside the factory">
-  `path`, `durable`, `dispatchedSteps`, `guards`, and `attachmentsUpload` are all static wiring metadata — which controllers exist, which routes they expose, and how `AgentRunWorkflow` builds its hooks are all decided at module build time, before the async factory resolves. Passing them on `AgentModuleAsyncOptions` (not inside the resolved `AgentModuleOptions`) is what makes that possible. `dispatchedSteps: true` without `durable: true` throws at module build, same as `forRoot`.
+  `path`, `durable`, `guards`, and `attachmentsUpload` are all static wiring metadata — which controllers exist, which routes they expose, and which runner `AGENT_RUNNER` binds to are all decided at module build time, before the async factory resolves. Passing them on `AgentModuleAsyncOptions` (not inside the resolved `AgentModuleOptions`) is what makes that possible.
 </Callout>
 
 `forRootAsync` always binds `AGENT_STORE` locally from the factory result (its factory reads the resolved options) unless `externalStore: true` — set that to defer to a globally-imported store module (e.g. `MikroOrmAgentStoreModule.forFeature()`) instead of returning `store` from `useFactory`.

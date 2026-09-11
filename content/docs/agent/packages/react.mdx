@@ -133,8 +133,8 @@ const chat = useAgentChat({
 ```
 
 This matters more than it used to: under a durable backend, `AgentModule.forRoot({ durable: true })`
-now dispatches a turn's model call and tool executions as routed durable steps by default
-(`dispatchedSteps` defaults ON, opt out with `dispatchedSteps: false`) — the actual LLM/tool work can
+dispatches a turn's model call and tool executions as routed durable steps — the actual LLM/tool work
+can
 run on a different worker than the pod holding this SSE connection, and results flow back through a
 cross-process token sink (e.g. Redis) instead of an in-process buffer. The `/agent/chat` SSE contract
 this package speaks doesn't change, but a run can keep progressing, or finish, on infrastructure this
