@@ -1,0 +1,40 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "name": "aviary-agent",
+  "homepage": "https://davidecarvalho.github.io/aviary/docs/agent",
+  "items": [
+    {
+      "name": "agent-chat",
+      "type": "registry:block",
+      "title": "Agent Chat",
+      "description": "A full chat surface over useChatTranscript — welcome state with mode pills, a composer card with a context strip, message bubbles, grouped tool cards, a reasoning disclosure, provenance from retrieval, follow-ups and stick-to-bottom.",
+      "author": "Davide Carvalho <https://github.com/DavideCarvalho>",
+      "categories": [
+        "ai",
+        "chat"
+      ],
+      "dependencies": [
+        "@dudousxd/nestjs-agent-react",
+        "ai",
+        "clsx",
+        "tailwind-merge"
+      ]
+    },
+    {
+      "name": "agent-chat-composer",
+      "type": "registry:component",
+      "title": "Agent Chat Composer",
+      "description": "The composer card on its own — growing textarea, attach affordance, a slot for a model picker, one control that submits or cancels the turn in flight, a context strip and mode pills.",
+      "author": "Davide Carvalho <https://github.com/DavideCarvalho>",
+      "categories": [
+        "ai",
+        "chat"
+      ],
+      "dependencies": [
+        "@dudousxd/nestjs-agent-react",
+        "clsx",
+        "tailwind-merge"
+      ]
+    }
+  ]
+}

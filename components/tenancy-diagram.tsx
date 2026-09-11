@@ -10,7 +10,8 @@ const muted = "var(--color-fd-muted-foreground)";
 const card = "var(--color-fd-card)";
 const border = "var(--color-fd-border)";
 const accent = "var(--color-fd-primary)";
-const accentSoft = "color-mix(in srgb, var(--color-fd-primary) 14%, transparent)";
+const accentSoft =
+  "color-mix(in srgb, var(--color-fd-primary) 14%, transparent)";
 const mono = "ui-monospace, SFMono-Regular, Menlo, monospace";
 
 /** A rounded node box with a title, muted subtitle rows, and an optional accent bar. */
@@ -47,7 +48,14 @@ function Node({
         filter="url(#soft)"
       />
       {accented ? (
-        <rect x={x} y={y} width={4} height={h} rx={2} style={{ fill: accent }} />
+        <rect
+          x={x}
+          y={y}
+          width={4}
+          height={h}
+          rx={2}
+          style={{ fill: accent }}
+        />
       ) : null}
       <text
         x={x + 16}

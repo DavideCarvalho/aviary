@@ -11,7 +11,8 @@ const muted = "var(--color-fd-muted-foreground)";
 const card = "var(--color-fd-card)";
 const border = "var(--color-fd-border)";
 const accent = "var(--color-fd-primary)";
-const accentSoft = "color-mix(in srgb, var(--color-fd-primary) 14%, transparent)";
+const accentSoft =
+  "color-mix(in srgb, var(--color-fd-primary) 14%, transparent)";
 const mono = "ui-monospace, SFMono-Regular, Menlo, monospace";
 
 /** A rounded node box with a title, muted subtitle rows, and an optional accent bar. */
@@ -48,9 +49,20 @@ function Node({
         filter="url(#soft)"
       />
       {accented ? (
-        <rect x={x} y={y} width={4} height={h} rx={2} style={{ fill: accent }} />
+        <rect
+          x={x}
+          y={y}
+          width={4}
+          height={h}
+          rx={2}
+          style={{ fill: accent }}
+        />
       ) : null}
-      <text x={x + 16} y={y + 25} style={{ fill: ink, fontSize: 13, fontWeight: 600 }}>
+      <text
+        x={x + 16}
+        y={y + 25}
+        style={{ fill: ink, fontSize: 13, fontWeight: 600 }}
+      >
         {title}
       </text>
       {rows.map((row, i) => (
@@ -226,10 +238,16 @@ function Defs() {
  */
 function Dispatched() {
   return (
-    <svg viewBox="0 0 1000 380" width="100%" role="img" aria-label="Dispatched agent turn flow">
+    <svg
+      viewBox="0 0 1000 380"
+      width="100%"
+      role="img"
+      aria-label="Dispatched agent turn flow"
+    >
       <title>
-        A dispatched agent turn: API pod starts agent.run, AgentRunSteps.llm/.tool execute on any
-        durable worker pod, and a cross-process sink carries tokens back to the SSE connection
+        A dispatched agent turn: API pod starts agent.run,
+        AgentRunSteps.llm/.tool execute on any durable worker pod, and a
+        cross-process sink carries tokens back to the SSE connection
       </title>
       <Defs />
       <Node
@@ -247,9 +265,21 @@ function Dispatched() {
         h={180}
         accented
         title="API pod"
-        rows={["AgentController", "starts workflow agent.run", "holds the SSE connection", "subscribes to the sink"]}
+        rows={[
+          "AgentController",
+          "starts workflow agent.run",
+          "holds the SSE connection",
+          "subscribes to the sink",
+        ]}
       />
-      <Bus x={450} y={150} w={90} h={90} title="Transport" subtitle="durable queue" />
+      <Bus
+        x={450}
+        y={150}
+        w={90}
+        h={90}
+        title="Transport"
+        subtitle="durable queue"
+      />
       <Node
         x={580}
         y={40}
@@ -266,14 +296,28 @@ function Dispatched() {
         title="AgentRunSteps.tool"
         rows={["ctx.step — tool exec", "ANY pod running a", "durable worker"]}
       />
-      <Bus x={830} y={140} w={150} h={100} title="Token sink" subtitle="Redis pub/sub" />
+      <Bus
+        x={830}
+        y={140}
+        w={150}
+        h={100}
+        title="Token sink"
+        subtitle="Redis pub/sub"
+      />
       <Link x1={170} y1={190} x2={210} y2={190} label="HTTP + SSE" dir="both" />
       <Link x1={410} y1={190} x2={450} y2={190} label="start agent.run" />
       <Link x1={540} y1={175} x2={580} y2={100} label="dispatch" />
       <Link x1={540} y1={215} x2={580} y2={280} label="dispatch" />
       <Link x1={790} y1={100} x2={830} y2={170} label="tokens" />
       <Link x1={790} y1={280} x2={830} y2={210} label="tool result" />
-      <ReturnRail x1={905} y1={140} x2={310} y2={100} railY={20} label="subscribe (cross-process)" />
+      <ReturnRail
+        x1={905}
+        y1={140}
+        x2={310}
+        y2={100}
+        railY={20}
+        label="subscribe (cross-process)"
+      />
     </svg>
   );
 }
@@ -288,10 +332,15 @@ function Dispatched() {
  */
 function Hitl() {
   return (
-    <svg viewBox="0 0 820 340" width="100%" role="img" aria-label="Human-in-the-loop signal flow">
+    <svg
+      viewBox="0 0 820 340"
+      width="100%"
+      role="img"
+      aria-label="Human-in-the-loop signal flow"
+    >
       <title>
-        Two decision sources — chat UI and the dashboard's approvals inbox — converge on the same
-        signal that resumes a suspended tool call
+        Two decision sources — chat UI and the dashboard's approvals inbox —
+        converge on the same signal that resumes a suspended tool call
       </title>
       <Defs />
       <Node
@@ -310,7 +359,14 @@ function Hitl() {
         title="Dashboard inbox"
         rows={["AGENT_APPROVAL_PORT", "opts.executedByRef", "console-guarded"]}
       />
-      <Bus x={340} y={100} w={110} h={140} title="Signal" subtitle="tool:<runId>:<callId>" />
+      <Bus
+        x={340}
+        y={100}
+        w={110}
+        h={140}
+        title="Signal"
+        subtitle="tool:<runId>:<callId>"
+      />
       <Node
         x={530}
         y={100}

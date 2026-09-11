@@ -22,8 +22,8 @@ adapter is free to back them with real relations. It covers five concerns across
 
 | Concern | Table | SPI methods |
 |---|---|---|
-| Threads | `agent_thread` | `createThread`, `getThread`, `listThreads`, `softDeleteThread`, `forkThread`, `setTitle`, `setActiveStream`, `ownerOfThread`, `ownerOfActiveStream` |
-| Messages | `agent_message` | `appendMessage`, `truncateFrom` |
+| Threads | `agent_thread` | `createThread`, `getThread`, `listThreads`, `softDeleteThread`, `forkThread`, `setTitle`, `updateThread`, `setActiveStream`, `ownerOfThread`, `ownerOfActiveStream` |
+| Messages | `agent_message` | `appendMessage`, `setMessageToolResults`, `truncateFrom` |
 | Tool calls | `agent_tool_call` | `recordToolCall`, `updateToolCall`, `ownerOfToolCall` |
 | Token usage (ledger) | `agent_token_usage` | `recordUsage`, `quotaToday` |
 | Model pricing | `agent_model_pricing` | read by the governance read-model; written by the separate `AgentPricingStore` SPI (`upsertModelPrice`, `listCurrentPrices`) — see [Cost & Governance](/docs/agent/guides/cost-and-governance#seeding-prices) |
@@ -37,6 +37,7 @@ export interface AgentStore {
   softDeleteThread(threadId: string): Promise<void>;
   forkThread(threadId: string, fromMessageId: string): Promise<ThreadSummary>;
   appendMessage(input: AppendMessageInput): Promise<StoredMessage>;
+  setMessageToolResults(messageId: string, results: ToolResult[]): Promise<void>;
   recordToolCall(input: RecordToolCallInput): Promise<void>;
   recordUsage(input: RecordUsageInput): Promise<void>;
   quotaToday(actorRef: string, day: string): Promise<{ usedTokens: number }>;
@@ -48,6 +49,12 @@ export interface AgentStore {
 }
 ```
 
+A message's tool CALLS are known when it is appended and their outputs are not, so the loop settles
+them afterwards with `setMessageToolResults` — a single write of the turn's complete result list,
+inside a checkpoint the turn already had. Both live on the message because that is where a thread
+reader pairs them: a call whose result is only in `agent_tool_call` renders as a tool still running,
+however long ago the turn finished.
+
 `ownerOfThread`, `ownerOfToolCall`, and `ownerOfActiveStream` resolve the owning `actorRef` (or
 `null` if the row doesn't exist) — the governance endpoints (`/agent/threads/:id`,
 `/agent/tool-call/approve` · `/reject`, `/agent/chat/:runId/cancel`) call these to assert the acting
@@ -58,6 +65,150 @@ delegated sub-agent's own child run) without a client-supplied run id.
 Each usage row carries the cache-aware token counts (`inputTokens`, `outputTokens`,
 `cacheWriteTokens`, `cacheReadTokens`) and an optional provider-reported `costUsd` — the raw material
 the [Cost & Governance](/docs/agent/guides/cost-and-governance) read-model rolls up.
+
+### Which agent answers a thread
+
+A thread carries its own `defaultAgent` (`agent_thread.default_agent`), set through
+`updateThread({ defaultAgent })` — `PATCH /agent/threads/:id` — and cleared with an explicit `null`.
+A `chat()` call that names no agent uses it, ahead of the module's configured `defaultAgent`; a
+`chat()` call that names one still wins. It comes back on every thread summary and detail as
+`defaultAgent: string | null`, and a `forkThread` carries it onto the fork, since a fork continues
+the same conversation.
+
+Both SQL adapters also implement `defaultAgentForThread(threadId)`, a one-column read on the primary
+key. `AgentService` prefers it for exactly this lookup: `getThread` would return the whole transcript
+— every message, every persisted tool output — to answer with one nullable string, which on a 20-turn
+thread with 8 KB tool results is ~170 KB read and discarded per turn. The method is not part of the
+`AgentStore` SPI; it is probed structurally against the `ThreadDefaultAgentReader` shape exported from
+`@dudousxd/nestjs-agent`, and a store that doesn't offer it still answers through the full read.
+
+### What a turn reads off a thread
+
+A turn needs a WINDOW of the thread: its last few messages, the title, and whether the thread has
+ever been answered. `getThread` gives it the transcript instead — every message, every attachment,
+every tool output the thread ever recorded — and the run journals what it loaded, so the same payload
+is re-read and re-parsed on every replay. On a 50-turn thread whose turns each ran a 50 KB tool that
+is ~1.9 MB per load, 97% of it tool results.
+
+Both SQL adapters implement `loadThreadForTurn({ threadId, messageLimit })`:
+
+```ts
+const page = await store.loadThreadForTurn({ threadId, messageLimit: 20 });
+// { title, defaultAgent, hasAssistantMessage, messages }  — oldest first
+```
+
+The bound is the database's (`order by created_at desc limit ?`, reversed for the prompt) over the
+columns a model turn reads; `usage`, `follow_ups` and `run_id` stay in the table. A `messageLimit` of
+`0` reads no messages at all, and an omitted one reads the whole thread.
+
+`hasAssistantMessage` is answered over the whole thread rather than the returned page — it is what a
+thread-start intake asks ("has this conversation been answered before?"), and a thread whose window
+holds only the user's last questions has still been answered. Like `defaultAgentForThread`, the
+method is not part of the `AgentStore` SPI: it is probed structurally, and a store that doesn't offer
+it still answers through the full `getThread` read.
+
+### Which turn asked for a run
+
+A delegation's child run records its parent in `agent_run.parent_run_id` — set from
+`RecordRunStartInput.parentRunId`, which both runners populate for awaited and detached children
+alike. The durable runtime journals the same edge, but only there, and a journal is not what a
+reliability or cost surface reads: without the column a run-row reader cannot roll a child's spend
+up to the turn that asked for it. A **detached** child makes it sharper, since it outlives its
+parent's turn and so is paired by nothing in the transcript either.
+
+A store that persists nothing for it still works — it loses the tree, not the run. Runs recorded
+before the column existed keep it null; the edge for a finished turn lives only in the journal and
+is not backfilled.
+
+### Which turn wrote a message
+
+`AppendMessageInput.runId` records the run that produced the message, and `StoredMessage.runId`
+reads it back. The loop stamps both the user message and every assistant message it writes.
+
+Without it, the only way to attribute a message to a turn is to compare its timestamp against the
+run's `startedAt` — and regenerating breaks that. A regenerate truncates the replaced answer and
+re-answers the **surviving** user message without appending a new one, so the transcript ends up as
+one prompt followed by the newest answer. Walking forward by time then hands the older run the
+replacement's text, scoring one run against another's output.
+
+The field is optional, so a row written before this existed simply has none, and a host that appends
+messages outside a run may omit it. Readers should treat a transcript with no stamp at all as legacy
+and fall back to timestamps, but a stamped transcript holding nothing for a given run as genuinely
+empty for that run — see `GovernanceRunSampleSource` in
+[`-evals`](/docs/agent/packages/evals), which does exactly that.
+
+<Callout type="info" title="Adding the column to a database that already exists">
+The MikroORM adapter heals its own schema at boot (`getUpdateSchemaSQL({ safe: true })` — create and
+add-column only), so `run_id` appears on the next start. On SQLite/libsql, where that diff comes out
+as a table rebuild rather than an `add column`, the heal applies the rebuild as a unit and verifies
+the result, throwing rather than recording a heal that did not land. The Drizzle adapter's `ensureAgentSchema`
+is `CREATE TABLE IF NOT EXISTS` DDL, which is inert against a table that already exists, so it now
+carries an explicit additive-column pass that adds `run_id` when the table predates it.
+</Callout>
+
+---
+
+## Which media a message still references (optional)
+
+`stage()` on an `AttachmentStagingStore` writes bytes at upload time, **before any message exists**.
+A user who attaches a file and then never sends it leaves media in your object store with nothing
+pointing at it — no message, no listing, no sweep. Finding it needs two facts held by different
+owners:
+
+| Who | Knows | Method |
+|---|---|---|
+| The host | Which media it staged, and when | `AttachmentStagingStore.list({ actor, stagedBefore?, limit? })` → `StagedAttachment[]` |
+| The library | Which media a live message still carries | `AgentStore.referencedMediaIds(actorRef, mediaIds)` → `string[]` |
+
+```ts
+referencedMediaIds?(actorRef: string, mediaIds: readonly string[]): Promise<string[]>;
+```
+
+Both are optional, and both are implemented by `-store-mikro-orm`, `-store-drizzle` and
+`InMemoryAgentStore` / `InMemoryAttachmentStagingStore`.
+
+### Running a sweep safely
+
+`AgentService.collectableAttachments` composes the two and returns candidates. It **never deletes
+anything** — the bytes are yours, and so is the decision:
+
+```ts
+const olderThan = new Date(Date.now() - 48 * 60 * 60 * 1000);
+for (const entry of await agents.collectableAttachments(actor, { olderThan })) {
+  await myMediaStore.delete(entry.mediaId);
+}
+```
+
+Three properties are worth knowing before you point that at a production bucket.
+
+**References are re-derived, never latched.** `truncateFrom` deletes messages, and regenerating a
+turn does exactly that — so media that was referenced becomes unreferenced again. A `referenced`
+flag written when a message is sent would never be unset by that delete, and the bytes would be
+pinned for ever. Every call answers from the surviving message rows instead.
+
+**`olderThan` is required and has no default.** Freshly staged media is an upload in flight, not
+garbage; how long one of your composers may sit open with a file attached is your knowledge, not the
+library's. It is pushed down to `list` as `stagedBefore` *and* re-applied to the result, so a store
+that ignores the hint cannot quietly turn a sweep into "delete what the user is about to send".
+
+**An unanswerable query refuses rather than guessing.** If the staging store has no `list`, or the
+`AgentStore` no `referencedMediaIds`, the call raises `501`. Reading silence as "nothing is
+referenced" would hand back every attachment the actor ever sent, marked safe to delete.
+
+Every read is per-actor. Media referenced only by *another* actor's thread reads as unreferenced
+here, so this can never be turned into a probe for what exists in someone else's conversation — and
+because your inventory is per-actor too, the candidate ids are already the caller's own. A
+soft-deleted thread still holds its references: the message rows survive, so the bytes are still
+reachable from stored state. Delete the thread for real and the cascade frees them.
+
+<Callout type="info" title="Nothing to migrate">
+`referencedMediaIds` reads the `attachments` JSON column messages have carried since attachments
+shipped, so an existing database answers correctly the moment you upgrade — no new table, no column,
+no backfill, and no boot-time heal in the path (which also sidesteps the MikroORM-on-SQLite
+add-column caveat in [`store-mikro-orm`](/docs/agent/packages/store-mikro-orm)). A normalized index
+table would query faster and would have reported every attachment written before the backfill as
+unreferenced — the one failure mode worth designing out when the next step is a delete.
+</Callout>
 
 ---
 
@@ -160,6 +311,10 @@ import { ensureAgentSchema } from '@dudousxd/nestjs-agent-store-mikro-orm';
 await ensureAgentSchema(orm); // safe: true by default
 ```
 
+It is fingerprint-gated (a steady-state boot is one cheap read) and it verifies itself: what the heal
+applied is re-diffed, and required structure still pending throws `AgentSchemaHealError` instead of
+writing the fingerprint that would stop later boots from retrying.
+
 The entity set is exported too: `AGENT_ENTITIES` (stamped with `utf8mb4_unicode_ci` for MySQL
 parity) and `agentEntities({ collation })` if you need to omit the collation for SQLite.
 
@@ -205,9 +360,12 @@ The package ships `agentSchema` (the Drizzle tables), `ensureAgentSchema` (the
 `DrizzlePricingStore`.
 
 <Callout type="warn" title="ensureAgentSchema is a quick start, not a migration story">
-`ensureAgentSchema` never drops or alters an existing column, so it can't evolve a table once it
-exists. For production, prefer drizzle-kit migrations over the helper — treat `ensureAgentSchema` as
-the "stand it up with no migration files" path (tests, demos, first boot).
+`ensureAgentSchema` is additive only: `CREATE TABLE IF NOT EXISTS` plus `CREATE INDEX IF NOT EXISTS`,
+and an explicit add-column pass for columns this package introduced after a table shipped (so an
+existing database picks them up on the next boot). It never drops a column, never changes a type, and
+can't express anything else a real migration can. For production, prefer drizzle-kit migrations over
+the helper — treat `ensureAgentSchema` as the "stand it up with no migration files" path (tests,
+demos, first boot). A host on its own migrations owns those additive statements itself.
 </Callout>
 
 </Tab>

@@ -174,13 +174,16 @@ sink.
 
 <Callout type="info" title="A suspend is never mispersisted as a tool failure">
 The durable runner's suspend/continue-as-new signals — thrown when a `waitForSignal` (an `action`
-tool's approval pause, among others) fires — are recognized by the durable runtime's marker-based
-`isWorkflowControlFlowSignal` before they ever reach the loop's tool-catch handling. Earlier releases
-mis-detected this by `instanceof`, which broke under the BullMQ thin worker (a different `Suspend`
-class) and corrupted the run's history on resume; the marker check fixed that across every
-classification site (the workflow's own catch, the loop's `isControlFlowError` hook, and the runner's
-start-suspend swallow). This holds whether the suspending step ran in-process or dispatched, so you
-never need to special-case a suspend in your own tool code.
+tool's approval pause, among others) fires — carry a `Symbol.for('aviary:durable:control-flow')`
+marker, and every classification site keys off that marker rather than `instanceof`: the workflow's
+own catch, the agent loop's tool catch, the transient-retry loop, and the runner's start-suspend
+swallow. `instanceof` would only recognize a signal thrown by the same class the checking code
+imported, which the BullMQ thin worker's separate `Suspend` class is not.
+
+The loop reads the marker off the error **itself**, so this holds even for a host that wires no
+`isControlFlowError` hook — that hook is an override for a runner whose signals carry no marker, not
+the thing that makes detection work. It also holds whether the suspending step ran in-process or
+dispatched, so you never need to special-case a suspend in your own tool code.
 </Callout>
 
 ---
@@ -225,7 +228,9 @@ curl -N http://localhost:3000/agent/chat/$RUN_ID/stream \
   -H 'x-actor-id: u1' -H 'x-actor-role: ADMIN'
 ```
 
-A run can also be cancelled:
+---
+
+## Cancelling a run
 
 ```bash
 curl -X POST http://localhost:3000/agent/chat/$RUN_ID/cancel \
@@ -234,7 +239,70 @@ curl -X POST http://localhost:3000/agent/chat/$RUN_ID/cancel \
 ```
 
 Cancel is ownership-scoped, same as approve/reject: the acting actor must own the run, or the
-request gets a `403` (`404` if the run doesn't exist).
+request gets a `403` (`404` if the run doesn't exist). This is what the Stop control in
+`@dudousxd/nestjs-agent-react` is wired to.
+
+### A cancelled run is its own outcome
+
+Not a failure and not a completion — a third terminal, visible in both places a consumer looks:
+
+| | Where | Value |
+|---|---|---|
+| Store | `AgentStore.recordRunEnd` | `status: 'cancelled'`, with no `errorCode` / `errorMessage` |
+| Stream | the last `AgentStreamEvent` | `{ kind: 'cancelled' }`, then a normal `end()` — never a `fail()` |
+
+That split is the point. A failure rate computed over agent runs must be able to leave a user
+pressing Stop out of it, and a client that retries a failed stream must not retry one the user
+deliberately stopped. A stream that simply ends wrote everything it had; one that ends after a
+`cancelled` frame did not, which is how a reader tells a truncated answer from a complete one.
+
+### Where a run actually stops
+
+The loop reads the cancel flag at the points where stopping is safe and cheap — **between steps,
+before the next model call, and before the turn's tool calls are dispatched** — and unwinds from
+there through the same path a durable suspend uses.
+
+<Callout type="warn" title="A tool already executing is not interrupted">
+  There is no un-executing a side effect. A tool that has started runs to completion and is recorded
+  exactly as it would have been; the cancel is observed at the next point instead. So a cancel that
+  lands mid-tool costs you that one tool, and nothing after it — the turn never makes its next model
+  call, and no further tool is dispatched.
+
+  Abandoning it is not on the table under the durable runner either: a dispatched step dropped
+  mid-flight leaves the journal holding a dispatch whose result never lands.
+</Callout>
+
+### Under each runner
+
+**Inline.** The request is held in-process (this runner is single-replica by construction) and the
+loop observes it at the next safe point. A turn parked on a human is a special case: nobody is going
+to resolve that wait, so `cancel` rejects it outright and the run unwinds through the identical path.
+
+**Durable.** `cancel` calls the runtime's own cancel in its compensating form, which does two things
+at once: it moves the run to `cancelling` — the status the workflow's cancel observation reads — and
+re-drives it, so a turn executing in-process unwinds at its next safe point rather than finishing.
+Child runs (`ctx.child` delegations) cascade with it. A turn parked on `waitForSignal` cannot observe
+anything, because it is suspended inside a checkpoint its journal already holds; the runtime settles
+that one `cancelled` on its own.
+
+<Callout type="info" title="Why the answer is journaled">
+  The loop only ever asks "was this cancelled?" *inside* a checkpoint. The first process to reach a
+  given position writes the answer there, and every later replay reads it back. So a cancel that
+  arrives between two replays is seen at the first position the history does not yet hold — it can
+  never change the branch a replayed position already took, which is what would otherwise make the
+  journal diverge.
+
+  The positions themselves are gated behind `ctx.patched('agent:cancellation')`, so a run already in
+  flight when you deploy this keeps replaying against the sequence it recorded.
+</Callout>
+
+### What settles what
+
+`cancel` settles the run row and the subscriber's stream — both are keyed by the run id alone. The
+thread's `activeStreamId` is released by the run body when it observes the cancel, because only the
+body knows which thread the run was streaming. For the one case the body cannot observe — a turn
+parked on a human under the durable runner — the thread stays marked active until its next turn;
+reattaching to it replays a stream that has already ended.
 
 <Callout type="info" title="A failed durable run surfaces the same way as an inline one">
 Durable runs emit `event: error` on a failure (e.g. quota exceeded) exactly like the inline runner —
@@ -255,6 +323,7 @@ the durable "Workflows" tab for free. See [Cost & Governance](/docs/agent/guides
 
 ## Related
 
+- [Asking the user](/docs/agent/guides/asking-the-user) — the other direction: collecting the scope *before* the work, on the same durable signal
 - [Tools](/docs/agent/guides/tools) — declaring `read` vs `action` tools
 - [Multi-agent](/docs/agent/guides/multi-agent) — a delegated sub-agent is a durable child run
 - [Frontend](/docs/agent/guides/frontend) — rendering the approve/reject prompt in the UI

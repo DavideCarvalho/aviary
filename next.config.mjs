@@ -1,4 +1,4 @@
-import { createMDX } from 'fumadocs-mdx/next';
+import { createMDX } from "fumadocs-mdx/next";
 
 const withMDX = createMDX();
 
@@ -6,11 +6,11 @@ const withMDX = createMDX();
 // so every asset/link must be prefixed with `/<repo>`. The deploy workflow passes
 // this via `actions/configure-pages` (PAGES_BASE_PATH). Empty in local dev so the
 // site works at http://localhost:3000 with no prefix.
-const basePath = process.env.PAGES_BASE_PATH || '';
+const basePath = process.env.PAGES_BASE_PATH || "";
 
 /** @type {import('next').NextConfig} */
 const config = {
-  output: 'export',
+  output: "export",
   reactStrictMode: true,
   basePath,
   // Static export can't run the on-demand Image Optimization server.

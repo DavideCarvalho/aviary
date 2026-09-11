@@ -36,7 +36,8 @@ channel already recorded elsewhere (the generic bridge now records all 8, includ
 Every run also emits four **span-only** events — never as point events on the base channel, only via
 `trace()` on the `:start`/`:end`/`:asyncStart`/`:asyncEnd`/`:error` sub-channels, correlated by
 `traceId = runId`. This is what lets the Telescope TRACES tab render a turn as a nested waterfall
-(llm calls, tool executions, retrieval, follow-ups) with durations and error phases. They're emitted
+(llm calls, tool executions, retrieval, follow-ups, structured-output) with durations and error
+phases. They're emitted
 from *inside* the checkpointed step bodies, so a replayed (cached) step never re-emits — and, for
 dispatched turns (see [Inline → durable](/docs/agent/recipes/inline-to-durable)), from whichever
 worker actually executes the step.
@@ -47,6 +48,7 @@ worker actually executes the step.
 | `tool.execution` | `runId: string`; `toolCallId: string`; `toolName: string`; `toolType: 'read' \| 'action'` |
 | `retrieval` | `runId: string`; `queryLength: number`; `topK: number` |
 | `follow-ups` | `runId: string`; `step: number`; `count: number` |
+| `structured-output` | `runId: string`; `step: number`; `attempt: number` |
 
 Payloads are metadata-only — model id, token counts, tool name/type, step index, query *length* —
 never prompt or output text. `traceLlmTurn`/`traceToolExecution` are exported for remote execution

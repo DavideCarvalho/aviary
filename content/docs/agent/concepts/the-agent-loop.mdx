@@ -49,6 +49,42 @@ A tool call's `kind` decides whether it runs unattended or waits for a human —
 A rejected `action` call doesn't throw — its result (`{ rejected: true, reason }`) is fed back to the
 model like any other tool result, so the model can adapt within the same turn instead of failing it.
 
+## Several tool calls in one turn
+
+A model routinely asks for more than one tool at a time. When **every** call in the turn is a `read`,
+the loop runs their invocations **concurrently** — the turn costs its slowest call, not the sum of
+them. Two independent three-second lookups take three seconds.
+
+Concurrency stops at the invocation. The bookkeeping around it stays strictly in call order:
+
+```
+persist:toolcall:a   persist:toolcall:b     ← claim every call first, in order
+        tool:a               tool:b         ← launched together, in one tick
+persist:toolexec:a   persist:toolexec:b     ← recorded in order, once all have settled
+```
+
+That order is the whole design, not an implementation detail. Under the durable runner the loop body
+is *replayed*, and checkpoint positions are handed out by a counter as the body runs — so a scheme
+that ordered them by whichever tool finished first would produce a different journal on the replay
+than on the original run. Positions are taken on the **call**, before the step's first `await`, so
+launching the batch in one tick pins the block in call order however the tools then settle.
+
+<Callout type="warn" title="Why it is reads only">
+- An **`action`** suspends on a human approval. That is decision time, not I/O, so overlapping what
+  follows it saves nothing — and reserving an execution slot for a call that may still be *rejected*
+  reserves one that the rejection never fills.
+- An **`agent`** delegation is a child workflow. Its parallel form is the durable runtime's own
+  `ctx.all` — one workflow over a reserved block of positions, with the bookkeeping that makes a fan
+  render as a fan — not a set of independent tasks, so it does not ride this path.
+
+A turn with a single call, or one containing an `action` or an `agent` call, runs exactly as it
+always has: one call at a time, start to finish, before the next one is claimed.
+</Callout>
+
+Each call's kind is read from its own `persist:toolcall` checkpoint rather than from the running
+process's tool registry, so every process that replays the turn reaches the same verdict about
+whether it was eligible — including one whose registry never declared the tool.
+
 ## Bounded by `maxSteps`
 
 The loop is a plain bounded iteration, not a "runs until done" open loop:
@@ -63,6 +99,45 @@ for (let i = 0; i < maxSteps; i += 1) {
 and **defaults to 8** when omitted. It exists to stop a
 model that keeps calling tools from running away with an unbounded turn — hitting the ceiling ends
 the turn with whatever text the last step produced.
+
+## What the model is given: the whole thread, unless you bound it
+
+Step 1's "the thread's messages so far" is literal — by default the loop maps **every** message the
+store holds for that thread into the model call, on every step of every turn. That is the right
+default for a thread that ends, and the wrong one for an assistant someone lives in: the prompt grows
+monotonically, each turn costs more than the last, and the thread eventually stops working when the
+transcript passes the model's context limit.
+
+`AgentModule.forRoot({ history: { maxMessages, maxTokens } })` keeps the newest messages that fit,
+and `{ summarize: true }` folds the rest into a leading `system` summary — one extra model call per
+run, billed as a `history_summary` usage row. The window is applied inside the thread load itself, so
+every step of the turn sees the same bounded list **and** the durable journal records the bounded
+list rather than the whole transcript. See
+[Conversation history](/docs/agent/guides/conversation-history).
+
+## Optional: gating what goes out and what comes back
+
+Two seams sit either side of the model call, and neither exists unless you configure it.
+`inputProcessors` rewrite `{ system, messages }` before **every** model call of the turn (the
+transcript grows between steps, so a redactor that only saw the opening prompt would miss whatever a
+tool result brought back). `outputProcessors` see each step's answer and may redact, replace, or
+refuse it outright — a refusal ends the run before the text is streamed, persisted, or carried into
+the next step.
+
+Gating the answer and streaming it token by token are mutually exclusive, so registering an output
+processor switches the turn's model call to a buffered sink; the loop releases it as one `text` frame
+once the chain has passed. See [Input & output processors](/docs/agent/guides/processors) for exactly
+what a subscriber still receives live.
+
+## Optional: an answer with a shape
+
+With `@Agent({ outputSchema })`, the loop makes **one more** call once a step comes back with no tool
+calls — carrying the schema and no tools — and validates the reply against it. It is a separate pass
+rather than a constraint on the turn's own calls because most providers refuse a response format and
+a tool set in the same request, and because skipping it for a tool-less agent would make the turn's
+checkpoint sequence depend on a tool-registry lookup. It writes its own `structured_output` usage
+row, and an invalid reply is repaired a bounded number of times before the run fails with a
+`StructuredOutputError`. See [Structured output](/docs/agent/guides/structured-output).
 
 ## Every turn appends a usage row
 
@@ -84,4 +159,5 @@ an opt-in, separately-costed extra. See [Cost & Governance](/docs/agent/guides/c
 <Cards>
   <Card title="Tools" href="/docs/agent/guides/tools" description="@AiTool classes, read vs action, the handler signature, and the tool context." />
   <Card title="Human-in-the-loop & Durability" href="/docs/agent/guides/human-in-the-loop-and-durability" description="How an action tool's suspend is implemented under each runner." />
+  <Card title="Conversation history" href="/docs/agent/guides/conversation-history" description="Bounding what a turn carries: a message/token window and an optional summary of what it drops." />
 </Cards>

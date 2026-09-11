@@ -47,6 +47,7 @@ AgentModule.forRoot({
 | Tool calls | Builds an SDK `ToolSet` **without** an `execute` function, so the SDK returns tool-calls for the agent loop to run as its own steps — the adapter never executes a tool itself. |
 | Usage | Maps SDK `LanguageModelUsage` to the core `MessageUsage` shape, including cache (`cacheWriteTokens` / `cacheReadTokens`) and reasoning (`reasoningTokens`) breakdowns when the provider reports them. |
 | Cost | Reads a gateway's real reported cost — Vercel AI Gateway's `providerMetadata.gateway.cost`, then OpenRouter's `total_cost` — into `costUsd`. Direct providers (Anthropic/OpenAI/Bedrock direct) report only tokens, so `costUsd` is left `undefined` and the governance read-model estimates instead. See [Cost & Governance](/docs/agent/guides/cost-and-governance). |
+| Structured output | When the turn carries an `outputSchema`, maps it onto `streamText`'s `output: Output.object({ schema })` so the provider constrains generation, and returns the SDK's parsed value as `object`. A refusal to parse (`NoObjectGeneratedError`) is reported as no object rather than rethrown — the agent loop turns the unparsed text into a repairable `StructuredOutputError`. See [Structured output](/docs/agent/guides/structured-output). |
 | Model id | Surfaces `response.modelId` on the result when the SDK reports one, so accounting reflects the model actually used rather than only the configured id. |
 
 ## Tool schemas reach the model as real shapes
@@ -101,9 +102,14 @@ AgentModule.forRoot({
 ```
 
 <Callout type="warn" title="Only safe for URLs the host itself generated">
-This bypasses the SDK's SSRF guard entirely, so it's safe only because agent attachment URLs come
-exclusively from the host's own `AGENT_ATTACHMENT_STAGING` presigner — never from user input. Don't
-point `attachmentFetchDownloader` at a downloader hook that might see a user-supplied URL.
+This bypasses the SDK's SSRF guard entirely, so it is safe only because agent attachment URLs come
+exclusively from the host's own `AGENT_ATTACHMENT_STAGING` presigner — never from user input. That
+is now enforced rather than assumed: `POST /agent/chat` reads only a `mediaId` off each attachment
+and rebuilds the rest through
+[`AttachmentStagingStore.resolve`](/docs/agent/reference/endpoints#attachments), discarding any url
+the request named. What remains yours: a `resolve` implementation that returns a url **it** minted
+(and only for media that actor owns), and not pointing `attachmentFetchDownloader` at some other
+downloader hook that might see a user-supplied URL.
 </Callout>
 
 ## Related

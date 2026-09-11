@@ -171,6 +171,14 @@ full approval and durability mechanics live in
 
 ---
 
+## Several `read` calls at once
+
+When a model asks for more than one tool in a single turn and all of them are `read`s, their
+invocations run **concurrently** — the turn costs its slowest call rather than the sum. A turn that
+contains an `action` or an `agent` call runs one call at a time. Nothing in your handler changes;
+see [The agent loop](/docs/agent/concepts/the-agent-loop#several-tool-calls-in-one-turn) for why the
+line is drawn there.
+
 ## The `ToolHandler` interface
 
 The contract is one method:
@@ -291,10 +299,33 @@ in [Identity & Authorization](/docs/agent/guides/identity-and-authorization).
 
 ---
 
+## Tools you didn't write
+
+A tool does not have to be a class in your codebase. An [MCP](https://modelcontextprotocol.io)
+server's tools can be imported wholesale with
+[`@dudousxd/nestjs-agent-mcp`](/docs/agent/packages/mcp) — they register into the same registry and
+go through every gate on this page. Because their effects are not visible from your repository, an
+imported tool is `kind: 'action'` unless you widen it explicitly.
+
+```ts
+AgentMcpModule.forRoot({
+  servers: [{ name: 'github', transport: { type: 'stdio', command: 'mcp-github' }, roles: ['ADMIN'] }],
+});
+```
+
+The other direction — letting an external MCP client reach *these* tools — is
+[`@dudousxd/nestjs-agent-mcp-server`](/docs/agent/packages/mcp-server). It serves the same registry
+and the same policy, and refuses the kinds that only mean something inside a turn: an `action` tool
+needs a human to approve it, and an MCP caller has no human.
+
+---
+
 ## Related
 
 - [Identity & Authorization](/docs/agent/guides/identity-and-authorization) — `ActorResolver`, the actor, roles vs abilities
 - [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability) — how an `action` tool suspends and resumes
 - [Multi-agent](/docs/agent/guides/multi-agent) — the synthesized `agent`-kind delegate tools
 - [Governed SQL](/docs/agent/guides/governed-sql) — a prebuilt read-only SQL tool
+- [MCP](/docs/agent/packages/mcp) — importing an external MCP server's tools instead of writing a class for each
+- [MCP server](/docs/agent/packages/mcp-server) — the other direction: exposing these same tools to an external MCP client
 - [Getting Started](/docs/agent/getting-started) — install, first tool, first turn

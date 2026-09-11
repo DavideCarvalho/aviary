@@ -6,20 +6,20 @@
 
 import {
   existsSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   renameSync,
   statSync,
   writeFileSync,
-} from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+} from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'out');
-const NAMES = ['opengraph-image', 'twitter-image'];
+const OUT = join(dirname(fileURLToPath(import.meta.url)), "..", "out");
+const NAMES = ["opengraph-image", "twitter-image"];
 
 if (!existsSync(OUT)) {
-  console.error('postbuild-og: no out/ directory');
+  console.error("postbuild-og: no out/ directory");
   process.exit(0);
 }
 
@@ -43,13 +43,15 @@ function walk(dir) {
 const re = /(opengraph-image|twitter-image)\?[A-Za-z0-9]+/g;
 let patched = 0;
 for (const file of walk(OUT)) {
-  if (!file.endsWith('.html')) continue;
-  const before = readFileSync(file, 'utf8');
-  const after = before.replace(re, '$1.png');
+  if (!file.endsWith(".html")) continue;
+  const before = readFileSync(file, "utf8");
+  const after = before.replace(re, "$1.png");
   if (after !== before) {
     writeFileSync(file, after);
     patched += 1;
   }
 }
 
-console.log(`✓ postbuild-og: renamed ${renamed} image(s), patched ${patched} page(s)`);
+console.log(
+  `✓ postbuild-og: renamed ${renamed} image(s), patched ${patched} page(s)`,
+);

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 // Pulls each library's docs into content/docs/<slug>/ (TanStack-style).
 //
 //   node scripts/sync-docs.mjs            # sync all migrated libraries
@@ -9,23 +10,22 @@
 // links to be nested under /docs/<slug>, and turns the top-level meta.json into
 // a sidebar "root" tab carrying the library's name + icon.
 
+import { execFileSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
-} from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { sources } from './docs-sources.mjs';
+} from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { sources } from "./docs-sources.mjs";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const USE_LOCAL = process.env.AVIARY_DOCS_LOCAL === '1';
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const USE_LOCAL = process.env.AVIARY_DOCS_LOCAL === "1";
 const only = process.argv[2];
 
 const selected = only
@@ -37,7 +37,7 @@ if (only && selected.length === 0) {
   process.exit(1);
 }
 if (selected.length === 0) {
-  console.log('· no migrated libraries to sync yet');
+  console.log("· no migrated libraries to sync yet");
   process.exit(0);
 }
 
@@ -56,7 +56,7 @@ function walk(dir) {
  */
 function fetchRepo(src, tmp) {
   if (USE_LOCAL) {
-    const base = join(ROOT, '..', src.repoDir);
+    const base = join(ROOT, "..", src.repoDir);
     if (!existsSync(join(base, src.path))) {
       throw new Error(`local source not found: ${join(base, src.path)}`);
     }
@@ -66,16 +66,28 @@ function fetchRepo(src, tmp) {
   mkdirSync(tmp, { recursive: true });
   const url = `https://github.com/${src.repo}.git`;
   execFileSync(
-    'git',
-    ['clone', '--depth', '1', '--filter=blob:none', '--sparse', '--branch', src.ref, url, tmp],
-    { stdio: ['ignore', 'ignore', 'inherit'] },
+    "git",
+    [
+      "clone",
+      "--depth",
+      "1",
+      "--filter=blob:none",
+      "--sparse",
+      "--branch",
+      src.ref,
+      url,
+      tmp,
+    ],
+    { stdio: ["ignore", "ignore", "inherit"] },
   );
   const checkout = [src.path, src.publicDir].filter(Boolean);
-  execFileSync('git', ['-C', tmp, 'sparse-checkout', 'set', ...checkout], {
-    stdio: ['ignore', 'ignore', 'inherit'],
+  execFileSync("git", ["-C", tmp, "sparse-checkout", "set", ...checkout], {
+    stdio: ["ignore", "ignore", "inherit"],
   });
   if (!existsSync(join(tmp, src.path))) {
-    throw new Error(`docs path "${src.path}" missing in ${src.repo}@${src.ref}`);
+    throw new Error(
+      `docs path "${src.path}" missing in ${src.repo}@${src.ref}`,
+    );
   }
   return tmp;
 }
@@ -102,7 +114,7 @@ function rewriteLinks(content, slug) {
   return content.replaceAll(DOCS_LINK, (_m, open, first) => {
     const seg = first?.slice(1);
     if (seg && SITE_SLUGS.has(seg)) return `${open}/docs${first}`;
-    return `${open}/docs/${slug}${first ?? ''}`;
+    return `${open}/docs/${slug}${first ?? ""}`;
   });
 }
 
@@ -116,15 +128,17 @@ function rewriteAssets(content, slug) {
  * rename it to the library name so the hub reads cleanly. Specific titles are
  * left untouched.
  */
-const GENERIC_TITLE = /^(documentation|docs|introduction|intro|overview|home|readme|getting started)$/i;
+const GENERIC_TITLE =
+  /^(documentation|docs|introduction|intro|overview|home|readme|getting started)$/i;
 function normalizeIndexTitle(dir, src) {
-  const file = join(dir, 'index.mdx');
+  const file = join(dir, "index.mdx");
   if (!existsSync(file)) return false;
-  const text = readFileSync(file, 'utf8');
+  const text = readFileSync(file, "utf8");
   const fm = text.match(/^---\n[\s\S]*?\n---/);
   if (!fm) return false;
   const title = fm[0].match(/^title:\s*(.+?)\s*$/m);
-  if (!title || !GENERIC_TITLE.test(title[1].replace(/['"]/g, '').trim())) return false;
+  if (!title || !GENERIC_TITLE.test(title[1].replace(/['"]/g, "").trim()))
+    return false;
   const patched = fm[0].replace(/^title:\s*.+$/m, `title: ${src.name}`);
   writeFileSync(file, text.replace(fm[0], patched));
   return true;
@@ -132,7 +146,7 @@ function normalizeIndexTitle(dir, src) {
 
 /** Promote the top-level meta.json to a sidebar root tab with name + icon. */
 function transformRootMeta(file, src) {
-  const meta = JSON.parse(readFileSync(file, 'utf8'));
+  const meta = JSON.parse(readFileSync(file, "utf8"));
   // Keep the source's page ordering etc., and make it a root tab carrying the
   // library's own name + icon + description. The explicit `tabs` config in
   // app/docs/layout.tsx adds a "Field guide" entry so the dropdown stays
@@ -151,8 +165,8 @@ let totalFiles = 0;
 let totalLinks = 0;
 
 for (const src of selected) {
-  const dest = join(ROOT, 'content', 'docs', src.slug);
-  const tmp = join(ROOT, '.docs-tmp', src.slug);
+  const dest = join(ROOT, "content", "docs", src.slug);
+  const tmp = join(ROOT, ".docs-tmp", src.slug);
 
   const repo = fetchRepo(src, tmp);
   rmSync(dest, { recursive: true, force: true });
@@ -165,7 +179,7 @@ for (const src of selected) {
   if (src.publicDir) {
     const assetsFrom = join(repo, src.publicDir);
     if (existsSync(assetsFrom)) {
-      const assetsDest = join(ROOT, 'public', 'lib-assets', src.slug);
+      const assetsDest = join(ROOT, "public", "lib-assets", src.slug);
       rmSync(assetsDest, { recursive: true, force: true });
       mkdirSync(assetsDest, { recursive: true });
       cpSync(assetsFrom, assetsDest, { recursive: true });
@@ -178,8 +192,8 @@ for (const src of selected) {
   let files = 0;
   let links = 0;
   for (const file of walk(dest)) {
-    if (file.endsWith('.mdx') || file.endsWith('.md')) {
-      const before = readFileSync(file, 'utf8');
+    if (file.endsWith(".mdx") || file.endsWith(".md")) {
+      const before = readFileSync(file, "utf8");
       let after = rewriteLinks(before, src.slug);
       if (src.publicDir) after = rewriteAssets(after, src.slug);
       links += (before.match(/\]\(\/docs|href="\/docs/g) || []).length;
@@ -189,14 +203,16 @@ for (const src of selected) {
   }
 
   normalizeIndexTitle(dest, src);
-  const rootMeta = join(dest, 'meta.json');
+  const rootMeta = join(dest, "meta.json");
   if (existsSync(rootMeta)) transformRootMeta(rootMeta, src);
 
   totalFiles += files;
   totalLinks += links;
   console.log(
-    `✓ ${src.slug.padEnd(14)} ${files} docs, ${links} links${assets ? `, ${assets} assets` : ''}  (${USE_LOCAL ? 'local' : src.repo + '@' + src.ref})`,
+    `✓ ${src.slug.padEnd(14)} ${files} docs, ${links} links${assets ? `, ${assets} assets` : ""}  (${USE_LOCAL ? "local" : `${src.repo}@${src.ref}`})`,
   );
 }
 
-console.log(`\n✓ synced ${selected.length} librar${selected.length === 1 ? 'y' : 'ies'} · ${totalFiles} files · ${totalLinks} links`);
+console.log(
+  `\n✓ synced ${selected.length} librar${selected.length === 1 ? "y" : "ies"} · ${totalFiles} files · ${totalLinks} links`,
+);

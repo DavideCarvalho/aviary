@@ -24,6 +24,13 @@ interface AgentRunner {
 the `TokenStreamSink` data plane, not through this call. See
 [Architecture](/docs/agent/concepts/architecture) for how the control and data planes split.
 
+`cancel` really stops the run: the loop observes the request between steps, before the next model
+call, and before a turn's tools are dispatched, then unwinds — recording the run `cancelled` (its own
+terminal, not a failure) and ending the stream on a `{ kind: 'cancelled' }` frame. A tool already
+executing is left to finish. See
+[Cancelling a run](/docs/agent/guides/human-in-the-loop-and-durability#cancelling-a-run) for the full
+behaviour, including what each runner does about a turn parked on a human.
+
 ## Inline (default) vs. durable (opt-in)
 
 | | Inline runner (default) | Durable runner (`durable: true`) |
@@ -59,9 +66,46 @@ default**, dispatched as separately-routed durable steps instead (`AgentRunSteps
 respond or a tool takes to run. Set `dispatchedSteps: false` (requires `durable: true`) to opt back
 into the pre-dispatch behavior and keep those two steps as `ctx.localStep`s as well.
 
+A turn that asks for several `read` tools dispatches them **together** — one suspend, N workers busy
+at once, rather than a suspend/resume round trip per call. See
+[The agent loop](/docs/agent/concepts/the-agent-loop#several-tool-calls-in-one-turn) for the ordering
+rules that keep that replay-safe.
+
 Both worker groups are always registered by `AgentDurableModule` regardless of this flag — only
 whether the workflow actually *routes* to them is controlled by `dispatchedSteps` — so a fleet
 never ends up with an unserved worker group after a config change either way.
+
+The workflow routes by the `@Step`-stamped NAME, read off `AgentRunSteps.prototype`, and never holds
+the instance. That matters on the `'http'` surface, which registers the workflow but deliberately
+provides no `AgentRunSteps`: were the branch conditional on having one, the same run would write
+in-process checkpoint names on an http pod and routed ones on an engine pod, and whichever replayed
+second would fail on the mismatch. Which branch a turn takes is a property of the run, not of the
+process replaying it.
+
+<Callout type="info" title="What a checkpoint costs, and the one knob that changes it">
+Each `ctx.localStep` is three statements against the state store: a point read of the checkpoint
+position, a `running` placeholder, and the `completed` row. A plain turn writes around 13 of them, so
+the placeholder alone is about a quarter of the turn's checkpoint traffic.
+
+That placeholder is what makes a step visible **in flight** — in the durable dashboard, and to a
+fresh page load or REST query — rather than appearing only once it finishes. The live SSE view sees
+the start either way; what you'd lose is reload-survivable in-flight visibility, on exactly the steps
+whose failure you would want to look at.
+
+The switch (`trackStepStart`) belongs to the durable **engine**, not to a step, a workflow, or this
+library: it is a `WorkflowEngineDeps` field, applied to every workflow in the process, and
+`nestjs-agent` neither sets it nor could. At `@dudousxd/nestjs-durable@0.34` it is not forwarded from
+`DurableModule.forRoot` either, so a host that wants it off constructs the engine itself. Decide it
+for the deployment, not for the agent.
+</Callout>
+
+<Callout type="warn" title="Turning dispatching on for a fleet that has been running">
+Dispatching changes which checkpoint names a turn writes, so it is gated on `ctx.patched`: a fresh
+run dispatches, and a run already journaled under the in-process names finishes on them. In-flight
+turns survive the upgrade. What does not follow automatically is capacity — a fleet that has been
+running everything in-process starts sending `AgentRunSteps.llm`/`.tool` to whichever workers serve
+those groups. Confirm they are served, and that the sink below is cross-process, before rolling out.
+</Callout>
 
 <Callout type="warn" title="Multi-pod fleets need a cross-process sink">
 Because a dispatched step can execute on any worker, the pod that streams tokens for `llm` may not

@@ -1,8 +1,8 @@
-import Link from 'next/link';
-import { ArrowRight, Plug, Settings2, Sparkles } from 'lucide-react';
-import { AviaryMark, GitHubMark } from '@/components/logo';
-import { libs, stageLabel, totalPackages } from '@/lib/libs';
-import { gitConfig, npmScope } from '@/lib/shared';
+import { ArrowRight, Plug, Settings2, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { AviaryMark, GitHubMark } from "@/components/logo";
+import { libs, stageLabel, totalPackages } from "@/lib/libs";
+import { gitConfig, npmScope } from "@/lib/shared";
 
 export default function HomePage() {
   return (
@@ -12,32 +12,35 @@ export default function HomePage() {
       <div className="aviary-content mx-auto w-full max-w-6xl px-5 sm:px-8">
         {/* ---------------------------------------------------------- Hero */}
         <section className="pt-32 pb-16 sm:pt-40 sm:pb-20 text-center">
-          <p className="aviary-kicker aviary-rise" style={{ animationDelay: '0ms' }}>
+          <p
+            className="aviary-kicker aviary-rise"
+            style={{ animationDelay: "0ms" }}
+          >
             {npmScope} &middot; for NestJS
           </p>
 
           <h1
             className="aviary-rise mx-auto mt-6 max-w-3xl text-balance text-4xl font-medium leading-[1.05] sm:text-6xl"
-            style={{ animationDelay: '60ms' }}
+            style={{ animationDelay: "60ms" }}
           >
-            Libraries that{' '}
-            <span className="italic" style={{ color: 'var(--aviary-primary)' }}>
+            Libraries that{" "}
+            <span className="italic" style={{ color: "var(--aviary-primary)" }}>
               flock together.
             </span>
           </h1>
 
           <p
             className="aviary-rise mx-auto mt-6 max-w-2xl text-balance text-base leading-relaxed text-fd-muted-foreground sm:text-lg"
-            style={{ animationDelay: '120ms' }}
+            style={{ animationDelay: "120ms" }}
           >
-            Aviary is a habitat of plug-n-play, fully-configurable libraries for NestJS —
-            Laravel-grade ergonomics, TanStack-grade composability. Use one. Use all ten.
-            They speak the same language.
+            Aviary is a habitat of plug-n-play, fully-configurable libraries for
+            NestJS — Laravel-grade ergonomics, TanStack-grade composability. Use
+            one. Use all ten. They speak the same language.
           </p>
 
           <div
             className="aviary-rise mt-9 flex flex-wrap items-center justify-center gap-3"
-            style={{ animationDelay: '180ms' }}
+            style={{ animationDelay: "180ms" }}
           >
             <Link href="/docs" className="aviary-cta">
               Open the field guide
@@ -56,7 +59,7 @@ export default function HomePage() {
 
           <div
             className="aviary-rise mt-10 flex flex-wrap items-center justify-center gap-x-8 gap-y-3 text-sm text-fd-muted-foreground"
-            style={{ animationDelay: '240ms' }}
+            style={{ animationDelay: "240ms" }}
           >
             <Stat value={String(libs.length)} label="library families" />
             <Dot />
@@ -89,10 +92,13 @@ export default function HomePage() {
           <div className="mb-8 flex items-end justify-between gap-4">
             <div>
               <p className="aviary-kicker">The collection</p>
-              <h2 className="mt-2 text-2xl font-medium sm:text-3xl">Specimens in the aviary</h2>
+              <h2 className="mt-2 text-2xl font-medium sm:text-3xl">
+                Specimens in the aviary
+              </h2>
             </div>
             <p className="hidden max-w-xs text-right text-sm text-fd-muted-foreground sm:block">
-              Every library is its own field-guide entry. Pick one and follow it to its docs.
+              Every library is its own field-guide entry. Pick one and follow it
+              to its docs.
             </p>
           </div>
 
@@ -108,7 +114,9 @@ export default function HomePage() {
                   <span className="specimen-icon">
                     <lib.icon className="size-5" strokeWidth={1.75} />
                   </span>
-                  <span className="specimen-no">No. {String(i + 1).padStart(2, '0')}</span>
+                  <span className="specimen-no">
+                    No. {String(i + 1).padStart(2, "0")}
+                  </span>
                 </div>
 
                 <div>
@@ -118,13 +126,17 @@ export default function HomePage() {
                   </code>
                 </div>
 
-                <p className="text-sm leading-relaxed text-fd-muted-foreground">{lib.blurb}</p>
+                <p className="text-sm leading-relaxed text-fd-muted-foreground">
+                  {lib.blurb}
+                </p>
 
                 <div className="mt-auto flex items-center justify-between pt-2">
                   <span className="specimen-bird">{lib.bird}</span>
                   <span className="flex items-center gap-2">
                     <span className="aviary-badge">{lib.packages} pkg</span>
-                    <span className="aviary-badge">{stageLabel[lib.stage]}</span>
+                    <span className="aviary-badge">
+                      {stageLabel[lib.stage]}
+                    </span>
                   </span>
                 </div>
               </Link>
@@ -141,7 +153,10 @@ export default function HomePage() {
               <span>— a field guide to the NestJS ecosystem.</span>
             </span>
             <span className="inline-flex items-center gap-1.5 text-xs text-fd-muted-foreground">
-              <Sparkles className="size-3.5" style={{ color: 'var(--aviary-primary)' }} />
+              <Sparkles
+                className="size-3.5"
+                style={{ color: "var(--aviary-primary)" }}
+              />
               Built by dudousxd
             </span>
           </div>
@@ -161,7 +176,9 @@ function Stat({ value, label }: { value: string; label: string }) {
 }
 
 function Dot() {
-  return <span className="hidden size-1 rounded-full bg-fd-border sm:inline-block" />;
+  return (
+    <span className="hidden size-1 rounded-full bg-fd-border sm:inline-block" />
+  );
 }
 
 function Philosophy({
@@ -181,9 +198,9 @@ function Philosophy({
         <span
           className="grid size-10 place-items-center rounded-xl"
           style={{
-            color: 'var(--aviary-primary)',
-            background: 'hsl(346 74% 51% / 0.1)',
-            border: '1px solid hsl(346 74% 51% / 0.22)',
+            color: "var(--aviary-primary)",
+            background: "hsl(346 74% 51% / 0.1)",
+            border: "1px solid hsl(346 74% 51% / 0.22)",
           }}
         >
           {icon}
@@ -191,7 +208,9 @@ function Philosophy({
         <p className="aviary-kicker">{kicker}</p>
       </div>
       <h3 className="mt-5 font-display text-2xl font-medium">{title}</h3>
-      <p className="mt-3 text-sm leading-relaxed text-fd-muted-foreground">{body}</p>
+      <p className="mt-3 text-sm leading-relaxed text-fd-muted-foreground">
+        {body}
+      </p>
     </div>
   );
 }

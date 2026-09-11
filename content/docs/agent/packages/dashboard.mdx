@@ -98,7 +98,11 @@ Beyond spend/usage, the console has three more sections, all fed by the same
 
 - **Reliability** (`#/reliability`) — success/error rate, retries, p50/p95 run duration, a run/failure
   trend, failure breakdown by error code, and a recent-runs table with `promptHash` chips (correlate an
-  error-rate shift with a prompt change) and a 500-char-capped error message. Backed by `GET
+  error-rate shift with a prompt change) and a 500-char-capped error message. The status filter covers
+  every terminal a run settles on, `cancelled` included — a user pressing Stop is not a failure, and a
+  terminal the dropdown omits is one a server-side filter cannot be asked for. A run's drill-down names
+  its `parentRunId` when it has one, which for a detached child is the only link back to the turn that
+  started it. Backed by `GET
   <api>/reliability?from&to` and `GET <api>/runs?limit` (paginated variant: `GET <api>/runs-page`).
 - **Approvals** (`#/approvals`) — the cross-thread HITL inbox: every tool call sitting
   `pending_approval`, oldest first, with a nav badge showing the pending count. Approve/reject posts

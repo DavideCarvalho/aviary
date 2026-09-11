@@ -159,8 +159,8 @@ catalog, quota, cancel, and approvals — in a single `useAgentChat` hook.
 | Method & path | Purpose |
 |---|---|
 | `POST /agent/chat` | Start a turn; streams tokens as SSE |
-| `GET /agent/chat/:runId/stream` | Resume an in-flight run's stream |
-| `POST /agent/chat/:runId/cancel` | Cancel a run |
+| `GET /agent/chat/:runId/stream` | Resume an in-flight run's stream (ownership-scoped: `403` on someone else's run, `404` once it has finished) |
+| `POST /agent/chat/:runId/cancel` | Cancel a run (ownership-scoped, same as above) |
 | `POST /agent/tool-call/approve` · `/reject` | Human-in-the-loop decision for an `action` tool (ownership-scoped: `403` on someone else's tool call) |
 | `GET /agent/threads` · `/:id` · `DELETE /:id` · `POST /:id/fork-from/:messageId` | Thread history (`:id` routes are ownership-scoped: `403`/`404` outside your own threads) |
 | `GET /agent/agents` · `GET /agent/quota/today` | Agent picker catalog & quota |
