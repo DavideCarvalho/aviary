@@ -3,5 +3,15 @@
   "title": "Authz",
   "description": "Laravel-style Gates & Policies for NestJS — a zero-dependency authorization core.",
   "icon": "ShieldCheck",
-  "pages": ["index", "getting-started", "policies", "gates", "enforcement", "current-user", "resource-resolution", "rbac", "ecosystem"]
+  "pages": [
+    "index",
+    "getting-started",
+    "policies",
+    "gates",
+    "enforcement",
+    "current-user",
+    "resource-resolution",
+    "rbac",
+    "ecosystem"
+  ]
 }

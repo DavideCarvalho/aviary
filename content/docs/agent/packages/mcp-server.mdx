@@ -468,7 +468,8 @@ the parts it does not supply.
 | `McpRouteHttpError` | An `HttpException` a route answered a dispatched call with, keeping its status. |
 | `defaultMcpRoutePrincipal` · `McpRoutePrincipal` · `McpRoutePrincipalFactory` | The principal a dispatched request carries, and the seam for replacing it. |
 | `McpRouteDispatcher` · `McpRouteDiscoveryService` | The pipeline dispatch, and the boot walk that finds `@Mcp()` routes. |
-| `routeInputSchema` · `McpRouteInput` · `readNestRoute` · `readRouteParams` | Route declarations → the schema and the arguments derived from them. |
+| `readMcpRouteMetadata` · `defaultRouteToolName` | What a route declared, and the tool name it gets — for predicting an `allowedTools` entry. |
+| `routeInputSchema` · `McpRouteInput` · `readNestRoute` · `NestRoute` · `ROUTE_PARAM` | Route declarations → the schema and the arguments derived from them. |
 | `AGENT_MCP_ROUTE_TOOLS` | The DI token for the registry route-derived tools land in. |
 | `toMcpInputSchema` / `McpInputSchema` | Standard Schema → the JSON Schema `tools/list` advertises. |
 | `AGENT_MCP_SERVER_OPTIONS` | The options DI token. |

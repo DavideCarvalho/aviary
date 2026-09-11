@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 // Interactive checkpoint-and-replay illustration for the durability docs. Hand-authored SVG, no
 // animation deps — plain React state + CSS transitions. Three column-aligned bands read top-to-bottom
@@ -9,33 +9,36 @@
 // Degrades without JS: SSR renders the fully-resolved frame (a readable static diagram). Theme-aware
 // via Fumadocs' `--color-fd-*` variables; respects `prefers-reduced-motion`.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from "react";
 
-const ink = 'var(--color-fd-foreground)';
-const muted = 'var(--color-fd-muted-foreground)';
-const cardBg = 'var(--color-fd-card)';
-const border = 'var(--color-fd-border)';
-const accent = 'var(--color-fd-primary)';
-const mono = 'ui-monospace, SFMono-Regular, Menlo, monospace';
-const RED = '#e5484d';
+const ink = "var(--color-fd-foreground)";
+const muted = "var(--color-fd-muted-foreground)";
+const cardBg = "var(--color-fd-card)";
+const border = "var(--color-fd-border)";
+const accent = "var(--color-fd-primary)";
+const mono = "ui-monospace, SFMono-Regular, Menlo, monospace";
+const RED = "#e5484d";
 
 // Layered surface tints — opaque over the card so they read on any theme.
-const tintAccent = 'color-mix(in srgb, var(--color-fd-primary) 14%, var(--color-fd-card))';
-const tintAccentSoft = 'color-mix(in srgb, var(--color-fd-primary) 7%, var(--color-fd-card))';
-const neutral = 'color-mix(in srgb, var(--color-fd-foreground) 4%, var(--color-fd-card))';
-const tintRed = 'color-mix(in srgb, #e5484d 12%, var(--color-fd-card))';
+const tintAccent =
+  "color-mix(in srgb, var(--color-fd-primary) 14%, var(--color-fd-card))";
+const tintAccentSoft =
+  "color-mix(in srgb, var(--color-fd-primary) 7%, var(--color-fd-card))";
+const neutral =
+  "color-mix(in srgb, var(--color-fd-foreground) 4%, var(--color-fd-card))";
+const tintRed = "color-mix(in srgb, #e5484d 12%, var(--color-fd-card))";
 // Semantic success green — a WRITTEN checkpoint / a saved-output return must read as "safe" on any
 // theme (the aviary docs accent is crimson, where accent-as-done looks like a failure).
-const GREEN = '#30a46c';
-const tintGreen = 'color-mix(in srgb, #30a46c 14%, var(--color-fd-card))';
+const GREEN = "#30a46c";
+const tintGreen = "color-mix(in srgb, #30a46c 14%, var(--color-fd-card))";
 
 const COLS = [188, 418, 648];
 const CELL_W = 176;
 const N = 3;
 const STEPS = [
-  { idx: 'step[0]', name: 'reserveStock' },
-  { idx: 'step[1]', name: 'chargeCard' },
-  { idx: 'step[2]', name: 'ship' },
+  { idx: "step[0]", name: "reserveStock" },
+  { idx: "step[1]", name: "chargeCard" },
+  { idx: "step[2]", name: "ship" },
 ];
 
 // Vertical bands.
@@ -51,35 +54,41 @@ const RP_H = 74;
 const BOUNDARY_X = [96, 303, 533, 748];
 
 type Ev =
-  | { kind: 'exec-first'; step: number }
-  | { kind: 'crash' }
-  | { kind: 'restart' }
-  | { kind: 'return'; step: number }
-  | { kind: 'exec-replay'; step: number };
+  | { kind: "exec-first"; step: number }
+  | { kind: "crash" }
+  | { kind: "restart" }
+  | { kind: "return"; step: number }
+  | { kind: "exec-replay"; step: number };
 
 function buildEvents(checkpointedCount: number): Ev[] {
   const ev: Ev[] = [];
-  for (let i = 0; i < checkpointedCount; i++) ev.push({ kind: 'exec-first', step: i });
-  ev.push({ kind: 'crash' });
-  ev.push({ kind: 'restart' });
+  for (let i = 0; i < checkpointedCount; i++)
+    ev.push({ kind: "exec-first", step: i });
+  ev.push({ kind: "crash" });
+  ev.push({ kind: "restart" });
   for (let i = 0; i < N; i++) {
-    ev.push(i < checkpointedCount ? { kind: 'return', step: i } : { kind: 'exec-replay', step: i });
+    ev.push(
+      i < checkpointedCount
+        ? { kind: "return", step: i }
+        : { kind: "exec-replay", step: i },
+    );
   }
   return ev;
 }
 
 function caption(e: Ev | undefined): string {
-  if (!e) return 'Ready — press play, drag the crash marker, or scrub the timeline.';
+  if (!e)
+    return "Ready — press play, drag the crash marker, or scrub the timeline.";
   switch (e.kind) {
-    case 'exec-first':
+    case "exec-first":
       return `First run: execute ${STEPS[e.step].name} → write checkpoint seq:${e.step}.`;
-    case 'crash':
-      return 'Crash — the process dies mid-run.';
-    case 'restart':
-      return 'Engine restarts and resumes the run from the top.';
-    case 'return':
+    case "crash":
+      return "Crash — the process dies mid-run.";
+    case "restart":
+      return "Engine restarts and resumes the run from the top.";
+    case "return":
       return `Replay: ${STEPS[e.step].name} has a completed checkpoint → return saved output (not re-run).`;
-    case 'exec-replay':
+    case "exec-replay":
       return `Replay: ${STEPS[e.step].name} has no checkpoint → execute for real.`;
   }
 }
@@ -114,15 +123,18 @@ function Card({
   titleFill: string;
   sub: string;
   tip: { title: string; body: string };
-  onTip: (t: { ax: number; ay: number; title: string; body: string } | null) => void;
+  onTip: (
+    t: { ax: number; ay: number; title: string; body: string } | null,
+  ) => void;
 }) {
   const x = cx - CELL_W / 2;
-  const enter = () => onTip({ ax: cx, ay: y, title: tip.title, body: tip.body });
+  const enter = () =>
+    onTip({ ax: cx, ay: y, title: tip.title, body: tip.body });
   const leave = () => onTip(null);
   return (
     <g
       className="rd-anim"
-      style={{ opacity, cursor: 'help' }}
+      style={{ opacity, cursor: "help" }}
       tabIndex={0}
       role="img"
       aria-label={`${tip.title}. ${tip.body}`}
@@ -142,7 +154,7 @@ function Card({
           fill,
           stroke,
           strokeWidth: 1.25,
-          strokeDasharray: dashed ? '5 4' : undefined,
+          strokeDasharray: dashed ? "5 4" : undefined,
         }}
         filter="url(#rd-soft)"
       />
@@ -180,25 +192,28 @@ function Pill({
   cx: number;
   filled: boolean;
   seq: number;
-  onTip: (t: { ax: number; ay: number; title: string; body: string } | null) => void;
+  onTip: (
+    t: { ax: number; ay: number; title: string; body: string } | null,
+  ) => void;
 }) {
   const w = 158;
   const x = cx - w / 2;
   const tip = filled
     ? {
         title: `Checkpoint seq:${seq}`,
-        body: 'Completed — the step’s saved output. On replay it is returned instead of re-running the step.',
+        body: "Completed — the step’s saved output. On replay it is returned instead of re-running the step.",
       }
     : {
         title: `seq:${seq} · no checkpoint`,
-        body: 'Nothing saved here, so replay must execute this step for real.',
+        body: "Nothing saved here, so replay must execute this step for real.",
       };
-  const enter = () => onTip({ ax: cx, ay: ST_Y, title: tip.title, body: tip.body });
+  const enter = () =>
+    onTip({ ax: cx, ay: ST_Y, title: tip.title, body: tip.body });
   const leave = () => onTip(null);
   return (
     <g
       className="rd-anim"
-      style={{ cursor: 'help' }}
+      style={{ cursor: "help" }}
       tabIndex={0}
       role="img"
       aria-label={`${tip.title}. ${tip.body}`}
@@ -218,7 +233,7 @@ function Pill({
           fill: filled ? tintGreen : neutral,
           stroke: filled ? GREEN : border,
           strokeWidth: 1.25,
-          strokeDasharray: filled ? undefined : '5 4',
+          strokeDasharray: filled ? undefined : "5 4",
         }}
       />
       <text
@@ -227,14 +242,19 @@ function Pill({
         className="rd-anim"
         style={{ fill: filled ? GREEN : muted, fontSize: 13 }}
       >
-        {filled ? '✓' : '○'}
+        {filled ? "✓" : "○"}
       </text>
       <text
         x={cx + 12}
         y={ST_Y + ST_H / 2 - 2}
         textAnchor="middle"
         className="rd-anim"
-        style={{ fill: filled ? ink : muted, fontSize: 11, fontWeight: 600, fontFamily: mono }}
+        style={{
+          fill: filled ? ink : muted,
+          fontSize: 11,
+          fontWeight: 600,
+          fontFamily: mono,
+        }}
       >
         seq:{seq}
       </text>
@@ -244,7 +264,7 @@ function Pill({
         textAnchor="middle"
         style={{ fill: muted, fontSize: 9.5, fontFamily: mono }}
       >
-        {filled ? 'saved output' : 'empty'}
+        {filled ? "saved output" : "empty"}
       </text>
     </g>
   );
@@ -273,9 +293,9 @@ function VArrow({
         y1={y1}
         x2={cx}
         y2={y2}
-        className={flow ? 'rd-flow' : undefined}
+        className={flow ? "rd-flow" : undefined}
         style={{ stroke: flow ? accent : muted, strokeWidth: 1.5 }}
-        markerEnd={flow ? 'url(#rd-arrow-on)' : 'url(#rd-arrow)'}
+        markerEnd={flow ? "url(#rd-arrow-on)" : "url(#rd-arrow)"}
       />
       {label ? (
         <text
@@ -296,15 +316,20 @@ export function ReplayDiagram() {
   const [t, setT] = useState(999); // clamped below → SSR/first paint shows the resolved frame
   const [playing, setPlaying] = useState(false);
   const [reduced, setReduced] = useState(false);
-  const [tip, setTip] = useState<{ left: number; top: number; title: string; body: string } | null>(
-    null,
-  );
+  const [tip, setTip] = useState<{
+    left: number;
+    top: number;
+    title: string;
+    body: string;
+  } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   // Map an SVG-space anchor to a pixel position within the wrapper so the HTML tooltip stays crisp
   // (it doesn't scale with the SVG) and sits centred just above the hovered element.
-  function onTip(t: { ax: number; ay: number; title: string; body: string } | null) {
+  function onTip(
+    t: { ax: number; ay: number; title: string; body: string } | null,
+  ) {
     if (!t) {
       setTip(null);
       return;
@@ -326,11 +351,11 @@ export function ReplayDiagram() {
   const tc = Math.min(t, events.length);
 
   useEffect(() => {
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     const on = () => setReduced(mq.matches);
     on();
-    mq.addEventListener('change', on);
-    return () => mq.removeEventListener('change', on);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
   }, []);
 
   useEffect(() => {
@@ -339,7 +364,10 @@ export function ReplayDiagram() {
       setPlaying(false);
       return;
     }
-    const id = setTimeout(() => setT((v) => Math.min(events.length, v + 1)), reduced ? 320 : 900);
+    const id = setTimeout(
+      () => setT((v) => Math.min(events.length, v + 1)),
+      reduced ? 320 : 900,
+    );
     return () => clearTimeout(id);
   }, [playing, tc, events.length, reduced]);
 
@@ -372,18 +400,18 @@ export function ReplayDiagram() {
     e.preventDefault();
     const move = (ev: PointerEvent) => dragCrash(ev.clientX);
     const up = () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
     };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
   }
 
   function onHandleKey(e: React.KeyboardEvent) {
-    if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+    if (e.key === "ArrowRight" || e.key === "ArrowUp") {
       e.preventDefault();
       resetTo(Math.min(N, checkpointed + 1));
-    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
       e.preventDefault();
       resetTo(Math.max(0, checkpointed - 1));
     }
@@ -391,33 +419,40 @@ export function ReplayDiagram() {
 
   const applied = events.slice(0, tc);
   const has = (pred: (e: Ev) => boolean) => applied.some(pred);
-  const firstDone = (i: number) => has((e) => e.kind === 'exec-first' && e.step === i);
-  const returned = (i: number) => has((e) => e.kind === 'return' && e.step === i);
-  const replayed = (i: number) => has((e) => e.kind === 'exec-replay' && e.step === i);
+  const firstDone = (i: number) =>
+    has((e) => e.kind === "exec-first" && e.step === i);
+  const returned = (i: number) =>
+    has((e) => e.kind === "return" && e.step === i);
+  const replayed = (i: number) =>
+    has((e) => e.kind === "exec-replay" && e.step === i);
   const storeFilled = (i: number) => firstDone(i) || replayed(i);
-  const crashed = has((e) => e.kind === 'crash');
-  const restarted = has((e) => e.kind === 'restart');
-  const phase: 'first' | 'crash' | 'replay' = !crashed ? 'first' : !restarted ? 'crash' : 'replay';
+  const crashed = has((e) => e.kind === "crash");
+  const restarted = has((e) => e.kind === "restart");
+  const phase: "first" | "crash" | "replay" = !crashed
+    ? "first"
+    : !restarted
+      ? "crash"
+      : "replay";
   const current = tc > 0 ? events[tc - 1] : undefined;
   const crashX = BOUNDARY_X[checkpointed];
 
   const btn = {
-    font: 'inherit',
+    font: "inherit",
     fontSize: 13,
     lineHeight: 1,
-    color: 'var(--color-fd-foreground)',
-    background: 'transparent',
-    border: 'none',
+    color: "var(--color-fd-foreground)",
+    background: "transparent",
+    border: "none",
     borderRadius: 7,
-    padding: '7px 10px',
-    cursor: 'pointer',
+    padding: "7px 10px",
+    cursor: "pointer",
   } as const;
   const group = {
-    display: 'inline-flex',
-    alignItems: 'center',
+    display: "inline-flex",
+    alignItems: "center",
     gap: 2,
-    background: 'var(--color-fd-card)',
-    border: '1px solid var(--color-fd-border)',
+    background: "var(--color-fd-card)",
+    border: "1px solid var(--color-fd-border)",
     borderRadius: 9,
     padding: 2,
   } as const;
@@ -438,7 +473,7 @@ export function ReplayDiagram() {
         @media (prefers-reduced-motion: reduce) { .rd-anim { transition: none } .rd-ping, .rd-flow { animation: none } .rd-ping { opacity: 0 } }
       `}</style>
 
-      <div ref={wrapRef} style={{ position: 'relative' }}>
+      <div ref={wrapRef} style={{ position: "relative" }}>
         <svg
           ref={svgRef}
           viewBox="0 0 800 340"
@@ -447,9 +482,10 @@ export function ReplayDiagram() {
           aria-label="Interactive checkpoint and deterministic replay across a crash"
         >
           <title>
-            The first run executes each step and writes a checkpoint; after a crash, replay returns
-            the saved output for completed checkpoints and executes only the step that has none.
-            Drag the crash marker to change how many checkpoints exist before the crash.
+            The first run executes each step and writes a checkpoint; after a
+            crash, replay returns the saved output for completed checkpoints and
+            executes only the step that has none. Drag the crash marker to
+            change how many checkpoints exist before the crash.
           </title>
           <defs>
             <marker
@@ -475,7 +511,12 @@ export function ReplayDiagram() {
               <path d="M0,0 L10,5 L0,10 z" style={{ fill: accent }} />
             </marker>
             <filter id="rd-soft" x="-10%" y="-10%" width="120%" height="140%">
-              <feDropShadow dx="0" dy="3" stdDeviation="5" floodOpacity="0.10" />
+              <feDropShadow
+                dx="0"
+                dy="3"
+                stdDeviation="5"
+                floodOpacity="0.10"
+              />
             </filter>
           </defs>
 
@@ -505,28 +546,48 @@ export function ReplayDiagram() {
           <text
             x={14}
             y={FR_Y + FR_H / 2 - 5}
-            style={{ fill: muted, fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}
+            style={{
+              fill: muted,
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: 0.5,
+            }}
           >
             FIRST
           </text>
           <text
             x={14}
             y={FR_Y + FR_H / 2 + 9}
-            style={{ fill: muted, fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}
+            style={{
+              fill: muted,
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: 0.5,
+            }}
           >
             RUN
           </text>
           <text
             x={14}
             y={ST_Y + ST_H / 2 + 3}
-            style={{ fill: muted, fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}
+            style={{
+              fill: muted,
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: 0.5,
+            }}
           >
             STORE
           </text>
           <text
             x={14}
             y={RP_Y + RP_H / 2 - 5}
-            style={{ fill: muted, fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}
+            style={{
+              fill: muted,
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: 0.5,
+            }}
           >
             REPLAY
           </text>
@@ -539,7 +600,10 @@ export function ReplayDiagram() {
           </text>
 
           {/* First-run band. */}
-          <g className="rd-anim" style={{ opacity: phase === 'replay' ? 0.55 : 1 }}>
+          <g
+            className="rd-anim"
+            style={{ opacity: phase === "replay" ? 0.55 : 1 }}
+          >
             {STEPS.map((step, i) => {
               if (i >= checkpointed) {
                 return (
@@ -560,7 +624,7 @@ export function ReplayDiagram() {
                     onTip={onTip}
                     tip={{
                       title: `${step.idx} · not reached`,
-                      body: 'The crash happened before this step ran, so it never wrote a checkpoint.',
+                      body: "The crash happened before this step ran, so it never wrote a checkpoint.",
                     }}
                   />
                 );
@@ -576,7 +640,7 @@ export function ReplayDiagram() {
                   stroke={on ? accent : border}
                   dashed={!on}
                   opacity={on ? 1 : 0.6}
-                  glyph={on ? '▸' : '○'}
+                  glyph={on ? "▸" : "○"}
                   glyphFill={on ? accent : muted}
                   title="execute"
                   titleFill={on ? ink : muted}
@@ -603,7 +667,10 @@ export function ReplayDiagram() {
           ))}
 
           {/* Replay band. */}
-          <g className="rd-anim" style={{ opacity: phase === 'first' ? 0.4 : 1 }}>
+          <g
+            className="rd-anim"
+            style={{ opacity: phase === "first" ? 0.4 : 1 }}
+          >
             {STEPS.map((step, i) => {
               if (i < checkpointed) {
                 const on = returned(i);
@@ -625,7 +692,7 @@ export function ReplayDiagram() {
                     onTip={onTip}
                     tip={{
                       title: `${step.idx} · replay`,
-                      body: 'A completed checkpoint exists, so the saved output is returned. The step body does not run again.',
+                      body: "A completed checkpoint exists, so the saved output is returned. The step body does not run again.",
                     }}
                   />
                 );
@@ -641,7 +708,7 @@ export function ReplayDiagram() {
                   stroke={on ? accent : border}
                   dashed={!on}
                   opacity={on ? 1 : 0.6}
-                  glyph={on ? '▸' : '○'}
+                  glyph={on ? "▸" : "○"}
                   glyphFill={on ? accent : muted}
                   title="execute for real"
                   titleFill={on ? ink : muted}
@@ -664,17 +731,17 @@ export function ReplayDiagram() {
                   cx={COLS[i]}
                   y1={FR_Y + FR_H}
                   y2={ST_Y}
-                  label={i === 0 ? 'write' : undefined}
+                  label={i === 0 ? "write" : undefined}
                   shown={firstDone(i)}
-                  flow={current?.kind === 'exec-first' && current.step === i}
+                  flow={current?.kind === "exec-first" && current.step === i}
                 />
                 <VArrow
                   cx={COLS[i]}
                   y1={ST_Y + ST_H}
                   y2={RP_Y}
-                  label={i === 0 ? 'return' : undefined}
+                  label={i === 0 ? "return" : undefined}
                   shown={returned(i)}
-                  flow={current?.kind === 'return' && current.step === i}
+                  flow={current?.kind === "return" && current.step === i}
                 />
               </g>
             ) : (
@@ -684,22 +751,23 @@ export function ReplayDiagram() {
                 y1={RP_Y}
                 y2={ST_Y + ST_H}
                 shown={replayed(i)}
-                flow={current?.kind === 'exec-replay' && current.step === i}
+                flow={current?.kind === "exec-replay" && current.step === i}
               />
             ),
           )}
 
           {/* Ping ring on the step the current beat executed. */}
-          {current && (current.kind === 'exec-first' || current.kind === 'exec-replay') ? (
+          {current &&
+          (current.kind === "exec-first" || current.kind === "exec-replay") ? (
             <rect
               key={`ping-${tc}`}
               className="rd-ping"
               x={COLS[current.step] - CELL_W / 2 - 3}
-              y={(current.kind === 'exec-first' ? FR_Y : RP_Y) - 3}
+              y={(current.kind === "exec-first" ? FR_Y : RP_Y) - 3}
               width={CELL_W + 6}
-              height={(current.kind === 'exec-first' ? FR_H : RP_H) + 6}
+              height={(current.kind === "exec-first" ? FR_H : RP_H) + 6}
               rx={16}
-              style={{ fill: 'none', stroke: accent, strokeWidth: 2 }}
+              style={{ fill: "none", stroke: accent, strokeWidth: 2 }}
             />
           ) : null}
 
@@ -717,8 +785,8 @@ export function ReplayDiagram() {
               onTip({
                 ax: crashX,
                 ay: FR_Y - 32,
-                title: 'Crash point — drag me',
-                body: 'Choose when the process dies. Only steps checkpointed before the crash are skipped on replay; the rest re-run.',
+                title: "Crash point — drag me",
+                body: "Choose when the process dies. Only steps checkpointed before the crash are skipped on replay; the rest re-run.",
               })
             }
             onMouseLeave={() => onTip(null)}
@@ -726,12 +794,12 @@ export function ReplayDiagram() {
               onTip({
                 ax: crashX,
                 ay: FR_Y - 32,
-                title: 'Crash point — arrow keys move me',
-                body: 'Choose when the process dies. Only steps checkpointed before the crash are skipped on replay; the rest re-run.',
+                title: "Crash point — arrow keys move me",
+                body: "Choose when the process dies. Only steps checkpointed before the crash are skipped on replay; the rest re-run.",
               })
             }
             onBlur={() => onTip(null)}
-            style={{ cursor: 'ew-resize', outline: 'none' }}
+            style={{ cursor: "ew-resize", outline: "none" }}
             className="rd-anim"
           >
             {/* Jagged lightning fault line — a vector rupture, no emoji. */}
@@ -739,12 +807,12 @@ export function ReplayDiagram() {
               d={`M ${crashX} ${FR_Y - 6} L ${crashX - 5} ${FR_Y + 12} L ${crashX + 5} ${FR_Y + 30} L ${crashX - 5} ${FR_Y + 48} L ${crashX + 5} ${FR_Y + 62} L ${crashX} ${FR_Y + FR_H + 6}`}
               className="rd-anim"
               style={{
-                fill: 'none',
+                fill: "none",
                 stroke: RED,
                 strokeWidth: 2,
-                strokeLinejoin: 'round',
-                strokeLinecap: 'round',
-                opacity: phase === 'crash' ? 1 : 0.85,
+                strokeLinejoin: "round",
+                strokeLinecap: "round",
+                opacity: phase === "crash" ? 1 : 0.85,
               }}
             />
             {/* Handle tab: a drawn lightning bolt + label. */}
@@ -765,7 +833,12 @@ export function ReplayDiagram() {
               x={crashX + 6}
               y={FR_Y - 16}
               textAnchor="middle"
-              style={{ fill: RED, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.6 }}
+              style={{
+                fill: RED,
+                fontSize: 10.5,
+                fontWeight: 700,
+                letterSpacing: 0.6,
+              }}
             >
               crash
             </text>
@@ -774,39 +847,43 @@ export function ReplayDiagram() {
               y={FR_Y - 34}
               width={44}
               height={FR_H + 48}
-              style={{ fill: 'transparent' }}
+              style={{ fill: "transparent" }}
             />
           </g>
         </svg>
         {tip ? (
           <div
             style={{
-              position: 'absolute',
+              position: "absolute",
               left: tip.left,
               top: tip.top,
-              transform: 'translate(-50%, calc(-100% - 12px))',
+              transform: "translate(-50%, calc(-100% - 12px))",
               width: 216,
-              pointerEvents: 'none',
+              pointerEvents: "none",
               zIndex: 5,
-              background: 'var(--color-fd-card)',
-              border: '1px solid var(--color-fd-border)',
+              background: "var(--color-fd-card)",
+              border: "1px solid var(--color-fd-border)",
               borderRadius: 10,
-              padding: '8px 11px',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+              padding: "8px 11px",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
             }}
           >
             <div
               style={{
                 fontSize: 12.5,
                 fontWeight: 700,
-                color: 'var(--color-fd-foreground)',
+                color: "var(--color-fd-foreground)",
                 marginBottom: 3,
               }}
             >
               {tip.title}
             </div>
             <div
-              style={{ fontSize: 11.5, lineHeight: 1.4, color: 'var(--color-fd-muted-foreground)' }}
+              style={{
+                fontSize: 11.5,
+                lineHeight: 1.4,
+                color: "var(--color-fd-muted-foreground)",
+              }}
             >
               {tip.body}
             </div>
@@ -816,19 +893,25 @@ export function ReplayDiagram() {
 
       {/* Controls. */}
       <div
-        style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 14 }}
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: 10,
+          marginTop: 14,
+        }}
       >
         <div style={group}>
           <button
             type="button"
             style={btn}
-            aria-label={playing ? 'Pause' : 'Play'}
+            aria-label={playing ? "Pause" : "Play"}
             onClick={() => {
               if (tc >= events.length) setT(0);
               setPlaying((p) => !p);
             }}
           >
-            {playing ? '⏸' : '▶'} {playing ? 'Pause' : 'Play'}
+            {playing ? "⏸" : "▶"} {playing ? "Pause" : "Play"}
           </button>
           <button
             type="button"
@@ -836,7 +919,9 @@ export function ReplayDiagram() {
             aria-label="Step forward"
             onClick={() => {
               setPlaying(false);
-              setT((v) => Math.min(events.length, Math.min(v, events.length) + 1));
+              setT((v) =>
+                Math.min(events.length, Math.min(v, events.length) + 1),
+              );
             }}
           >
             ⏭
@@ -864,15 +949,24 @@ export function ReplayDiagram() {
             setPlaying(false);
             setT(Number(e.target.value));
           }}
-          style={{ flex: '1 1 120px', minWidth: 110, accentColor: 'var(--color-fd-primary)' }}
+          style={{
+            flex: "1 1 120px",
+            minWidth: 110,
+            accentColor: "var(--color-fd-primary)",
+          }}
         />
 
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 11.5, color: 'var(--color-fd-muted-foreground)' }}>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span
+            style={{
+              fontSize: 11.5,
+              color: "var(--color-fd-muted-foreground)",
+            }}
+          >
             Crash after
           </span>
           <div style={group}>
-            {['0', '1', '2', '3'].map((n, c) => (
+            {["0", "1", "2", "3"].map((n, c) => (
               <button
                 key={n}
                 type="button"
@@ -881,7 +975,7 @@ export function ReplayDiagram() {
                 aria-pressed={checkpointed === c}
                 onClick={() => resetTo(c)}
               >
-                {c === 0 ? 'none' : n}
+                {c === 0 ? "none" : n}
               </button>
             ))}
           </div>

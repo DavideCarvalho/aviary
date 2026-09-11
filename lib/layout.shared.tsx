@@ -1,21 +1,21 @@
-import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
-import { AviaryWordmark } from '@/components/logo';
-import { gitConfig } from './shared';
+import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
+import { AviaryWordmark } from "@/components/logo";
+import { gitConfig } from "./shared";
 
 export function baseOptions(): BaseLayoutProps {
   return {
     nav: {
       title: <AviaryWordmark />,
-      transparentMode: 'top',
+      transparentMode: "top",
     },
     links: [
       {
-        text: 'Field guide',
-        url: '/docs',
-        active: 'nested-url',
+        text: "Field guide",
+        url: "/docs",
+        active: "nested-url",
         // Top navbar only — the docs sidebar already reaches the hub via the
         // library dropdown, so don't duplicate it there.
-        on: 'nav',
+        on: "nav",
       },
     ],
     githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,

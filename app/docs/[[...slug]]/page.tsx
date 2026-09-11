@@ -1,4 +1,3 @@
-import { getPageImage, getPageMarkdownUrl, source } from '@/lib/source';
 import {
   DocsBody,
   DocsDescription,
@@ -6,14 +5,15 @@ import {
   DocsTitle,
   MarkdownCopyButton,
   ViewOptionsPopover,
-} from 'fumadocs-ui/layouts/docs/page';
-import { notFound } from 'next/navigation';
-import { getMDXComponents } from '@/components/mdx';
-import type { Metadata } from 'next';
-import { createRelativeLink } from 'fumadocs-ui/mdx';
-import { gitConfig } from '@/lib/shared';
+} from "fumadocs-ui/layouts/docs/page";
+import { createRelativeLink } from "fumadocs-ui/mdx";
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import { getMDXComponents } from "@/components/mdx";
+import { gitConfig } from "@/lib/shared";
+import { getPageImage, getPageMarkdownUrl, source } from "@/lib/source";
 
-export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
+export default async function Page(props: PageProps<"/docs/[[...slug]]">) {
   const params = await props.params;
   const page = source.getPage(params.slug);
   if (!page) notFound();
@@ -24,7 +24,9 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
       <DocsTitle>{page.data.title}</DocsTitle>
-      <DocsDescription className="mb-0">{page.data.description}</DocsDescription>
+      <DocsDescription className="mb-0">
+        {page.data.description}
+      </DocsDescription>
       <div className="flex flex-row gap-2 items-center border-b pb-6">
         <MarkdownCopyButton markdownUrl={markdownUrl} />
         <ViewOptionsPopover
@@ -48,7 +50,9 @@ export async function generateStaticParams() {
   return source.generateParams();
 }
 
-export async function generateMetadata(props: PageProps<'/docs/[[...slug]]'>): Promise<Metadata> {
+export async function generateMetadata(
+  props: PageProps<"/docs/[[...slug]]">,
+): Promise<Metadata> {
   const params = await props.params;
   const page = source.getPage(params.slug);
   if (!page) notFound();
@@ -58,7 +62,12 @@ export async function generateMetadata(props: PageProps<'/docs/[[...slug]]'>): P
   // image by URL); bump it whenever the OG card design changes. width/height
   // make scrapers render the full 1200×630 landscape card instead of cropping
   // to a square thumbnail (which cut off the specimen on the right).
-  const image = { url: `${getPageImage(page).url}?v=2`, width: 1200, height: 630, alt: title };
+  const image = {
+    url: `${getPageImage(page).url}?v=2`,
+    width: 1200,
+    height: 630,
+    alt: title,
+  };
 
   return {
     title: page.data.title,
@@ -67,13 +76,13 @@ export async function generateMetadata(props: PageProps<'/docs/[[...slug]]'>): P
     // Slack) and Twitter card, so every platform shows this page's own title,
     // description and preview image instead of the site-wide one.
     openGraph: {
-      type: 'article',
+      type: "article",
       title,
       description: page.data.description,
       images: [image],
     },
     twitter: {
-      card: 'summary_large_image',
+      card: "summary_large_image",
       title,
       description: page.data.description,
       images: [image],

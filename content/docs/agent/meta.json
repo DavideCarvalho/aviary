@@ -1,6 +1,14 @@
 {
   "title": "Agent",
-  "pages": ["index", "getting-started", "concepts", "guides", "packages", "recipes", "reference"],
+  "pages": [
+    "index",
+    "getting-started",
+    "concepts",
+    "guides",
+    "packages",
+    "recipes",
+    "reference"
+  ],
   "root": true,
   "description": "A governed AI agent for NestJS — chat + tools + RBAC + quota + HITL, each turn an optionally-durable workflow.",
   "icon": "Bot"

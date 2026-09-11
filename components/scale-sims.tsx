@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
 // Scale-story companions to the queue sims: FanoutSim (ctx.all scattering children and
 // joining on all results), RateLimitSim (a fixed-window rate gate refilling every
 // second), and AdaptiveSim (a worker whose concurrency limit breathes with load).
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from "react";
 import {
   arcPos,
   drawBox,
@@ -12,16 +12,16 @@ import {
   drawPulses,
   type Pulse,
   pushTrail,
-  setupSim,
   SIM_AMBER,
   SIM_GREEN,
   SIM_RED,
   SIM_W,
   SimFigure,
+  setupSim,
   simBtn,
   type Trail,
   useSimCanvas,
-} from './queue-sim';
+} from "./queue-sim";
 
 // ── FanoutSim ────────────────────────────────────────────────────────────────
 // ctx.all: one parent scatters N children across parallel lanes, every child runs
@@ -35,7 +35,7 @@ const F_SLOT_X = 460;
 const F_JOIN = { x: 690, y: 160 };
 const F_DONE = { x: 840, y: 160 };
 
-type FPhase = 'fanout' | 'working' | 'toJoin' | 'joined' | 'gone';
+type FPhase = "fanout" | "working" | "toJoin" | "joined" | "gone";
 
 type FChild = {
   phase: FPhase;
@@ -70,7 +70,7 @@ export function FanoutSim() {
 
     const pulses: Pulse[] = [];
     let children: FChild[] = [];
-    let stage: 'scatter' | 'gather' | 'settle' | 'rest' = 'rest';
+    let stage: "scatter" | "gather" | "settle" | "rest" = "rest";
     let restT = 1; // start a wave immediately
     let settleT = 0;
     let batchFailed = false;
@@ -88,7 +88,7 @@ export function FanoutSim() {
       const n = countRef.current;
       const failIdx = failRef.current ? Math.floor(Math.random() * n) : -1;
       children = Array.from({ length: n }, (_, i) => ({
-        phase: 'fanout' as FPhase,
+        phase: "fanout" as FPhase,
         x: F_PARENT.x + 44,
         y: F_PARENT.y,
         fromX: F_PARENT.x + 44,
@@ -100,7 +100,7 @@ export function FanoutSim() {
         trail: [],
       }));
       batchFailed = failIdx >= 0;
-      stage = 'scatter';
+      stage = "scatter";
     }
 
     function tick(now: number) {
@@ -112,7 +112,7 @@ export function FanoutSim() {
       }
       const dt = dtMs / 1000;
 
-      if (stage === 'rest') {
+      if (stage === "rest") {
         restT += dt;
         if (restT > 1.2) {
           restT = 0;
@@ -122,69 +122,102 @@ export function FanoutSim() {
 
       for (const child of children) {
         switch (child.phase) {
-          case 'fanout': {
+          case "fanout": {
             child.t += 2.0 * dt;
             if (child.t >= 1) {
-              child.phase = 'working';
+              child.phase = "working";
               child.x = F_SLOT_X;
               child.y = child.laneY;
               child.t = 0;
               child.trail.length = 0;
             } else {
-              const p = arcPos(child.fromX, child.fromY, F_SLOT_X, child.laneY, child.t, (child.laneY - F_PARENT.y) * -0.18);
+              const p = arcPos(
+                child.fromX,
+                child.fromY,
+                F_SLOT_X,
+                child.laneY,
+                child.t,
+                (child.laneY - F_PARENT.y) * -0.18,
+              );
               pushTrail(child.trail, child.x, child.y);
               child.x = p.x;
               child.y = p.y;
             }
             break;
           }
-          case 'working': {
+          case "working": {
             child.t += dtMs / child.workMs;
             if (child.t >= 1) {
               if (child.failed) {
-                pulses.push({ x: F_SLOT_X, y: child.laneY, t: 0, color: SIM_RED });
+                pulses.push({
+                  x: F_SLOT_X,
+                  y: child.laneY,
+                  t: 0,
+                  color: SIM_RED,
+                });
               }
-              child.phase = 'toJoin';
+              child.phase = "toJoin";
               child.fromX = child.x;
               child.fromY = child.y;
               child.t = 0;
             }
             break;
           }
-          case 'toJoin': {
+          case "toJoin": {
             child.t += 2.2 * dt;
             if (child.t >= 1) {
-              child.phase = 'joined';
+              child.phase = "joined";
               child.x = F_JOIN.x;
               child.y = F_JOIN.y;
             } else {
-              const p = arcPos(child.fromX, child.fromY, F_JOIN.x, F_JOIN.y, child.t, (child.laneY - F_PARENT.y) * 0.18);
+              const p = arcPos(
+                child.fromX,
+                child.fromY,
+                F_JOIN.x,
+                F_JOIN.y,
+                child.t,
+                (child.laneY - F_PARENT.y) * 0.18,
+              );
               pushTrail(child.trail, child.x, child.y);
               child.x = p.x;
               child.y = p.y;
             }
             break;
           }
-          case 'joined':
-          case 'gone':
+          case "joined":
+          case "gone":
             break;
         }
       }
 
-      if (stage === 'scatter' && children.length > 0 && children.every((c) => c.phase === 'joined')) {
-        stage = 'settle';
+      if (
+        stage === "scatter" &&
+        children.length > 0 &&
+        children.every((c) => c.phase === "joined")
+      ) {
+        stage = "settle";
         settleT = 0;
-        pulses.push({ x: F_JOIN.x, y: F_JOIN.y, t: 0, color: batchFailed ? SIM_RED : SIM_GREEN });
+        pulses.push({
+          x: F_JOIN.x,
+          y: F_JOIN.y,
+          t: 0,
+          color: batchFailed ? SIM_RED : SIM_GREEN,
+        });
       }
-      if (stage === 'settle') {
+      if (stage === "settle") {
         settleT += 2.2 * dt;
         if (settleT >= 1) {
           if (batchFailed) failedCount += 1;
           else doneCount += 1;
-          pulses.push({ x: F_DONE.x - 24, y: F_DONE.y, t: 0, color: batchFailed ? SIM_RED : SIM_GREEN });
+          pulses.push({
+            x: F_DONE.x - 24,
+            y: F_DONE.y,
+            t: 0,
+            color: batchFailed ? SIM_RED : SIM_GREEN,
+          });
           // keep the settled children on screen through the rest — the per-child ✓/✗
           // marks are the payoff; startWave replaces them.
-          stage = 'rest';
+          stage = "rest";
           restT = 0;
         }
       }
@@ -198,28 +231,57 @@ export function FanoutSim() {
       const theme = themeRef.current;
       ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx2d.clearRect(0, 0, SIM_W, F_H);
-      ctx2d.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx2d.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
 
       // parent
-      const waiting = stage === 'scatter';
-      drawBox(ctx2d, theme, F_PARENT.x - 74, F_PARENT.y - 40, 124, 80, waiting ? SIM_AMBER : theme.border, waiting ? 1.5 : 1);
+      const waiting = stage === "scatter";
+      drawBox(
+        ctx2d,
+        theme,
+        F_PARENT.x - 74,
+        F_PARENT.y - 40,
+        124,
+        80,
+        waiting ? SIM_AMBER : theme.border,
+        waiting ? 1.5 : 1,
+      );
       ctx2d.fillStyle = theme.ink;
-      ctx2d.fillText('run · batch', F_PARENT.x - 60, F_PARENT.y - 18);
+      ctx2d.fillText("run · batch", F_PARENT.x - 60, F_PARENT.y - 18);
       ctx2d.fillStyle = waiting ? SIM_AMBER : theme.muted;
-      ctx2d.fillText(waiting ? 'suspended on' : 'ctx.all(Item,', F_PARENT.x - 60, F_PARENT.y + 2);
-      ctx2d.fillText(waiting ? 'ctx.all(…)' : 'inputs)', F_PARENT.x - 60, F_PARENT.y + 20);
+      ctx2d.fillText(
+        waiting ? "suspended on" : "ctx.all(Item,",
+        F_PARENT.x - 60,
+        F_PARENT.y + 2,
+      );
+      ctx2d.fillText(
+        waiting ? "ctx.all(…)" : "inputs)",
+        F_PARENT.x - 60,
+        F_PARENT.y + 20,
+      );
 
       // child lanes + slots — each lane carries its index so the reader can map it to the
       // per-child result marks under the join.
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
-        if (!child || child.phase === 'gone') continue;
-        const active = child.phase === 'working';
-        const settled = child.phase === 'joined' || child.phase === 'toJoin';
-        ctx2d.fillStyle = settled ? (child.failed ? SIM_RED : SIM_GREEN) : theme.muted;
+        if (!child || child.phase === "gone") continue;
+        const active = child.phase === "working";
+        const settled = child.phase === "joined" || child.phase === "toJoin";
+        ctx2d.fillStyle = settled
+          ? child.failed
+            ? SIM_RED
+            : SIM_GREEN
+          : theme.muted;
         ctx2d.fillText(`#${i}`, F_SLOT_X - 42, child.laneY + 4);
         ctx2d.fillStyle = theme.card;
-        ctx2d.strokeStyle = active ? (child.failed ? SIM_RED : theme.accent) : settled ? (child.failed ? SIM_RED : SIM_GREEN) : theme.border;
+        ctx2d.strokeStyle = active
+          ? child.failed
+            ? SIM_RED
+            : theme.accent
+          : settled
+            ? child.failed
+              ? SIM_RED
+              : SIM_GREEN
+            : theme.border;
         ctx2d.beginPath();
         ctx2d.arc(F_SLOT_X, child.laneY, 13, 0, Math.PI * 2);
         ctx2d.fill();
@@ -228,7 +290,13 @@ export function FanoutSim() {
           ctx2d.strokeStyle = child.failed ? SIM_RED : theme.accent;
           ctx2d.lineWidth = 2.2;
           ctx2d.beginPath();
-          ctx2d.arc(F_SLOT_X, child.laneY, 13, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, child.t));
+          ctx2d.arc(
+            F_SLOT_X,
+            child.laneY,
+            13,
+            -Math.PI / 2,
+            -Math.PI / 2 + Math.PI * 2 * Math.min(1, child.t),
+          );
           ctx2d.stroke();
           ctx2d.lineWidth = 1;
         }
@@ -252,12 +320,17 @@ export function FanoutSim() {
         }
       }
       ctx2d.fillStyle = theme.muted;
-      ctx2d.fillText(`${children.filter((c) => c.phase === 'working').length} children running concurrently`, F_SLOT_X - 78, F_H - 18);
+      ctx2d.fillText(
+        `${children.filter((c) => c.phase === "working").length} children running concurrently`,
+        F_SLOT_X - 78,
+        F_H - 18,
+      );
 
       // join node — fills as children arrive
-      const arrived = children.filter((c) => c.phase === 'joined').length;
+      const arrived = children.filter((c) => c.phase === "joined").length;
       const total = children.length || countRef.current;
-      const joinColor = batchFailed && arrived === total ? SIM_RED : theme.accent;
+      const joinColor =
+        batchFailed && arrived === total ? SIM_RED : theme.accent;
       ctx2d.fillStyle = theme.card;
       ctx2d.strokeStyle = arrived > 0 ? joinColor : theme.border;
       ctx2d.beginPath();
@@ -268,14 +341,20 @@ export function FanoutSim() {
         ctx2d.strokeStyle = joinColor;
         ctx2d.lineWidth = 3;
         ctx2d.beginPath();
-        ctx2d.arc(F_JOIN.x, F_JOIN.y, 20, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (arrived / Math.max(1, total)));
+        ctx2d.arc(
+          F_JOIN.x,
+          F_JOIN.y,
+          20,
+          -Math.PI / 2,
+          -Math.PI / 2 + Math.PI * 2 * (arrived / Math.max(1, total)),
+        );
         ctx2d.stroke();
         ctx2d.lineWidth = 1;
         ctx2d.fillStyle = theme.ink;
         ctx2d.fillText(`${arrived}/${total}`, F_JOIN.x - 10, F_JOIN.y + 4);
       }
       ctx2d.fillStyle = theme.muted;
-      ctx2d.fillText('join · waitAll', F_JOIN.x - 34, F_JOIN.y + 42);
+      ctx2d.fillText("join · waitAll", F_JOIN.x - 34, F_JOIN.y + 42);
 
       // per-child results row under the join: one mark per index, in input order — the
       // reader sees exactly WHICH children succeeded and which one failed.
@@ -287,11 +366,15 @@ export function FanoutSim() {
         for (let i = 0; i < children.length; i++) {
           const child = children[i];
           if (!child) continue;
-          const joined = child.phase === 'joined';
+          const joined = child.phase === "joined";
           if (joined && child.failed) failedIdx.push(i);
           const mx = rowX0 + i * rowSpacing;
           ctx2d.fillStyle = theme.card;
-          ctx2d.strokeStyle = joined ? (child.failed ? SIM_RED : SIM_GREEN) : theme.border;
+          ctx2d.strokeStyle = joined
+            ? child.failed
+              ? SIM_RED
+              : SIM_GREEN
+            : theme.border;
           ctx2d.beginPath();
           ctx2d.arc(mx, rowY, 7, 0, Math.PI * 2);
           ctx2d.fill();
@@ -316,40 +399,65 @@ export function FanoutSim() {
         }
         if (failedIdx.length > 0 && arrived === total) {
           ctx2d.fillStyle = SIM_RED;
-          ctx2d.fillText(`GatherError: child #${failedIdx.join(', #')} failed`, F_JOIN.x - 74, rowY + 24);
+          ctx2d.fillText(
+            `GatherError: child #${failedIdx.join(", #")} failed`,
+            F_JOIN.x - 74,
+            rowY + 24,
+          );
         }
       }
 
       // done boxes
       drawBox(ctx2d, theme, F_DONE.x - 24, F_DONE.y - 40, 74, 44, theme.border);
       ctx2d.fillStyle = SIM_GREEN;
-      ctx2d.font = '600 16px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx2d.font = "600 16px ui-monospace, SFMono-Regular, Menlo, monospace";
       ctx2d.fillText(String(doneCount), F_DONE.x - 8, F_DONE.y - 18);
-      ctx2d.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx2d.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
       ctx2d.fillStyle = theme.muted;
-      ctx2d.fillText('resolved', F_DONE.x - 12, F_DONE.y - 2);
-      drawBox(ctx2d, theme, F_DONE.x - 24, F_DONE.y + 8, 74, 44, failedCount > 0 ? SIM_RED : theme.border);
+      ctx2d.fillText("resolved", F_DONE.x - 12, F_DONE.y - 2);
+      drawBox(
+        ctx2d,
+        theme,
+        F_DONE.x - 24,
+        F_DONE.y + 8,
+        74,
+        44,
+        failedCount > 0 ? SIM_RED : theme.border,
+      );
       ctx2d.fillStyle = failedCount > 0 ? SIM_RED : theme.muted;
-      ctx2d.font = '600 16px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx2d.font = "600 16px ui-monospace, SFMono-Regular, Menlo, monospace";
       ctx2d.fillText(String(failedCount), F_DONE.x - 8, F_DONE.y + 30);
-      ctx2d.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx2d.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
       ctx2d.fillStyle = theme.muted;
-      ctx2d.fillText('GatherError', F_DONE.x - 18, F_DONE.y + 46);
+      ctx2d.fillText("GatherError", F_DONE.x - 18, F_DONE.y + 46);
 
       drawPulses(ctx2d, pulses, dt);
 
       for (const child of children) {
-        if (child.phase === 'joined' || child.phase === 'gone') continue;
-        const moving = child.phase === 'fanout' || child.phase === 'toJoin';
-        const color = child.failed && child.phase !== 'fanout' ? SIM_RED : child.phase === 'toJoin' ? SIM_GREEN : theme.accent;
-        drawDot(ctx2d, child.x, child.y, child.phase === 'working' ? 6.5 : 5, color, moving ? child.trail : undefined, moving);
+        if (child.phase === "joined" || child.phase === "gone") continue;
+        const moving = child.phase === "fanout" || child.phase === "toJoin";
+        const color =
+          child.failed && child.phase !== "fanout"
+            ? SIM_RED
+            : child.phase === "toJoin"
+              ? SIM_GREEN
+              : theme.accent;
+        drawDot(
+          ctx2d,
+          child.x,
+          child.y,
+          child.phase === "working" ? 6.5 : 5,
+          color,
+          moving ? child.trail : undefined,
+          moving,
+        );
       }
     }
 
     if (reduced) {
       startWave();
       children.forEach((c, i) => {
-        c.phase = i % 2 === 0 ? 'working' : 'joined';
+        c.phase = i % 2 === 0 ? "working" : "joined";
         c.x = i % 2 === 0 ? F_SLOT_X : F_JOIN.x;
         c.y = i % 2 === 0 ? c.laneY : F_JOIN.y;
         c.t = 0.5;
@@ -373,7 +481,7 @@ export function FanoutSim() {
       ariaLabel="Simulation: ctx.all scatters N child workflows across parallel lanes; the suspended parent resumes once every child has settled and joined; with a failing child the join resolves as a GatherError."
       controls={
         <>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
             children
             {[3, 5, 8].map((n) => (
               <button
@@ -381,9 +489,15 @@ export function FanoutSim() {
                 type="button"
                 style={{
                   ...simBtn,
-                  padding: '4px 10px',
-                  borderColor: n === count ? 'var(--color-fd-primary)' : 'var(--color-fd-border)',
-                  color: n === count ? 'var(--color-fd-foreground)' : 'var(--color-fd-muted-foreground)',
+                  padding: "4px 10px",
+                  borderColor:
+                    n === count
+                      ? "var(--color-fd-primary)"
+                      : "var(--color-fd-border)",
+                  color:
+                    n === count
+                      ? "var(--color-fd-foreground)"
+                      : "var(--color-fd-muted-foreground)",
                 }}
                 onClick={() => setCount(n)}
               >
@@ -393,23 +507,31 @@ export function FanoutSim() {
           </label>
           <button
             type="button"
-            style={{ ...simBtn, borderColor: failOne ? SIM_RED : 'var(--color-fd-border)' }}
+            style={{
+              ...simBtn,
+              borderColor: failOne ? SIM_RED : "var(--color-fd-border)",
+            }}
             onClick={() => setFailOne((f) => !f)}
           >
-            {failOne ? '✗ one child fails' : 'all succeed'}
+            {failOne ? "✗ one child fails" : "all succeed"}
           </button>
-          <button type="button" style={{ ...simBtn, marginLeft: 'auto' }} onClick={() => setPaused((p) => !p)}>
-            {paused ? '▶ resume' : '⏸ pause'}
+          <button
+            type="button"
+            style={{ ...simBtn, marginLeft: "auto" }}
+            onClick={() => setPaused((p) => !p)}
+          >
+            {paused ? "▶ resume" : "⏸ pause"}
           </button>
         </>
       }
       caption={
         <>
-          Live model of <code>ctx.all</code>: the parent <b>suspends</b> (amber, zero compute) while N
-          children — each a full durable run, labelled <code>#i</code> — execute concurrently and{' '}
-          <b>join</b> as they settle, stamping a per-child ✓/✗ under the join. Toggle a failing child:
-          the others still finish green, and the join resolves as a <code>GatherError</code> naming
-          exactly which index failed.
+          Live model of <code>ctx.all</code>: the parent <b>suspends</b> (amber,
+          zero compute) while N children — each a full durable run, labelled{" "}
+          <code>#i</code> — execute concurrently and <b>join</b> as they settle,
+          stamping a per-child ✓/✗ under the join. Toggle a failing child: the
+          others still finish green, and the join resolves as a{" "}
+          <code>GatherError</code> naming exactly which index failed.
         </>
       }
     />
@@ -427,7 +549,7 @@ const RL_GATE = { x: 380, y: 78, w: 190, h: 84 };
 const RL_DONE = { x: 812, y: 120 };
 
 type RLDot = {
-  phase: 'toGate' | 'waiting' | 'through' | 'gone';
+  phase: "toGate" | "waiting" | "through" | "gone";
   x: number;
   y: number;
   fromX: number;
@@ -463,7 +585,7 @@ export function RateLimitSim() {
 
     function spawn() {
       dots.push({
-        phase: 'toGate',
+        phase: "toGate",
         x: RL_PRODUCER.x + 36,
         y: RL_PRODUCER.y,
         fromX: RL_PRODUCER.x + 36,
@@ -497,7 +619,10 @@ export function RateLimitSim() {
 
       spawnCarry += 3.5 * dt;
       if (burstRef.current > 0) {
-        const release = Math.min(burstRef.current, Math.max(1, Math.round(30 * dt)));
+        const release = Math.min(
+          burstRef.current,
+          Math.max(1, Math.round(30 * dt)),
+        );
         burstRef.current -= release;
         for (let i = 0; i < release; i++) spawn();
       }
@@ -509,9 +634,9 @@ export function RateLimitSim() {
       // admissions: FIFO through the gate while the window has budget
       for (const dot of dots) {
         if (usedThisWindow >= limitRef.current) break;
-        if (dot.phase !== 'waiting') continue;
+        if (dot.phase !== "waiting") continue;
         usedThisWindow += 1;
-        dot.phase = 'through';
+        dot.phase = "through";
         dot.fromX = dot.x;
         dot.fromY = dot.y;
         dot.t = 0;
@@ -521,11 +646,13 @@ export function RateLimitSim() {
       let waitIndex = 0;
       for (const dot of dots) {
         switch (dot.phase) {
-          case 'toGate': {
-            const pos = waitPos(Math.min(23, dots.filter((d) => d.phase === 'waiting').length));
+          case "toGate": {
+            const pos = waitPos(
+              Math.min(23, dots.filter((d) => d.phase === "waiting").length),
+            );
             dot.t += 2.2 * dt;
             if (dot.t >= 1) {
-              dot.phase = 'waiting';
+              dot.phase = "waiting";
               dot.x = pos.x;
               dot.y = pos.y;
               dot.trail.length = 0;
@@ -537,32 +664,45 @@ export function RateLimitSim() {
             }
             break;
           }
-          case 'waiting': {
+          case "waiting": {
             const pos = waitPos(Math.min(23, waitIndex));
             waitIndex += 1;
             dot.x += (pos.x - dot.x) * Math.min(1, 10 * dt);
             dot.y += (pos.y - dot.y) * Math.min(1, 10 * dt);
             break;
           }
-          case 'through': {
+          case "through": {
             dot.t += 1.8 * dt;
             if (dot.t >= 1) {
-              dot.phase = 'gone';
+              dot.phase = "gone";
               doneCount += 1;
-              pulses.push({ x: RL_DONE.x - 32, y: RL_DONE.y, t: 0, color: SIM_GREEN });
+              pulses.push({
+                x: RL_DONE.x - 32,
+                y: RL_DONE.y,
+                t: 0,
+                color: SIM_GREEN,
+              });
             } else {
-              const p = arcPos(dot.fromX, dot.fromY, RL_DONE.x - 32, RL_DONE.y, dot.t, -20);
+              const p = arcPos(
+                dot.fromX,
+                dot.fromY,
+                RL_DONE.x - 32,
+                RL_DONE.y,
+                dot.t,
+                -20,
+              );
               pushTrail(dot.trail, dot.x, dot.y);
               dot.x = p.x;
               dot.y = p.y;
             }
             break;
           }
-          case 'gone':
+          case "gone":
             break;
         }
       }
-      for (let i = dots.length - 1; i >= 0; i--) if (dots[i]?.phase === 'gone') dots.splice(i, 1);
+      for (let i = dots.length - 1; i >= 0; i--)
+        if (dots[i]?.phase === "gone") dots.splice(i, 1);
       draw(dt);
       raf = requestAnimationFrame(tick);
     }
@@ -572,9 +712,11 @@ export function RateLimitSim() {
       const theme = themeRef.current;
       ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx2d.clearRect(0, 0, SIM_W, RL_H);
-      ctx2d.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx2d.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
       const lim = limitRef.current;
-      const waitingN = dots.filter((d) => d.phase === 'waiting' || d.phase === 'toGate').length;
+      const waitingN = dots.filter(
+        (d) => d.phase === "waiting" || d.phase === "toGate",
+      ).length;
 
       ctx2d.strokeStyle = theme.border;
       ctx2d.setLineDash([3, 6]);
@@ -586,18 +728,39 @@ export function RateLimitSim() {
       ctx2d.stroke();
       ctx2d.setLineDash([]);
 
-      drawBox(ctx2d, theme, RL_PRODUCER.x - 64, RL_PRODUCER.y - 34, 100, 68, theme.border);
+      drawBox(
+        ctx2d,
+        theme,
+        RL_PRODUCER.x - 64,
+        RL_PRODUCER.y - 34,
+        100,
+        68,
+        theme.border,
+      );
       ctx2d.fillStyle = theme.ink;
-      ctx2d.fillText('runs', RL_PRODUCER.x - 50, RL_PRODUCER.y - 12);
+      ctx2d.fillText("runs", RL_PRODUCER.x - 50, RL_PRODUCER.y - 12);
       ctx2d.fillStyle = theme.muted;
-      ctx2d.fillText('dispatch', RL_PRODUCER.x - 50, RL_PRODUCER.y + 6);
-      ctx2d.fillText('ctx.step', RL_PRODUCER.x - 50, RL_PRODUCER.y + 22);
+      ctx2d.fillText("dispatch", RL_PRODUCER.x - 50, RL_PRODUCER.y + 6);
+      ctx2d.fillText("ctx.step", RL_PRODUCER.x - 50, RL_PRODUCER.y + 22);
 
       // the gate: window budget bar + reset countdown
       const spent = usedThisWindow >= lim;
-      drawBox(ctx2d, theme, RL_GATE.x, RL_GATE.y, RL_GATE.w, RL_GATE.h, spent ? SIM_AMBER : theme.border, spent ? 1.5 : 1);
+      drawBox(
+        ctx2d,
+        theme,
+        RL_GATE.x,
+        RL_GATE.y,
+        RL_GATE.w,
+        RL_GATE.h,
+        spent ? SIM_AMBER : theme.border,
+        spent ? 1.5 : 1,
+      );
       ctx2d.fillStyle = theme.muted;
-      ctx2d.fillText(`rateLimit { limit: ${lim}, perMs: 1000 }`, RL_GATE.x + 2, RL_GATE.y - 8);
+      ctx2d.fillText(
+        `rateLimit { limit: ${lim}, perMs: 1000 }`,
+        RL_GATE.x + 2,
+        RL_GATE.y - 8,
+      );
       // budget bar
       const barW = RL_GATE.w - 28;
       ctx2d.fillStyle = theme.border;
@@ -612,35 +775,70 @@ export function RateLimitSim() {
         ctx2d.fill();
       }
       ctx2d.fillStyle = spent ? SIM_AMBER : theme.muted;
-      ctx2d.fillText(`${lim - usedThisWindow}/${lim} left this window`, RL_GATE.x + 14, RL_GATE.y + 52);
+      ctx2d.fillText(
+        `${lim - usedThisWindow}/${lim} left this window`,
+        RL_GATE.x + 14,
+        RL_GATE.y + 52,
+      );
       // window reset countdown
       ctx2d.strokeStyle = theme.muted;
       ctx2d.lineWidth = 2;
       ctx2d.beginPath();
-      ctx2d.arc(RL_GATE.x + RL_GATE.w - 24, RL_GATE.y + 58, 9, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - windowMs / 1000));
+      ctx2d.arc(
+        RL_GATE.x + RL_GATE.w - 24,
+        RL_GATE.y + 58,
+        9,
+        -Math.PI / 2,
+        -Math.PI / 2 + Math.PI * 2 * (1 - windowMs / 1000),
+      );
       ctx2d.stroke();
       ctx2d.lineWidth = 1;
 
       if (waitingN > 0) {
         ctx2d.fillStyle = waitingN > 8 ? SIM_AMBER : theme.muted;
-        ctx2d.fillText(`${waitingN} waiting for the next window`, RL_GATE.x - 174, RL_GATE.y + RL_GATE.h + 22);
+        ctx2d.fillText(
+          `${waitingN} waiting for the next window`,
+          RL_GATE.x - 174,
+          RL_GATE.y + RL_GATE.h + 22,
+        );
       }
 
-      drawBox(ctx2d, theme, RL_DONE.x - 30, RL_DONE.y - 34, 96, 68, theme.border);
+      drawBox(
+        ctx2d,
+        theme,
+        RL_DONE.x - 30,
+        RL_DONE.y - 34,
+        96,
+        68,
+        theme.border,
+      );
       ctx2d.fillStyle = SIM_GREEN;
-      ctx2d.font = '600 20px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx2d.font = "600 20px ui-monospace, SFMono-Regular, Menlo, monospace";
       ctx2d.fillText(String(doneCount), RL_DONE.x - 14, RL_DONE.y + 2);
-      ctx2d.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx2d.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
       ctx2d.fillStyle = theme.muted;
-      ctx2d.fillText('dispatched', RL_DONE.x - 14, RL_DONE.y + 22);
+      ctx2d.fillText("dispatched", RL_DONE.x - 14, RL_DONE.y + 22);
 
       drawPulses(ctx2d, pulses, dt);
 
       for (const dot of dots) {
-        if (dot.phase === 'gone') continue;
-        const moving = dot.phase === 'toGate' || dot.phase === 'through';
-        const color = dot.phase === 'through' ? SIM_GREEN : dot.phase === 'waiting' ? SIM_AMBER : theme.accent;
-        drawDot(ctx2d, dot.x, dot.y, 5.5, color, moving ? dot.trail : undefined, moving);
+        if (dot.phase === "gone") continue;
+        const moving = dot.phase === "toGate" || dot.phase === "through";
+        const color =
+          dot.phase === "through"
+            ? SIM_GREEN
+            : dot.phase === "waiting"
+              ? SIM_AMBER
+              : theme.accent;
+        drawDot(
+          ctx2d,
+          dot.x,
+          dot.y,
+          5.5,
+          color,
+          moving ? dot.trail : undefined,
+          moving,
+        );
       }
     }
 
@@ -648,7 +846,7 @@ export function RateLimitSim() {
       for (let i = 0; i < 6; i++) spawn();
       dots.forEach((d, i) => {
         const pos = waitPos(i);
-        d.phase = 'waiting';
+        d.phase = "waiting";
         d.x = pos.x;
         d.y = pos.y;
       });
@@ -672,10 +870,16 @@ export function RateLimitSim() {
       ariaLabel="Simulation: a fixed-window rate limit admits at most limit calls per second; excess arrivals wait suspended and surge through when the window refills."
       controls={
         <>
-          <button type="button" style={simBtn} onClick={() => { burstRef.current += 20; }}>
+          <button
+            type="button"
+            style={simBtn}
+            onClick={() => {
+              burstRef.current += 20;
+            }}
+          >
             ⚡ burst +20
           </button>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
             limit/s
             {[3, 5, 10].map((n) => (
               <button
@@ -683,9 +887,15 @@ export function RateLimitSim() {
                 type="button"
                 style={{
                   ...simBtn,
-                  padding: '4px 10px',
-                  borderColor: n === limit ? 'var(--color-fd-primary)' : 'var(--color-fd-border)',
-                  color: n === limit ? 'var(--color-fd-foreground)' : 'var(--color-fd-muted-foreground)',
+                  padding: "4px 10px",
+                  borderColor:
+                    n === limit
+                      ? "var(--color-fd-primary)"
+                      : "var(--color-fd-border)",
+                  color:
+                    n === limit
+                      ? "var(--color-fd-foreground)"
+                      : "var(--color-fd-muted-foreground)",
                 }}
                 onClick={() => setLimit(n)}
               >
@@ -693,16 +903,21 @@ export function RateLimitSim() {
               </button>
             ))}
           </label>
-          <button type="button" style={{ ...simBtn, marginLeft: 'auto' }} onClick={() => setPaused((p) => !p)}>
-            {paused ? '▶ resume' : '⏸ pause'}
+          <button
+            type="button"
+            style={{ ...simBtn, marginLeft: "auto" }}
+            onClick={() => setPaused((p) => !p)}
+          >
+            {paused ? "▶ resume" : "⏸ pause"}
           </button>
         </>
       }
       caption={
         <>
-          Live model of a queue's <code>rateLimit</code>: the window budget drains as calls pass (watch the
-          bar), and once it's spent, arrivals <b>wait suspended</b> for the refill — a burst rides the
-          windows through, <code>limit</code> at a time, never hammering the downstream.
+          Live model of a queue's <code>rateLimit</code>: the window budget
+          drains as calls pass (watch the bar), and once it's spent, arrivals{" "}
+          <b>wait suspended</b> for the refill — a burst rides the windows
+          through, <code>limit</code> at a time, never hammering the downstream.
         </>
       }
     />
@@ -722,7 +937,7 @@ const A_DONE = { x: 830, y: 140 };
 const A_MAX_SLOTS = 8;
 
 type ADot = {
-  phase: 'toQueue' | 'queued' | 'toSlot' | 'working' | 'toDone' | 'gone';
+  phase: "toQueue" | "queued" | "toSlot" | "working" | "toDone" | "gone";
   x: number;
   y: number;
   fromX: number;
@@ -766,12 +981,15 @@ export function AdaptiveSim() {
       const perRow = 9;
       const row = Math.min(1, Math.floor(index / perRow));
       const col = index % perRow;
-      return { x: A_QUEUE.x + A_QUEUE.w - 16 - col * 19, y: A_QUEUE.y + (row === 0 ? 22 : 46) };
+      return {
+        x: A_QUEUE.x + A_QUEUE.w - 16 - col * 19,
+        y: A_QUEUE.y + (row === 0 ? 22 : 46),
+      };
     }
 
     function spawn() {
       dots.push({
-        phase: 'toQueue',
+        phase: "toQueue",
         x: A_PRODUCER.x + 36,
         y: A_PRODUCER.y,
         fromX: A_PRODUCER.x + 36,
@@ -797,7 +1015,10 @@ export function AdaptiveSim() {
       const rate = 3.1 + 1.9 * Math.sin(waveT / 4.2);
       spawnCarry += rate * dt;
       if (burstRef.current > 0) {
-        const release = Math.min(burstRef.current, Math.max(1, Math.round(30 * dt)));
+        const release = Math.min(
+          burstRef.current,
+          Math.max(1, Math.round(30 * dt)),
+        );
         burstRef.current -= release;
         for (let i = 0; i < release; i++) spawn();
       }
@@ -812,17 +1033,23 @@ export function AdaptiveSim() {
         brakeMs = 2600;
       }
       brakeMs = Math.max(0, brakeMs - dtMs);
-      const queuedN = dots.filter((d) => d.phase === 'queued').length;
-      const target = brakeMs > 0 ? 1 : Math.max(1, Math.min(A_MAX_SLOTS, Math.round(1 + queuedN / 2)));
-      limitFloat += (target - limitFloat) * Math.min(1, (brakeMs > 0 ? 3.2 : 0.9) * dt);
+      const queuedN = dots.filter((d) => d.phase === "queued").length;
+      const target =
+        brakeMs > 0
+          ? 1
+          : Math.max(1, Math.min(A_MAX_SLOTS, Math.round(1 + queuedN / 2)));
+      limitFloat +=
+        (target - limitFloat) * Math.min(1, (brakeMs > 0 ? 3.2 : 0.9) * dt);
       limit = Math.round(limitFloat);
 
       // admissions
-      const inFlight = dots.filter((d) => d.phase === 'working' || d.phase === 'toSlot');
+      const inFlight = dots.filter(
+        (d) => d.phase === "working" || d.phase === "toSlot",
+      );
       const busy = new Set(inFlight.map((d) => d.slot));
       for (const dot of dots) {
         if (inFlight.length >= limit) break;
-        if (dot.phase !== 'queued') continue;
+        if (dot.phase !== "queued") continue;
         let free = -1;
         for (let s = 0; s < limit; s++) {
           if (!busy.has(s)) {
@@ -833,7 +1060,7 @@ export function AdaptiveSim() {
         if (free < 0) break;
         busy.add(free);
         inFlight.push(dot);
-        dot.phase = 'toSlot';
+        dot.phase = "toSlot";
         dot.slot = free;
         dot.fromX = dot.x;
         dot.fromY = dot.y;
@@ -844,11 +1071,13 @@ export function AdaptiveSim() {
       let qIndex = 0;
       for (const dot of dots) {
         switch (dot.phase) {
-          case 'toQueue': {
-            const pos = queuePosOf(Math.min(17, dots.filter((d) => d.phase === 'queued').length));
+          case "toQueue": {
+            const pos = queuePosOf(
+              Math.min(17, dots.filter((d) => d.phase === "queued").length),
+            );
             dot.t += 2.2 * dt;
             if (dot.t >= 1) {
-              dot.phase = 'queued';
+              dot.phase = "queued";
               dot.x = pos.x;
               dot.y = pos.y;
               dot.trail.length = 0;
@@ -860,18 +1089,18 @@ export function AdaptiveSim() {
             }
             break;
           }
-          case 'queued': {
+          case "queued": {
             const pos = queuePosOf(Math.min(17, qIndex));
             qIndex += 1;
             dot.x += (pos.x - dot.x) * Math.min(1, 10 * dt);
             dot.y += (pos.y - dot.y) * Math.min(1, 10 * dt);
             break;
           }
-          case 'toSlot': {
+          case "toSlot": {
             dot.t += 2.4 * dt;
             const ty = slotY(dot.slot);
             if (dot.t >= 1) {
-              dot.phase = 'working';
+              dot.phase = "working";
               dot.x = A_WORKER_X;
               dot.y = ty;
               dot.t = 0;
@@ -884,35 +1113,48 @@ export function AdaptiveSim() {
             }
             break;
           }
-          case 'working': {
+          case "working": {
             dot.t += dtMs / dot.workMs;
             if (dot.t >= 1) {
-              dot.phase = 'toDone';
+              dot.phase = "toDone";
               dot.fromX = dot.x;
               dot.fromY = dot.y;
               dot.t = 0;
             }
             break;
           }
-          case 'toDone': {
+          case "toDone": {
             dot.t += 2.6 * dt;
             if (dot.t >= 1) {
-              dot.phase = 'gone';
+              dot.phase = "gone";
               doneCount += 1;
-              pulses.push({ x: A_DONE.x - 30, y: A_DONE.y, t: 0, color: SIM_GREEN });
+              pulses.push({
+                x: A_DONE.x - 30,
+                y: A_DONE.y,
+                t: 0,
+                color: SIM_GREEN,
+              });
             } else {
-              const p = arcPos(dot.fromX, dot.fromY, A_DONE.x - 30, A_DONE.y, dot.t, -22);
+              const p = arcPos(
+                dot.fromX,
+                dot.fromY,
+                A_DONE.x - 30,
+                A_DONE.y,
+                dot.t,
+                -22,
+              );
               pushTrail(dot.trail, dot.x, dot.y);
               dot.x = p.x;
               dot.y = p.y;
             }
             break;
           }
-          case 'gone':
+          case "gone":
             break;
         }
       }
-      for (let i = dots.length - 1; i >= 0; i--) if (dots[i]?.phase === 'gone') dots.splice(i, 1);
+      for (let i = dots.length - 1; i >= 0; i--)
+        if (dots[i]?.phase === "gone") dots.splice(i, 1);
       draw(dt);
       raf = requestAnimationFrame(tick);
     }
@@ -922,9 +1164,13 @@ export function AdaptiveSim() {
       const theme = themeRef.current;
       ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx2d.clearRect(0, 0, SIM_W, A_H);
-      ctx2d.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
-      const queuedN = dots.filter((d) => d.phase === 'queued' || d.phase === 'toQueue').length;
-      const inFlightN = dots.filter((d) => d.phase === 'working' || d.phase === 'toSlot').length;
+      ctx2d.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
+      const queuedN = dots.filter(
+        (d) => d.phase === "queued" || d.phase === "toQueue",
+      ).length;
+      const inFlightN = dots.filter(
+        (d) => d.phase === "working" || d.phase === "toSlot",
+      ).length;
 
       ctx2d.strokeStyle = theme.border;
       ctx2d.setLineDash([3, 6]);
@@ -938,15 +1184,32 @@ export function AdaptiveSim() {
       ctx2d.stroke();
       ctx2d.setLineDash([]);
 
-      drawBox(ctx2d, theme, A_PRODUCER.x - 64, A_PRODUCER.y - 34, 100, 68, theme.border);
+      drawBox(
+        ctx2d,
+        theme,
+        A_PRODUCER.x - 64,
+        A_PRODUCER.y - 34,
+        100,
+        68,
+        theme.border,
+      );
       ctx2d.fillStyle = theme.ink;
-      ctx2d.fillText('load', A_PRODUCER.x - 50, A_PRODUCER.y - 12);
+      ctx2d.fillText("load", A_PRODUCER.x - 50, A_PRODUCER.y - 12);
       ctx2d.fillStyle = theme.muted;
-      ctx2d.fillText('varies over', A_PRODUCER.x - 50, A_PRODUCER.y + 6);
-      ctx2d.fillText('the day', A_PRODUCER.x - 50, A_PRODUCER.y + 22);
+      ctx2d.fillText("varies over", A_PRODUCER.x - 50, A_PRODUCER.y + 6);
+      ctx2d.fillText("the day", A_PRODUCER.x - 50, A_PRODUCER.y + 22);
 
       const pressure = Math.min(1, queuedN / 14);
-      drawBox(ctx2d, theme, A_QUEUE.x, A_QUEUE.y, A_QUEUE.w, A_QUEUE.h, pressure > 0.5 ? SIM_AMBER : theme.border, 1 + pressure);
+      drawBox(
+        ctx2d,
+        theme,
+        A_QUEUE.x,
+        A_QUEUE.y,
+        A_QUEUE.w,
+        A_QUEUE.h,
+        pressure > 0.5 ? SIM_AMBER : theme.border,
+        1 + pressure,
+      );
       ctx2d.fillStyle = queuedN > 7 ? SIM_AMBER : theme.muted;
       ctx2d.fillText(`backlog: ${queuedN}`, A_QUEUE.x + 2, A_QUEUE.y - 8);
 
@@ -955,7 +1218,7 @@ export function AdaptiveSim() {
       for (let s = 0; s < A_MAX_SLOTS; s++) {
         const y = slotY(s);
         const exists = s < limit;
-        const dot = dots.find((d) => d.phase === 'working' && d.slot === s);
+        const dot = dots.find((d) => d.phase === "working" && d.slot === s);
         if (!exists) {
           ctx2d.globalAlpha = 0.25;
           ctx2d.strokeStyle = theme.border;
@@ -977,31 +1240,61 @@ export function AdaptiveSim() {
           ctx2d.strokeStyle = theme.accent;
           ctx2d.lineWidth = 2.2;
           ctx2d.beginPath();
-          ctx2d.arc(A_WORKER_X, y, 12, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, dot.t));
+          ctx2d.arc(
+            A_WORKER_X,
+            y,
+            12,
+            -Math.PI / 2,
+            -Math.PI / 2 + Math.PI * 2 * Math.min(1, dot.t),
+          );
           ctx2d.stroke();
           ctx2d.lineWidth = 1;
         }
       }
       ctx2d.fillStyle = braking ? SIM_RED : theme.ink;
-      ctx2d.fillText(braking ? `RAM brake → limit: ${limit}` : `adaptive · limit: ${limit}`, A_WORKER_X - 52, slotY(A_MAX_SLOTS - 1) + 32);
+      ctx2d.fillText(
+        braking ? `RAM brake → limit: ${limit}` : `adaptive · limit: ${limit}`,
+        A_WORKER_X - 52,
+        slotY(A_MAX_SLOTS - 1) + 32,
+      );
       ctx2d.fillStyle = theme.muted;
-      ctx2d.fillText(`in flight ${inFlightN}/${limit} · heartbeats as WorkerStatus`, A_WORKER_X - 92, slotY(A_MAX_SLOTS - 1) + 48);
+      ctx2d.fillText(
+        `in flight ${inFlightN}/${limit} · heartbeats as WorkerStatus`,
+        A_WORKER_X - 92,
+        slotY(A_MAX_SLOTS - 1) + 48,
+      );
 
       drawBox(ctx2d, theme, A_DONE.x - 28, A_DONE.y - 34, 92, 68, theme.border);
       ctx2d.fillStyle = SIM_GREEN;
-      ctx2d.font = '600 20px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx2d.font = "600 20px ui-monospace, SFMono-Regular, Menlo, monospace";
       ctx2d.fillText(String(doneCount), A_DONE.x - 12, A_DONE.y + 2);
-      ctx2d.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx2d.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
       ctx2d.fillStyle = theme.muted;
-      ctx2d.fillText('completed', A_DONE.x - 12, A_DONE.y + 22);
+      ctx2d.fillText("completed", A_DONE.x - 12, A_DONE.y + 22);
 
       drawPulses(ctx2d, pulses, dt);
 
       for (const dot of dots) {
-        if (dot.phase === 'gone') continue;
-        const moving = dot.phase === 'toQueue' || dot.phase === 'toSlot' || dot.phase === 'toDone';
-        const color = dot.phase === 'toDone' ? SIM_GREEN : dot.phase === 'queued' ? SIM_AMBER : theme.accent;
-        drawDot(ctx2d, dot.x, dot.y, dot.phase === 'working' ? 6.5 : 5, color, moving ? dot.trail : undefined, moving);
+        if (dot.phase === "gone") continue;
+        const moving =
+          dot.phase === "toQueue" ||
+          dot.phase === "toSlot" ||
+          dot.phase === "toDone";
+        const color =
+          dot.phase === "toDone"
+            ? SIM_GREEN
+            : dot.phase === "queued"
+              ? SIM_AMBER
+              : theme.accent;
+        drawDot(
+          ctx2d,
+          dot.x,
+          dot.y,
+          dot.phase === "working" ? 6.5 : 5,
+          color,
+          moving ? dot.trail : undefined,
+          moving,
+        );
       }
     }
 
@@ -1009,14 +1302,14 @@ export function AdaptiveSim() {
       for (let i = 0; i < 4; i++) spawn();
       dots.forEach((d, i) => {
         if (i < 2) {
-          d.phase = 'working';
+          d.phase = "working";
           d.slot = i;
           d.x = A_WORKER_X;
           d.y = slotY(i);
           d.t = 0.5;
         } else {
           const pos = queuePosOf(i - 2);
-          d.phase = 'queued';
+          d.phase = "queued";
           d.x = pos.x;
           d.y = pos.y;
         }
@@ -1040,24 +1333,42 @@ export function AdaptiveSim() {
       ariaLabel="Simulation: an adaptive worker's concurrency limit grows as backlog builds under healthy latency and slams down when the RAM brake fires, then recovers."
       controls={
         <>
-          <button type="button" style={simBtn} onClick={() => { burstRef.current += 20; }}>
+          <button
+            type="button"
+            style={simBtn}
+            onClick={() => {
+              burstRef.current += 20;
+            }}
+          >
             📈 spike load +20
           </button>
-          <button type="button" style={{ ...simBtn, borderColor: SIM_RED }} onClick={() => { brakeRef.current = 1; }}>
+          <button
+            type="button"
+            style={{ ...simBtn, borderColor: SIM_RED }}
+            onClick={() => {
+              brakeRef.current = 1;
+            }}
+          >
             🧠 RAM brake
           </button>
-          <button type="button" style={{ ...simBtn, marginLeft: 'auto' }} onClick={() => setPaused((p) => !p)}>
-            {paused ? '▶ resume' : '⏸ pause'}
+          <button
+            type="button"
+            style={{ ...simBtn, marginLeft: "auto" }}
+            onClick={() => setPaused((p) => !p)}
+          >
+            {paused ? "▶ resume" : "⏸ pause"}
           </button>
         </>
       }
       caption={
         <>
-          Live model of <code>concurrency: 'adaptive'</code>: the worker's slot count <b>breathes</b> — it
-          grows into the dashed headroom while backlog builds and latency stays healthy, and the{' '}
-          <b style={{ color: SIM_RED }}>RAM brake</b> slams it down before memory melts, recovering once
-          pressure clears. The live limit is what the worker heartbeats as <code>WorkerStatus</code> (see
-          the Telescope Workers panel).
+          Live model of <code>concurrency: 'adaptive'</code>: the worker's slot
+          count <b>breathes</b> — it grows into the dashed headroom while
+          backlog builds and latency stays healthy, and the{" "}
+          <b style={{ color: SIM_RED }}>RAM brake</b> slams it down before
+          memory melts, recovering once pressure clears. The live limit is what
+          the worker heartbeats as <code>WorkerStatus</code> (see the Telescope
+          Workers panel).
         </>
       }
     />
