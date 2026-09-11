@@ -313,6 +313,11 @@ AgentMcpModule.forRoot({
 });
 ```
 
+The other direction — letting an external MCP client reach *these* tools — is
+[`@dudousxd/nestjs-agent-mcp-server`](/docs/agent/packages/mcp-server). It serves the same registry
+and the same policy, and refuses the kinds that only mean something inside a turn: an `action` tool
+needs a human to approve it, and an MCP caller has no human.
+
 ---
 
 ## Related
@@ -322,4 +327,5 @@ AgentMcpModule.forRoot({
 - [Multi-agent](/docs/agent/guides/multi-agent) — the synthesized `agent`-kind delegate tools
 - [Governed SQL](/docs/agent/guides/governed-sql) — a prebuilt read-only SQL tool
 - [MCP](/docs/agent/packages/mcp) — importing an external MCP server's tools instead of writing a class for each
+- [MCP server](/docs/agent/packages/mcp-server) — the other direction: exposing these same tools to an external MCP client
 - [Getting Started](/docs/agent/getting-started) — install, first tool, first turn

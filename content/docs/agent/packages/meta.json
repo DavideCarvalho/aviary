@@ -11,6 +11,7 @@
     "rag",
     "rag-media",
     "mcp",
+    "mcp-server",
     "evals",
     "dashboard",
     "store-mikro-orm",

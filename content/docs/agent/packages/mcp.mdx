@@ -31,6 +31,13 @@ re-evaluated once per model step, and for an imported tool they can reach the ne
 
 Built on the official [`@modelcontextprotocol/sdk`](https://www.npmjs.com/package/@modelcontextprotocol/sdk).
 
+<Callout type="info" title="Looking for the other direction?">
+This package is the **client** — it imports a remote server's tools, and treats a remote tool as
+untrusted input. To expose *this* deployment's tools to an external MCP client, install
+[`@dudousxd/nestjs-agent-mcp-server`](/docs/agent/packages/mcp-server), which treats a remote caller
+as an untrusted caller. They share no code; install either, both, or neither.
+</Callout>
+
 ```ts
 import { AgentModule } from '@dudousxd/nestjs-agent';
 import { AgentMcpModule } from '@dudousxd/nestjs-agent-mcp';

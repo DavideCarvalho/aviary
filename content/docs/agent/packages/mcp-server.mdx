@@ -1,0 +1,320 @@
+---
+title: '@dudousxd/nestjs-agent-mcp-server'
+icon: ServerCog
+description: An MCP server — expose this deployment's @AiTools to an external Model Context Protocol client, over the agent's own registry and roles policy, with action tools off the surface by default.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+<Tabs items={['pnpm', 'npm']}>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @dudousxd/nestjs-agent-mcp-server @dudousxd/nestjs-agent @dudousxd/nestjs-agent-core
+    ```
+  </Tab>
+  <Tab value="npm">
+    ```bash
+    npm install @dudousxd/nestjs-agent-mcp-server @dudousxd/nestjs-agent @dudousxd/nestjs-agent-core
+    ```
+  </Tab>
+</Tabs>
+
+An [MCP](https://modelcontextprotocol.io) **server** for the agent. It mounts a Streamable HTTP
+endpoint on your app, and an external MCP client — Claude Desktop, an editor, a CI job — reaches the
+tools this deployment already has, through the gates a turn goes through and no wider.
+
+Built on the official [`@modelcontextprotocol/sdk`](https://www.npmjs.com/package/@modelcontextprotocol/sdk).
+
+<Callout type="info" title="The opposite direction to -mcp">
+[`@dudousxd/nestjs-agent-mcp`](/docs/agent/packages/mcp) is the **client**: it imports a remote
+server's tools into this app, and treats a remote tool as untrusted **input** — an imported tool is
+HITL-gated by default, its descriptions and results are attacker-controlled text.
+
+This package is the **server**: it exposes this deployment's tools, and treats a remote caller as an
+untrusted **caller** — identity is required, roles decide reach, and a tool whose gate this surface
+cannot honour is refused rather than listed.
+
+They share no code, only the SDK. Install either, both, or neither.
+</Callout>
+
+## Mount it
+
+```ts
+import { AgentModule } from '@dudousxd/nestjs-agent';
+import { AgentMcpServerModule, BearerTokenActorResolver } from '@dudousxd/nestjs-agent-mcp-server';
+
+@Module({
+  imports: [
+    AgentModule.forRoot({ /* … */ }),
+    AgentMcpServerModule.forRoot({
+      name: 'Acme Agent',
+      version: '1.0.0',
+      auth: new BearerTokenActorResolver([
+        { token: process.env.MCP_CI_TOKEN ?? '', actor: { id: 'ci', roles: ['ANALYST'] } },
+      ]),
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+`POST | GET | DELETE /mcp` is the endpoint — `POST` for `initialize` and requests, `GET` for the
+server-to-client SSE stream, `DELETE` to terminate the session. `path` moves it.
+
+<Callout type="warn">
+Import `AgentMcpServerModule` **after** `AgentModule`, whose global `AGENT_TOOL_REGISTRY` and
+`AGENT_ROLES_POLICY` it injects and serves from.
+</Callout>
+
+`forRootAsync` takes the usual `imports` / `inject` / `useFactory`, for auth that only exists at
+runtime — a key list from config, a JWT verifier built from a secret:
+
+```ts
+AgentMcpServerModule.forRootAsync({
+  imports: [ConfigModule],
+  inject: [ConfigService],
+  path: 'mcp',
+  useFactory: (config: ConfigService) => ({
+    name: 'Acme Agent',
+    version: '1.0.0',
+    auth: new BearerTokenActorResolver([
+      { token: config.getOrThrow('MCP_CI_TOKEN'), actor: { id: 'ci', roles: ['ANALYST'] } },
+    ]),
+  }),
+});
+```
+
+`path` sits on the async options object rather than inside the factory result: routes are mounted
+before an async factory resolves, so routing metadata has to be static.
+
+---
+
+## The same registry, the same policy
+
+Neither half of this server is a second gate written to agree with the loop's:
+
+| MCP method | What it actually is |
+|---|---|
+| `tools/list` | `ToolRegistry.definitionsFor(actor, policy, allowedTools)` — the agent's own four filter layers (allow-list, `enabled`, the `RolesPolicy`, the tool's `canUse`) — then every kind this surface will not run is dropped. |
+| `tools/call` | The exposure decision again, then `ToolRegistry.invoke` — which re-checks `enabled`, the `RolesPolicy` and `canUse`, and re-validates the arguments against the tool's real schema, before the handler runs. |
+
+A role-checked tool stays role-checked, a `canUse` still runs, a disabled tool is still absent, and a
+client holding a list taken before a demotion gains nothing by calling from it. See
+[Identity & authorization](/docs/agent/guides/identity-and-authorization) for what those gates are.
+
+The acting actor is read from the transport's verified auth on **every** request, not once at
+`initialize` — a long-lived MCP session cannot outlive the identity it was opened with.
+
+---
+
+## What crosses the boundary
+
+The agent's [tool kinds](/docs/agent/guides/tools) mean different things on a surface with no human
+and no turn, so not all of them cross:
+
+| `kind` | Over MCP |
+|---|---|
+| `read` | **Listed and callable.** Advertised with `annotations.readOnlyHint: true`. |
+| `action` | **Neither listed nor callable**, unless `actions: 'execute'`. |
+| `agent` (handoff) | **Never exposed**, whatever `actions` says. |
+| `ask` · `skill` · `memory` | **Never exposed**, whatever `actions` says. |
+
+### An `action` tool is not callable by default
+
+In a turn, an `action` never auto-executes: the turn parks and waits for a person to approve the call
+([HITL](/docs/agent/guides/human-in-the-loop-and-durability)). An MCP client is a program. There is
+nobody to park for and nobody to ask, so the approval the tool was **declared to require** cannot
+happen — and the answer is to keep the tool off a surface that cannot honour its gate, rather than to
+quietly auto-execute it. It is absent from `tools/list`, and a caller that guesses the name is
+refused with the reason.
+
+<Callout type="warn" title="What `actions: 'execute'` accepts">
+Setting it is the deployment stating out loud that this caller may act **without approval**. It
+removes the human from *every* `action` tool the caller's roles reach — not from one you had in mind
+— and those tools were declared `action` precisely because someone judged their effects to warrant a
+person. It is a named opt-in rather than the default for that reason.
+
+If you set it, bound it on both sides: `allowedTools` for the names, and the roles you put on the
+calling identity for everything else.
+</Callout>
+
+### Loop-served kinds are never exposed
+
+An `agent` (handoff) tool is registered with a **stub handler**, because the loop is what performs
+the delegation — reaching it through the registry runs the stub, which answers `{}` and delegates to
+nobody. `ask`, `skill` and `memory` are settled by the loop against a run and are never registered at
+all. Refusing all four keeps that true of this surface even if something registers one out of band,
+and it means `actions: 'execute'` cannot widen its way into them.
+
+### `allowedTools` is enforced on the call, not only on the list
+
+```ts
+AgentMcpServerModule.forRoot({
+  name: 'Acme Agent',
+  version: '1.0.0',
+  auth,
+  allowedTools: ['search_docs', 'lookup_order'],
+});
+```
+
+`ToolRegistry.invoke` knows nothing about the allow-list — `definitionsFor` applies it where the
+**list** is built, and nothing applies it on the way in. So this package re-checks it on
+`tools/call`: without that, a caller who simply guesses a name reaches a tool the deployment
+deliberately left off its MCP surface.
+
+Omit it and the surface is every tool of an exposable kind the calling actor's roles already allow.
+An **empty** array is an allow-list that lists nothing, not the absence of one — it exposes no tools.
+
+---
+
+## Identity is required, and never invented
+
+`auth` is an [`ActorResolver`](/docs/agent/guides/identity-and-authorization) — the same seam
+`AgentModule.forRoot({ actorResolver })` takes. It has no default and no fallback actor: this option
+decides which of your tools a program you did not write gets to run, so it is a compile-time
+obligation rather than something that can be left off.
+
+- Reject by **throwing**. An `UnauthorizedException` keeps its 401; a deliberate `ForbiddenException`
+  keeps its 403; a plain `Error` is mapped to **401**, not allowed to become a 500 with a logged
+  stack for what is a routine anonymous probe.
+- A resolver that answers with something that is not an actor — no `id`, an empty `id`, roles that
+  are not strings — is treated as having failed to identify the caller, rather than handing a
+  malformed identity to the roles policy.
+- **No role is granted by default.** An actor with no roles reaches no tools, which is the right
+  starting point for a new integration.
+
+### `BearerTokenActorResolver`
+
+The machine-to-machine case: a fixed list of issued tokens, each bound to the identity it acts as,
+compared in constant time so a wrong key cannot be refined one character at a time.
+
+```ts
+new BearerTokenActorResolver([
+  { token: config.getOrThrow('MCP_CI_TOKEN'), actor: { id: 'ci', roles: ['ANALYST'] } },
+  { token: config.getOrThrow('MCP_RELEASE_TOKEN'), actor: { id: 'release', roles: ['OPS'] } },
+]);
+```
+
+A grant's reach is exactly the roles its `actor` carries; the resolver grants none of its own. It
+refuses to be **constructed** with an empty token, which a bare `Authorization: Bearer ` header would
+otherwise match — that is to say, which anyone who knows the endpoint exists would match.
+
+<Callout type="info">
+When the caller is a **person** your app already knows, pass the resolver you gave `AgentModule`
+instead, so one user has one set of roles on both surfaces. Any resolver works: read a session,
+verify a JWT, call your gateway.
+</Callout>
+
+---
+
+## Sessions, and how a request is refused
+
+A session id travels in a plain `mcp-session-id` header and owns an open SSE stream that server
+messages are written to. Holding one is not permission to act as the identity that opened it, so a
+session is **bound to its opener**.
+
+| Situation | Answer |
+|---|---|
+| No credential, or one the resolver does not know, on `POST` / `GET` / `DELETE` | `401` |
+| The host resolver threw a plain `Error`, or returned a non-actor | `401` |
+| A session id presented by a **different** actor | `403` |
+| A session id this process does not hold | `404` — the client re-initializes rather than retrying |
+| `POST` with no session id whose body is not an `initialize` | `400` |
+| `GET` / `DELETE` with no session id | `400` |
+
+Every method authenticates **first**, before the transport is handed the request, so an unidentified
+caller never reaches the MCP machinery.
+
+Refusals *inside* a call are different in kind: a tool that is not exposed, not enabled, not allowed
+by the policy, or called with arguments that fail its schema comes back as a normal MCP tool result
+with `isError: true` and the reason as text. A request with no resolvable identity is a **protocol**
+error, so a client can tell "you are not authenticated" from "the tool said no".
+
+---
+
+## Options
+
+| Option | Default | What it does |
+|---|---|---|
+| `name`, `version` | — (required) | Reported to clients in the `initialize` handshake |
+| `auth` | — (required) | The `ActorResolver` deciding who the caller is |
+| `path` | `'mcp'` | Route the endpoint mounts at |
+| `actions` | `'deny'` | `'execute'` lets `action` tools run with no human approval |
+| `allowedTools` | every exposable tool the actor may use | The names this surface exposes at all — on the list *and* on the call |
+
+---
+
+## Input schemas
+
+A tool's [Standard Schema](https://standardschema.dev) becomes the JSON Schema `tools/list`
+advertises: Zod goes through the SDK's own converter, and a schema carrying the Standard JSON Schema
+extension (Valibot, ArkType, Zod 4) hands its `input()` document over. Other keywords — `$defs`,
+`additionalProperties`, descriptions — ride along untouched, so nested references still resolve on
+the client.
+
+<Callout type="info">
+A schema that can be introspected neither way degrades to a permissive object rather than failing the
+listing. The client loses the parameter shapes and nothing else: `ToolRegistry.invoke` validates the
+real schema before the handler runs, so a call that does not fit it is refused whatever the client
+was told.
+</Callout>
+
+## A tool call with no run behind it
+
+There is no turn here, so a handler's `AiToolCtx` carries the actor the request authenticated as and
+ids that name the **MCP call** rather than a run: `threadId: 'mcp:<session>'`, and `runId` /
+`requestId` of `mcp:<session>:<request>`. A tool that reads `ctx.actor` behaves identically on both
+surfaces; one that expects to find its own run persisted will not find one.
+
+---
+
+## Deliberately not in this package
+
+<Callout type="warn">
+An operator putting this endpoint on the internet is deciding what goes **in front of** it. These are
+the parts it does not supply.
+</Callout>
+
+| Not provided | Why, and what to do |
+|---|---|
+| An approval flow for MCP callers | Parking a `tools/call` on a human decision needs a run, a persisted tool-call row and a signal to wait on. A half-built version of that is worse than an explicit refusal, so `action` tools are refused instead — see [HITL](/docs/agent/guides/human-in-the-loop-and-durability) for what the real one costs. |
+| Rate limiting | Host middleware on the route. |
+| IP allow-lists, DNS-rebinding protection | Host middleware on the route. The MCP SDK's own `allowedHosts` / `allowedOrigins` options are deprecated in favour of exactly that. |
+| A shared session store | Sessions are held **in memory, per pod**. A fleet behind a load balancer needs session affinity on the MCP route, or a client's second request lands on a pod that never saw its `initialize`. |
+
+---
+
+## Exports
+
+| Export | What it is |
+|---|---|
+| `AgentMcpServerModule.forRoot(options)` / `.forRootAsync(options)` | The NestJS wiring — mounts the controller under `path`. |
+| `AgentMcpServerController` | The Streamable HTTP endpoint itself. |
+| `createAgentMcpServer(options)` | The MCP `Server` over a registry + policy, framework-free. |
+| `BearerTokenActorResolver` / `McpBearerGrant` | Issued tokens bound to the identities they act as. |
+| `authenticateMcpRequest({ auth, request })` | One request's identity, or an `HttpException`. |
+| `mcpExposureRefusal` · `isToolExposedOverMcp` · `assertToolExposedOverMcp` · `McpToolNotExposedError` | The exposure decision on its own, and its refusal reason. |
+| `McpActionPolicy` · `McpExposureInput` | `'deny' \| 'execute'`, and what the decision reads. |
+| `actorFromAuthInfo` · `isActor` · `McpUnauthenticatedError` · `McpAuthInfo` | Reading the acting actor off a verified `AuthInfo`. |
+| `McpSessionStore` / `McpSession` | The live sessions this process holds — `size`, and a shutdown hook that closes them. Exported by the module. |
+| `toMcpInputSchema` / `McpInputSchema` | Standard Schema → the JSON Schema `tools/list` advertises. |
+| `AGENT_MCP_SERVER_OPTIONS` | The options DI token. |
+
+## Without the module
+
+`createAgentMcpServer` is the whole feature; the controller is HTTP wiring around it.
+
+```ts
+const server = createAgentMcpServer({
+  name: 'Acme Agent',
+  version: '1.0.0',
+  registry,            // the agent's own ToolRegistry
+  policy,              // the agent's own RolesPolicy
+  actions: 'deny',
+});
+await server.connect(transport);
+```
+
+`actorFromAuth` is the seam for where the acting actor is read from the transport's verified
+`AuthInfo`; its default refuses a request that carries none.
