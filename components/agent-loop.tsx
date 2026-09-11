@@ -1,3 +1,8 @@
+/** biome-ignore-all lint/a11y/noInteractiveElementToNoninteractiveRole: these are focusable
+ * GRAPHICS, not widgets. Each carries the whole tooltip in its aria-label, so a screen reader
+ * gets the content without focus; tabIndex is there so a sighted keyboard user can reach the
+ * same tooltip the mouse reveals. Dropping role="img" would leave the label on a bare <g>, where
+ * it is announced unreliably. */
 "use client";
 
 // Interactive "model → tools → model" illustration for the agent docs. Hand-authored SVG, no

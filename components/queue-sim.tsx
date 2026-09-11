@@ -725,7 +725,13 @@ export function QueueSim() {
               {rate}/s
             </span>
           </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {/* biome-ignore lint/a11y/useSemanticElements: a fieldset groups controls being
+              submitted; these are view toggles, and it would bring form chrome to undo in CSS */}
+          <span
+            role="group"
+            aria-label="concurrency"
+            style={{ display: "flex", alignItems: "center", gap: 6 }}
+          >
             concurrency
             {[1, 2, 4].map((n) => (
               <button
@@ -748,7 +754,7 @@ export function QueueSim() {
                 {n}
               </button>
             ))}
-          </label>
+          </span>
           <button
             type="button"
             style={{ ...simBtn, marginLeft: "auto" }}

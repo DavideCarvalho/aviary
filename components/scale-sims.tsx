@@ -481,7 +481,12 @@ export function FanoutSim() {
       ariaLabel="Simulation: ctx.all scatters N child workflows across parallel lanes; the suspended parent resumes once every child has settled and joined; with a failing child the join resolves as a GatherError."
       controls={
         <>
-          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {/* biome-ignore lint/a11y/useSemanticElements: a fieldset groups controls being submitted */}
+          <span
+            role="group"
+            aria-label="children"
+            style={{ display: "flex", alignItems: "center", gap: 6 }}
+          >
             children
             {[3, 5, 8].map((n) => (
               <button
@@ -504,7 +509,7 @@ export function FanoutSim() {
                 {n}
               </button>
             ))}
-          </label>
+          </span>
           <button
             type="button"
             style={{
@@ -879,7 +884,12 @@ export function RateLimitSim() {
           >
             ⚡ burst +20
           </button>
-          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {/* biome-ignore lint/a11y/useSemanticElements: a fieldset groups controls being submitted */}
+          <span
+            role="group"
+            aria-label="limit/s"
+            style={{ display: "flex", alignItems: "center", gap: 6 }}
+          >
             limit/s
             {[3, 5, 10].map((n) => (
               <button
@@ -902,7 +912,7 @@ export function RateLimitSim() {
                 {n}
               </button>
             ))}
-          </label>
+          </span>
           <button
             type="button"
             style={{ ...simBtn, marginLeft: "auto" }}

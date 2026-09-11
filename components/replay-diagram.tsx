@@ -1,3 +1,8 @@
+/** biome-ignore-all lint/a11y/noInteractiveElementToNoninteractiveRole: these are focusable
+ * GRAPHICS, not widgets. Each carries the whole tooltip in its aria-label, so a screen reader
+ * gets the content without focus; tabIndex is there so a sighted keyboard user can reach the
+ * same tooltip the mouse reveals. Dropping role="img" would leave the label on a bare <g>, where
+ * it is announced unreliably. */
 "use client";
 
 // Interactive checkpoint-and-replay illustration for the durability docs. Hand-authored SVG, no
@@ -13,7 +18,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const ink = "var(--color-fd-foreground)";
 const muted = "var(--color-fd-muted-foreground)";
-const cardBg = "var(--color-fd-card)";
 const border = "var(--color-fd-border)";
 const accent = "var(--color-fd-primary)";
 const mono = "ui-monospace, SFMono-Regular, Menlo, monospace";

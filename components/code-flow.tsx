@@ -1,3 +1,11 @@
+/** biome-ignore-all lint/suspicious/noArrayIndexKey: every list here is positional — syntax
+ * tokens within a line, dots generated from a count, numbered attempts, beats of a sequence.
+ * Nothing is inserted mid-list or reordered, so the index IS the identity. */
+/** biome-ignore-all lint/a11y/noStaticElementInteractions: the mouse handlers in here are
+ * bonus affordances over a walkthrough that is already driven by real buttons — clicking a code
+ * line jumps to it, hovering keeps an open peek from closing. Giving each a widget role would
+ * put every line and every token of the snippet in the tab order to reach what the step controls
+ * already do with two keys. */
 "use client";
 
 // A synced code↔diagram walkthrough. The left panel shows a code snippet with the
@@ -3183,18 +3191,14 @@ export function CodeFlow({ scene }: { scene: string }) {
   );
   const stepFile = data ? (data.steps[stepper.index]?.file ?? 0) : 0;
   useEffect(() => setViewFile(stepFile), [stepFile]);
-  if (!data) return null;
-  const step = data.steps[stepper.index];
-  const files = data.files ?? [{ name: "", code: data.code ?? "" }];
-  // When peeking at another tab, highlight nothing (the active step's lines live elsewhere).
-  const noLines: [number, number] = [-1, -1];
-  const activeLines = (step.file ?? 0) === viewFile ? step.lines : noLines;
-
   // ── peek card state ────────────────────────────────────────────────────────
   // The card auto-opens on a step that carries a split; while paused, hovering/tapping a dotted
   // `hint` token re-opens it. Hover is ignored during auto-play so the two never fight.
   const [hoverPeek, setHoverPeek] = useState<number | null>(null);
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // These deps are the TRIGGER, not values the body reads: the peek closes when you step or switch
+  // tab. Dropping them, as the rule suggests, runs this once on mount and leaves a stale card open.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the deps are the trigger
   useEffect(() => setHoverPeek(null), [stepper.index, viewFile]);
   useEffect(() => {
     function onKey(keyEvent: KeyboardEvent) {
@@ -3203,6 +3207,13 @@ export function CodeFlow({ scene }: { scene: string }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  if (!data) return null;
+  const step = data.steps[stepper.index];
+  const files = data.files ?? [{ name: "", code: data.code ?? "" }];
+  // When peeking at another tab, highlight nothing (the active step's lines live elsewhere).
+  const noLines: [number, number] = [-1, -1];
+  const activeLines = (step.file ?? 0) === viewFile ? step.lines : noLines;
 
   // One hoverable hint per anchor line of every split step owned by the tab in view.
   const hints = new Map<number, LineHint>();

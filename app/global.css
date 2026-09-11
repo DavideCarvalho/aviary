@@ -86,10 +86,15 @@ html {
   scrollbar-gutter: stable;
 }
 
+/* `scrollbar-gutter: stable` above already reserves the space, so react-remove-scroll's
+   compensation shifts the page instead of holding it still. Its own declarations are inline, which
+   is the one case !important is the tool for. */
+/* biome-ignore-start lint/complexity/noImportantStyles: overriding a library's inline styles */
 html > body[data-scroll-locked] {
   margin-right: 0px !important;
   --removed-body-scroll-bar-size: 0px !important;
 }
+/* biome-ignore-end lint/complexity/noImportantStyles: overriding a library's inline styles */
 
 /* ------------------------------------------------------------------ *
  * Home page ("the aviary")

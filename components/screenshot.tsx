@@ -8,8 +8,9 @@ export function Screenshot({ src, alt }: { src: string; alt?: string }) {
   const url = src.startsWith("/") ? `${basePath}${src}` : src;
   return (
     <figure className="my-6 overflow-hidden rounded-xl border border-fd-border bg-fd-card">
-      {/* biome-ignore lint/a11y/useAltText: alt is forwarded from the prop */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
+      {/* biome-ignore lint/performance/noImgElement: next.config sets output: "export", so the
+          image optimiser next/image exists for never runs — and these are docs screenshots of
+          arbitrary size, which it would need explicit dimensions for */}
       <img src={url} alt={alt ?? ""} className="block w-full" loading="lazy" />
       {alt ? (
         <figcaption className="border-t border-fd-border px-4 py-2 text-xs text-fd-muted-foreground">

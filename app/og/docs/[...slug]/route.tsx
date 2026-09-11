@@ -137,6 +137,8 @@ export async function GET(
                 No. {specimen.plate}
               </div>
             </div>
+            {/* biome-ignore lint/a11y/noSvgWithoutTitle: this tree is rasterised to a PNG by
+                next/og — the output is an image file, with no accessibility surface to name */}
             <svg
               width="208"
               height="150"

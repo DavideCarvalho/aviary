@@ -394,7 +394,13 @@ export function RetrySim() {
       ariaLabel="Simulation: a dispatched step fails transiently, the run suspends with an exponential-backoff countdown that doubles each attempt, then the retry succeeds and the run completes."
       controls={
         <>
-          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {/* biome-ignore lint/a11y/useSemanticElements: a fieldset groups controls being
+              submitted; these are view toggles, and it would bring form chrome to undo in CSS */}
+          <span
+            role="group"
+            aria-label="speed"
+            style={{ display: "flex", alignItems: "center", gap: 6 }}
+          >
             speed
             {[1, 2].map((n) => (
               <button
@@ -417,7 +423,7 @@ export function RetrySim() {
                 {n}×
               </button>
             ))}
-          </label>
+          </span>
           <button
             type="button"
             style={{ ...simBtn, marginLeft: "auto" }}

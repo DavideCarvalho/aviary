@@ -18,7 +18,6 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -210,7 +209,7 @@ for (const src of selected) {
   totalFiles += files;
   totalLinks += links;
   console.log(
-    `✓ ${src.slug.padEnd(14)} ${files} docs, ${links} links${assets ? `, ${assets} assets` : ""}  (${USE_LOCAL ? "local" : src.repo + "@" + src.ref})`,
+    `✓ ${src.slug.padEnd(14)} ${files} docs, ${links} links${assets ? `, ${assets} assets` : ""}  (${USE_LOCAL ? "local" : `${src.repo}@${src.ref}`})`,
   );
 }
 
