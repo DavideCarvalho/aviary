@@ -10,6 +10,8 @@
     "data",
     "rag",
     "rag-media",
+    "mcp",
+    "evals",
     "dashboard",
     "store-mikro-orm",
     "store-drizzle",

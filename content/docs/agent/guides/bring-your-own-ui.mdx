@@ -1,39 +1,46 @@
 ---
 title: Bring your own UI
 icon: Palette
-description: The package ships no components by design — build a chat entirely on useAgentChat, AgentChatTransport, and the stored-history mappers, owning every pixel yourself.
+description: Build a chat on useAgentChat, useChatTranscript and the stored-history mappers — the library computes the model, you write the markup.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
 [Frontend](/docs/agent/guides/frontend) covers `MessageList` / `ChatInput` — the optional,
 styling-agnostic reference components. This guide is for the common case in a product with its own
-design system: skip the components entirely and render straight off `useAgentChat`'s return value.
-Nothing here is a fallback path or an escape hatch — it's the same headless surface the reference
-components are themselves built on.
+design system: skip the components and render off `useAgentChat` plus `useChatTranscript`, the model
+those components are themselves one rendering of. Nothing here is a fallback path or an escape hatch.
+
+If you want a designed starting point rather than a blank file, the
+[chat components](/docs/agent/guides/chat-components) are a shadcn registry over this same model —
+copied into your project as source, and yours to edit.
 
 ---
 
 ## The headless split
 
-`@dudousxd/nestjs-agent-react` is three layers, and only the top one renders anything:
+`@dudousxd/nestjs-agent-react` is four layers, and only the top one renders anything:
 
 | Layer | What it owns | Ships a UI? |
 |---|---|---|
 | `AgentClient` | The REST calls — threads, quota, attachments, approve/reject | No |
 | `AgentChatTransport` + `useAgentChat` | SSE parsing, resume/reconnect, thread state, HITL routing — the AI SDK v7 `ChatTransport`/`useChat` contract | No |
-| `MessageList` / `ChatInput` / `AgentMarkdown` | A reference chat UI over the two layers above | Yes — and it's optional |
+| `useChatTranscript` / `useTranscriptItem` | The transcript model — parts grouped into runs, per-message derived values, actions as state machines, list windowing, stick-to-bottom | No |
+| `MessageList` / `ChatInput` / `AgentMarkdown` | One rendering of that model | Yes — and it's optional |
 
 A host that never imports `MessageList` still gets everything below it: streaming, thread CRUD,
-quota, cancel, regenerate, and human-in-the-loop, all through plain callbacks and state. Bubble
-layout, tool-call cards, composer design, upload-progress affordances, and theming are 100% the
-host's — the library never assumes a design system, a CSS framework, or even that you're rendering
-HTML at all.
+quota, cancel, regenerate, human-in-the-loop, *and* the message-level logic the components used to
+keep to themselves. Bubble layout, tool-call cards, composer design, upload-progress affordances,
+and theming are 100% the host's — the library never assumes a design system, a CSS framework, or
+even that you're rendering HTML at all.
 
 <Callout type="info" title="A real host owns all of this">
 Products built on this hook typically own every visual surface — message bubbles, tool-result
 cards branched by tool name, a composer with per-file upload progress, loading skeletons — and
 never import a single component from the package. That's the intended shape, not a workaround.
+What they should **not** own is the logic under those surfaces: reimplementing tool grouping or the
+edit machine by hand is how a host ends up shipping a message item that quietly lost `copy` and
+`fork`. Drive `useChatTranscript` and write only the markup.
 </Callout>
 
 ---
@@ -112,6 +119,160 @@ does **not** mean the server has finished persisting the title or the run's term
 `onRunSettled` is the agent-specific signal for that; reach for it whenever you're refetching
 anything server-derived (thread title, list ordering, quota).
 </Callout>
+
+---
+
+## The transcript model
+
+`chat.messages` is the wire shape, not a renderable one. Turning it into a chat screen means
+grouping runs of consecutive tool parts, deciding which message is "the streaming one", keeping an
+edit draft per message, flashing a copied state, formatting cost and relative time, mounting only
+the tail of a long thread, and following the stream without stealing the viewport from a reader
+scrolled up. That is the work `MessageList` used to keep to itself.
+
+`useChatTranscript` returns it as a model with nothing drawn:
+
+```tsx
+import { useAgentChat, useChatTranscript } from '@dudousxd/nestjs-agent-react';
+
+function CustomChat({ threadId }: { threadId: string }) {
+  const chat = useAgentChat({ threadId, baseUrl: '/agent', resume: true });
+  const transcript = useChatTranscript({
+    messages: chat.messages,
+    status: chat.status,
+    editable: true,
+    onEditSubmit: (_messageId, text) => chat.sendMessage({ text }),
+    onFork: (messageId) => chat.forkThread(threadId, messageId),
+    regeneratable: true,
+    onRegenerate: () => chat.regenerate(),
+    onStop: () => chat.cancel(),
+    getUsage: (message) => readUsage(message),
+    getCreatedAt: (message) => readCreatedAt(message),
+  });
+
+  return (
+    <div {...transcript.scroll.getContainerProps()} className="my-scroller">
+      {transcript.window.canLoadEarlier ? (
+        <button onClick={transcript.window.loadEarlier}>
+          Load {transcript.window.hiddenCount} earlier
+        </button>
+      ) : null}
+
+      {transcript.items.map((item) => (
+        <article key={item.id} className={item.isUser ? 'bubble-user' : 'bubble-assistant'}>
+          {item.blocks.map((block) => {
+            if (block.kind === 'text') return <MyMarkdown key={block.key}>{block.text}</MyMarkdown>;
+            if (block.kind === 'tools') return <MyToolGroup key={block.key} parts={block.parts} />;
+            return (
+              <MyDisclosure key={block.key} open={block.isOpen} onToggle={() => block.toggle()}>
+                {block.text}
+              </MyDisclosure>
+            );
+          })}
+
+          {item.edit.isEditing ? (
+            <textarea {...item.edit.getTextareaProps()} />
+          ) : item.edit.available ? (
+            <button onClick={item.edit.start}>Edit</button>
+          ) : null}
+
+          {item.copy.available ? (
+            <button onClick={item.copy.copy}>{item.copy.copied ? 'Copied' : 'Copy'}</button>
+          ) : null}
+          {item.fork.available ? <button onClick={item.fork.run}>Fork</button> : null}
+          {item.regenerate.available ? (
+            <button onClick={item.regenerate.run}>Regenerate</button>
+          ) : null}
+          {item.usage ? <span>{item.usage.costLabel} · {item.usage.tokensLabel}</span> : null}
+          {item.timestamp ? (
+            <time title={item.timestamp.absolute}>{item.timestamp.relative}</time>
+          ) : null}
+        </article>
+      ))}
+
+      {transcript.showTypingIndicator ? <MySpinner /> : null}
+      {transcript.scroll.showJumpToLatest ? (
+        <button onClick={transcript.scroll.scrollToBottom}>Jump to latest</button>
+      ) : null}
+      {transcript.stop.available ? (
+        <button onClick={transcript.stop.stop}>
+          {transcript.stop.isStopping ? 'Stopping…' : 'Stop'}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+```
+
+### The instance
+
+| | Shape | Notes |
+|---|---|---|
+| `items` | `TranscriptItem[]` | The mounted window, oldest first. `item.index` is the position in the FULL thread. |
+| `item.blocks` | `{ kind: 'text' \| 'reasoning' \| 'tools', key, … }[]` | See below. |
+| `item.text` | `string` | The prose alone — what `copy` writes and what an edit starts from. Reasoning is excluded. |
+| `item.copy` | `{ available, copied, copy() }` | `copied` resets after `copyResetMs` (default 1500ms). `available` is false when there is no prose. |
+| `item.edit` | `{ available, isEditing, draft, canSave, start(), cancel(), setDraft(), save(), getTextareaProps() }` | `available` only for user messages, and only when `editable` + `onEditSubmit` are both wired. Blank drafts are refused; the saved text is trimmed. |
+| `item.fork` / `item.regenerate` | `{ available, run() }` | Regenerate is offered on the **last** assistant message only. |
+| `item.usage` | `{ inputTokens, outputTokens, totalTokens, costUsd, costLabel, tokensLabel } \| null` | Resolved through `getUsage`. The labels are derivations (`$0.012`, `2.0k tokens`), not markup. |
+| `item.timestamp` | `{ date, iso, relative, absolute } \| null` | `null` for an unparseable stamp, so a bad `created_at` renders nothing rather than "Invalid Date". |
+| `item.isStreaming` / `isLastAssistant` / `isUser` | `boolean` | Only the last assistant message streams. |
+| `window` | `{ visibleCount, hiddenCount, canLoadEarlier, loadEarlier(), showAll() }` | Default 50 mounted, +50 per `loadEarlier`. Mounting every markdown-rendered message of a long thread locks the main thread during streaming. |
+| `scroll` | `{ isAtBottom, showJumpToLatest, scrollToBottom(), getContainerProps() }` | See [Stick-to-bottom](#stick-to-bottom). |
+| `stop` | `{ available, isStopping, stop() }` | See [Stopping a turn](#stopping-a-turn). |
+| `showEmptyState` / `showTypingIndicator` / `showFollowUps` | `boolean` | "Should this be on screen" — the model decides whether, the host decides what. |
+
+`useTranscriptItem({ message })` is the same model for one message, when the host lays out the list
+itself. `MessageItemView({ item })` renders the shipped markup for an item you modelled yourself.
+
+### Blocks: why grouping is the model's job
+
+A turn's parts arrive interleaved — prose, then three tool calls, then more prose. Rendering each
+part on its own gives three separate tool cards where the UX wants one "3 tools ran" disclosure, so
+every host writes the same buffer-and-flush loop. `item.blocks` has already run it:
+
+- **`tools`** — a run of CONSECUTIVE tool parts, as `block.parts`. Any other part between two calls
+  ends the run, including the AI SDK's `step-start` marker, so tools from different steps never
+  merge into one group.
+- **`text`** — a run of prose. `block.isStreaming` is that PART's state, distinct from
+  `item.isStreaming` (the message's).
+- **`reasoning`** — a run of the model's thinking, with its own `isOpen` / `toggle(open?)`
+  disclosure state. It defaults to open while streaming and folded once done, per run.
+
+Blocks the model has no shape for (files, sources, `data-*` parts) are omitted, but they still end a
+tool run — where they sit in the transcript is meaningful even when their content isn't modelled.
+
+### Reasoning
+
+Reasoning has been on the wire since AI SDK v7 support landed: the backend emits a `reasoning` frame
+and `AgentChatTransport` maps it to the SDK's `reasoning-start` / `reasoning-delta` /
+`reasoning-end` chunks, so `reasoning` parts are already on your `UIMessage`s if the model produces
+them. Render them from the `reasoning` block — `MessageItem` shows one way (a toggle plus the body,
+overridable through `renderReasoning` and `reasoningLabel`), and a host is free to show a "thinking"
+shimmer instead, or nothing at all.
+
+### Stopping a turn
+
+`POST /agent/chat/:runId/cancel` closes the SSE client-side and hard-aborts the run server-side;
+`useAgentChat` exposes it as `cancel()`. `transcript.stop` wraps it as a machine so a host can render
+the gap honestly: `available` only while a turn is in flight and a canceller is wired, `isStopping`
+from the click until the run actually leaves a busy status. `ChatInput` takes `isStreaming` +
+`onStop` and renders the same thing next to send.
+
+### Stick-to-bottom
+
+The most common streaming-chat bug is scrolling to the bottom on every token, which yanks the
+viewport away from a reader scrolled up mid-thread. `transcript.scroll` (also exported standalone as
+`useStickToBottom`) follows the stream only while the reader is already at the bottom, unpins the
+moment they scroll up, and exposes `showJumpToLatest` for the affordance that brings them back:
+
+```tsx
+<div {...transcript.scroll.getContainerProps()}>…</div>
+```
+
+`getContainerProps()` returns a callback `ref` and an `onScroll` — behaviour only, no classes. The
+bottom is measured with a small threshold (default 32px) because sub-pixel layout leaves a residue
+after a programmatic scroll, and an exact comparison unpins on the very scroll it just caused.
 
 ---
 
@@ -246,7 +407,10 @@ await chat.sendMessage({ text: 'what is in this?' }, { body: { attachments: [att
 ```
 
 `uploadAttachment` is a single multipart POST to `/agent/attachments` — the library gives you the
-one round-trip and its typed result, not a queue or a progress event. A composer with **per-file**
+one round-trip and its typed result, not a queue or a progress event. The server reads only
+`mediaId` off each attachment a turn sends and resolves the rest itself, so passing the whole
+`MessageAttachment` back (as above) is fine; passing a url you built by hand is not, and neither is
+passing an id you did not upload. A composer with **per-file**
 upload states (queued → uploading → done/error, a progress percentage, a retry button) is host UI:
 track that state yourself, e.g. one entry per file keyed by a local id, resolved to a
 `MessageAttachment` on success or a failure marker on rejection, and only call `sendMessage` once
@@ -278,6 +442,17 @@ This is exactly the shape a product-grade composer needs — per-file rows, a sp
 per row, a way to retry or remove a failed file before sending — and none of it is in the package,
 because the right shape is a product decision, not a library one.
 
+### Files the user uploaded but never sent
+
+`GET /agent/attachments` returns the caller's own staged files as metadata (`mediaId`, `name`,
+`contentType`, `sizeBytes`, `createdAt`) — including uploads that belong to no thread because they
+were never sent, which is the one thing walking `messages[].attachments` cannot show you. It carries
+no urls: `resolve` mints those per turn so they can be short-lived.
+
+An upload nobody sent is also storage nobody is tracking. Sweeping it is a server-side job, not
+something a browser triggers — see
+[Persistence](/docs/agent/guides/persistence#which-media-a-message-still-references-optional).
+
 ---
 
 ## What the host owns vs. what the library owns
@@ -290,6 +465,7 @@ because the right shape is a product decision, not a library one.
 | Tool calls | `toolMetadata.toolKind`, part state (`input-available` / `output-available` / …) | Bubble layout, tool-specific cards, icons |
 | HITL | `approve` / `reject` wired to the current run | The Approve/Reject affordance itself |
 | History | `storedThreadToUiMessages` turn-grouping + aggregated usage | Skeletons, virtualization, date separators |
+| Transcript logic | `useChatTranscript`: part grouping, edit/copy machines, usage + relative-time derivations, windowing, stick-to-bottom | Which of those to render, and as what |
 | Errors | `chat.error` (SSE `event: error`), `AgentHttpError.status` on REST calls | Toasts, inline banners, retry buttons |
 | Everything visual | Nothing | Bubbles, composer, theming, design tokens |
 

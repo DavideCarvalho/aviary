@@ -274,6 +274,16 @@ default for exactly this reason — turn it on only where the extra spend is wor
 
 ---
 
+## So does a structured answer
+
+`@Agent({ outputSchema })` restates the turn's final answer as a schema with one **additional**,
+non-streamed model call — plus up to `outputRepairAttempts` more when a reply fails validation. Each
+attempt writes its own row with `purpose: 'structured_output'` and counts against quota like any
+other step. It is a separate pass rather than a constraint on the turn's own calls for reasons
+covered in [Structured output](/docs/agent/guides/structured-output); the cost is the price of it.
+
+---
+
 ## Surfacing it
 
 Both surfaces read the same `AGENT_GOVERNANCE_QUERIES` read-model and tail live tool-call / quota

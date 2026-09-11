@@ -71,7 +71,7 @@ no re-binding. Do not import it more than once expecting scoped behavior.
 | Export | Kind | Purpose |
 |---|---|---|
 | `MikroOrmAgentStoreModule` | `DynamicModule` factory | `.forFeature()` registers the six entities and binds `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` + `AGENT_PRICING_STORE` globally |
-| `MikroOrmAgentStore` | class | `AgentStore` implementation — the write side (threads, messages, tool calls, usage), including the optional `recordRunStart`/`recordRunEnd`/`bumpRunRetries` run-reliability hooks the loop and durable runners call |
+| `MikroOrmAgentStore` | class | `AgentStore` implementation — the write side (threads, messages, tool calls, usage), including `updateThread` (title and/or the thread's `defaultAgent`), the projected `defaultAgentForThread` read, `referencedMediaIds` (which media a live message still carries — the library half of [attachment collection](/docs/agent/guides/persistence#which-media-a-message-still-references-optional)), and the optional `recordRunStart`/`recordRunEnd`/`bumpRunRetries` run-reliability hooks the loop and durable runners call |
 | `MikroOrmGovernanceQueries` | class | `AgentGovernanceQueries` implementation — the full read-model: spend by model/actor/thread, usage trend, recent activity, run reliability (`runMetrics`/`runsByAgent`/`runErrors`/`runTrend`/`recentRuns`), the approvals inbox (`pendingApprovals`), per-tool stats (`toolStats`), and paged/filterable reads (`toolCallsPage`/`threadsPage`/`runsPage`) |
 | `MikroOrmPricingStore` | class | `AgentPricingStore` implementation — `upsertModelPrice` / `listCurrentPrices`, the write side of model pricing (see [Cost & Governance](/docs/agent/guides/cost-and-governance#seeding-prices)) |
 | `ensureAgentSchema(orm, opts?)` | function | Non-destructive `schema.update({ safe: true })` — create + add-column, never drop or alter |
@@ -80,6 +80,27 @@ no re-binding. Do not import it more than once expecting scoped behavior.
 | `agentEntities({ collation? })` | function | Builds the entity schemas with a custom (or no) collation, e.g. for SQLite |
 | `AGENT_COLLATION` | `'utf8mb4_unicode_ci'` | The default collation baked into `AGENT_ENTITIES` |
 | entity classes (`AgentThread`, `AgentMessage`, `AgentToolCall`, `AgentTokenUsage`, `AgentModelPricing`, `AgentRun`) | `EntitySchema`-backed classes | The six tables — `agent_thread`, `agent_message`, `agent_tool_call`, `agent_token_usage`, `agent_model_pricing`, `agent_run` |
+
+<Callout type="info" title="referencedMediaIds needs no migration">
+`referencedMediaIds(actorRef, mediaIds)` — the library half of
+[attachment collection](/docs/agent/guides/persistence#which-media-a-message-still-references-optional)
+— reads the `attachments` JSON column `agent_message` has carried since attachments shipped, so an
+existing database answers correctly the moment you upgrade. No new table, no column, no backfill,
+and no boot-time heal in the path, which is what keeps the SQLite caveat below out of it. The match
+runs in memory rather than in SQL (the column holds an array of objects, no dialect indexes that),
+bounded to one actor's attachment-bearing messages. A soft-deleted thread still counts as holding
+its references: the rows survive, so the bytes are still reachable.
+</Callout>
+
+<Callout type="warn" title="ensureAgentSchema's add-column heal is dialect-dependent">
+The heal applies `getUpdateSchemaSQL({ safe: true })` and keeps only the statements targeting an
+agent table. On MySQL and Postgres a new column is a plain `alter table … add column`, so an existing
+database picks it up on the next boot. On **SQLite/libsql** MikroORM expresses the same change as a
+table rebuild (`create table agent_thread__temp_alter` → copy → `drop` → `rename`), and those
+statements name a table the filter does not recognise, so they are dropped and the column appears on
+a fresh database only. If you run the agent store on SQLite, add the column with
+[`agentSchemaSql`](#exports) in a migration instead of relying on the boot heal.
+</Callout>
 
 <Callout type="info" title="agent_run — the reliability + approvals table">
 Every turn is recorded as a run in `agent_run` (status, duration, error code/message, retry count, a

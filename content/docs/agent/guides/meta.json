@@ -5,12 +5,20 @@
     "tools",
     "identity-and-authorization",
     "human-in-the-loop-and-durability",
+    "asking-the-user",
+    "skills",
+    "memory",
     "multi-agent",
     "rag",
+    "conversation-history",
+    "processors",
+    "structured-output",
     "cost-and-governance",
+    "evals",
     "persistence",
     "frontend",
     "bring-your-own-ui",
+    "chat-components",
     "governed-sql"
   ]
 }

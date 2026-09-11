@@ -156,9 +156,32 @@ function ChatPanel({ chat }: { chat: ReturnType<typeof useAgentChat> }) {
 ```
 
 `MessageList` also accepts `renderText`, `renderToolPart` / `renderToolGroup` (to render tool calls),
-`onFork` / `editable` + `onEditSubmit` / `regeneratable` + `onRegenerate`, and per-message
-`getUsage` / `getCreatedAt` resolvers for the cost + timestamp line. Pass `<MessageItem>` directly if
-you want to lay the list out yourself.
+`renderReasoning` + `reasoningLabel` (the model's thinking, folded behind a toggle), `onFork` /
+`editable` + `onEditSubmit` / `regeneratable` + `onRegenerate`, and per-message `getUsage` /
+`getCreatedAt` resolvers for the cost + timestamp line. Pass `<MessageItem>` directly if you want to
+lay the list out yourself.
+
+Both components are thin renderers over `useChatTranscript` — the same model is exported, so a
+different layout is a rewrite of the markup only, not of the part grouping, the edit machine, or the
+windowing. See [Bring your own UI](/docs/agent/guides/bring-your-own-ui#the-transcript-model).
+
+### Stopping a turn from the composer
+
+`ChatInput` renders a cancel affordance next to send while a turn is in flight — it calls the same
+`POST /agent/chat/:runId/cancel` that `chat.cancel()` does:
+
+```tsx
+<ChatInput
+  onSubmit={(text) => chat.sendMessage({ text })}
+  isStreaming={chat.status === 'streaming' || chat.status === 'submitted'}
+  onStop={() => chat.cancel()}
+  stopLabel="Stop generating"
+/>
+```
+
+Without `onStop` nothing is rendered, so the affordance exists exactly when there is something to
+cancel. (`ChatInput`'s dictation mic has its own "Stop" — the two never collide, the cancel button
+defaults to "Stop generating".)
 
 ---
 
@@ -339,7 +362,7 @@ round-trip, so a normal mount never fires a resume request that 404s.
 
 ## Related
 
-- [Bring your own UI](/docs/agent/guides/bring-your-own-ui) — skip `MessageList`/`ChatInput` and render straight off `useAgentChat`, with a fully custom design system
+- [Bring your own UI](/docs/agent/guides/bring-your-own-ui) — skip `MessageList`/`ChatInput` and render off `useAgentChat` + `useChatTranscript`, with a fully custom design system
 - [Getting Started](/docs/agent/getting-started) — install the module and stream your first turn
 - [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability) — the durable suspend behind approve/reject
 - [Identity & Authorization](/docs/agent/guides/identity-and-authorization) — how the backend resolves the actor your headers carry

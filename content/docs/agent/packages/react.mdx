@@ -1,7 +1,7 @@
 ---
 title: "@dudousxd/nestjs-agent-react"
 icon: Atom
-description: useAgentChat, the AgentChatTransport and AgentClient, styling-agnostic chat components, dictation, and the markdown subpath.
+description: useAgentChat, the AgentChatTransport and AgentClient, the headless transcript model, styling-agnostic chat components, dictation, and the markdown subpath.
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
@@ -21,8 +21,9 @@ import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
 `@dudousxd/nestjs-agent-react` connects a React app to the `/agent` endpoints. `useAgentChat` wraps
 the Vercel AI SDK v7 `useChat` with a transport that speaks the backend's SSE protocol, then layers on
-threads, quota, cancel, and human-in-the-loop approve/reject. Components ship unstyled —
-every class is yours via `classNames`.
+threads, quota, cancel, and human-in-the-loop approve/reject. `useChatTranscript` turns the streamed
+messages into a renderable model, and the components are one rendering of it — they ship unstyled,
+every class yours via `classNames`.
 
 ```tsx
 import { useAgentChat, ChatInput, MessageList } from '@dudousxd/nestjs-agent-react';
@@ -48,9 +49,13 @@ function Assistant() {
 | `useAgentChat(options)` | The hook — the AI SDK `useChat` result plus threads/quota/cancel/approve/reject. |
 | `AgentClient` | The framework-agnostic REST client the hook is built on; usable standalone. |
 | `AgentChatTransport` | The `useChat` transport implementing the `/agent/chat` SSE protocol. |
-| `ChatInput` | The composer — Enter submits, Shift+Enter newlines, optional dictation. |
-| `MessageList` | Windows the thread; typing indicator, error+retry banner, follow-up chips, tool-part rendering. |
+| `useChatTranscript(options)` | The transcript model — messages normalized into items with their parts grouped into text/reasoning/tool blocks, per-message derived values, each action a state machine, plus list windowing and stick-to-bottom. Renders nothing. |
+| `useTranscriptItem(options)` | The same model for a single message, for a host that lays out the list itself. |
+| `useStickToBottom(options)` | Follow-the-stream-while-at-the-bottom, standalone. Also on `transcript.scroll`. |
+| `ChatInput` | The composer — Enter submits, Shift+Enter newlines, optional dictation, optional stop. |
+| `MessageList` | Windows the thread; typing indicator, error+retry banner, follow-up chips, tool and reasoning rendering. |
 | `MessageItem` | A single message, if you want to lay out the list yourself. |
+| `MessageItemView` | The default markup for one item you modelled yourself. |
 | `useSpeechRecognition` | Browser dictation hook backing `ChatInput`'s optional mic button. |
 | `SPEECH_LANGUAGES` / `DEFAULT_SPEECH_LANG` | The dictation language catalog and default. |
 | `storedThreadToUiMessages(messages)` | Converts a thread's full `StoredMessage[]` history into `UIMessage[]` for hydrating a reloaded chat — see [Hydrating from history](#hydrating-from-history) below. |
@@ -59,6 +64,33 @@ function Assistant() {
 Subpath `@dudousxd/nestjs-agent-react/markdown` exports `AgentMarkdown` — a streaming-aware GFM +
 KaTeX + Mermaid renderer for `renderText`, behind its own peers so a plain-text app never pulls them
 in.
+
+## Headless, in the TanStack sense
+
+The components are style-agnostic, but style-agnostic is not headless: a `classNames` map lets you
+restyle the markup this package chose, not replace it. `useChatTranscript` is the model under that
+markup — grouped part runs, per-message derived values, actions as state machines, windowing,
+stick-to-bottom — with nothing drawn and no class named:
+
+```tsx
+const transcript = useChatTranscript({
+  messages: chat.messages,
+  status: chat.status,
+  onStop: () => chat.cancel(),
+});
+
+transcript.items[0].blocks;        // [{ kind: 'reasoning' | 'text' | 'tools', … }]
+transcript.items[0].copy;          // { available, copied, copy() }
+transcript.items[0].edit;          // { isEditing, draft, canSave, save(), getTextareaProps() }
+transcript.window;                 // { hiddenCount, canLoadEarlier, loadEarlier() }
+transcript.scroll;                 // { isAtBottom, showJumpToLatest, getContainerProps() }
+transcript.stop;                   // { available, isStopping, stop() }
+```
+
+`MessageList` and `MessageItem` are one rendering of exactly this and keep their existing props, so
+adopting the model is additive: a host can move to it screen by screen. The full walkthrough — blocks,
+reasoning, stopping a turn, stick-to-bottom — is in
+[Bring your own UI](/docs/agent/guides/bring-your-own-ui#the-transcript-model).
 
 ## Hydrating from history
 

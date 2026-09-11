@@ -97,8 +97,14 @@ mechanism** — no new message field:
 - **Agentic mode:** the `search_knowledge` tool's output *is* the passages. It persists as a tool
   call and renders as a tool part in the chat UI, and shows up in the `-telescope` Agent tab.
 - **Inject mode:** the loop records a synthetic `auto_executed` `retrieve` tool call (output =
-  passages) against the assistant message it informed — the same surface, so citations render
-  identically.
+  passages) on the assistant message it informed — on the message's `toolCalls`/`toolResults`, in
+  the `agent_tool_call` table, and live on the stream as the same `tool-input-available` +
+  `tool-output` frame pair an executed read tool writes. That is the whole delivery path an ordinary
+  tool call has, so citations render identically.
+
+A client detects provenance **structurally** — a tool output shaped `{ passages: [{ id, text }] }` —
+rather than by tool name, which is what lets both modes land in the same block even though one is
+named `retrieve` and the other is whatever you called `createRetrievalTool`.
 
 Either way, each retrieval also emits an `aviary:agent:retrieved` diagnostics event
 (`{ runId, query, count }`) — subscribe for retrieval metrics without instrumenting your code.
