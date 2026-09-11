@@ -82,6 +82,44 @@ thread with 8 KB tool results is ~170 KB read and discarded per turn. The method
 `AgentStore` SPI; it is probed structurally against the `ThreadDefaultAgentReader` shape exported from
 `@dudousxd/nestjs-agent`, and a store that doesn't offer it still answers through the full read.
 
+### What a turn reads off a thread
+
+A turn needs a WINDOW of the thread: its last few messages, the title, and whether the thread has
+ever been answered. `getThread` gives it the transcript instead — every message, every attachment,
+every tool output the thread ever recorded — and the run journals what it loaded, so the same payload
+is re-read and re-parsed on every replay. On a 50-turn thread whose turns each ran a 50 KB tool that
+is ~1.9 MB per load, 97% of it tool results.
+
+Both SQL adapters implement `loadThreadForTurn({ threadId, messageLimit })`:
+
+```ts
+const page = await store.loadThreadForTurn({ threadId, messageLimit: 20 });
+// { title, defaultAgent, hasAssistantMessage, messages }  — oldest first
+```
+
+The bound is the database's (`order by created_at desc limit ?`, reversed for the prompt) over the
+columns a model turn reads; `usage`, `follow_ups` and `run_id` stay in the table. A `messageLimit` of
+`0` reads no messages at all, and an omitted one reads the whole thread.
+
+`hasAssistantMessage` is answered over the whole thread rather than the returned page — it is what a
+thread-start intake asks ("has this conversation been answered before?"), and a thread whose window
+holds only the user's last questions has still been answered. Like `defaultAgentForThread`, the
+method is not part of the `AgentStore` SPI: it is probed structurally, and a store that doesn't offer
+it still answers through the full `getThread` read.
+
+### Which turn asked for a run
+
+A delegation's child run records its parent in `agent_run.parent_run_id` — set from
+`RecordRunStartInput.parentRunId`, which both runners populate for awaited and detached children
+alike. The durable runtime journals the same edge, but only there, and a journal is not what a
+reliability or cost surface reads: without the column a run-row reader cannot roll a child's spend
+up to the turn that asked for it. A **detached** child makes it sharper, since it outlives its
+parent's turn and so is paired by nothing in the transcript either.
+
+A store that persists nothing for it still works — it loses the tree, not the run. Runs recorded
+before the column existed keep it null; the edge for a finished turn lives only in the journal and
+is not backfilled.
+
 ### Which turn wrote a message
 
 `AppendMessageInput.runId` records the run that produced the message, and `StoredMessage.runId`
@@ -101,7 +139,9 @@ empty for that run — see `GovernanceRunSampleSource` in
 
 <Callout type="info" title="Adding the column to a database that already exists">
 The MikroORM adapter heals its own schema at boot (`getUpdateSchemaSQL({ safe: true })` — create and
-add-column only), so `run_id` appears on the next start. The Drizzle adapter's `ensureAgentSchema`
+add-column only), so `run_id` appears on the next start. On SQLite/libsql, where that diff comes out
+as a table rebuild rather than an `add column`, the heal applies the rebuild as a unit and verifies
+the result, throwing rather than recording a heal that did not land. The Drizzle adapter's `ensureAgentSchema`
 is `CREATE TABLE IF NOT EXISTS` DDL, which is inert against a table that already exists, so it now
 carries an explicit additive-column pass that adds `run_id` when the table predates it.
 </Callout>
@@ -270,6 +310,10 @@ import { ensureAgentSchema } from '@dudousxd/nestjs-agent-store-mikro-orm';
 
 await ensureAgentSchema(orm); // safe: true by default
 ```
+
+It is fingerprint-gated (a steady-state boot is one cheap read) and it verifies itself: what the heal
+applied is re-diffed, and required structure still pending throws `AgentSchemaHealError` instead of
+writing the fingerprint that would stop later boots from retrying.
 
 The entity set is exported too: `AGENT_ENTITIES` (stamped with `utf8mb4_unicode_ci` for MySQL
 parity) and `agentEntities({ collation })` if you need to omit the collation for SQLite.

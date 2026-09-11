@@ -76,6 +76,7 @@ additive statements are yours to write:
 ALTER TABLE agent_thread ADD COLUMN default_agent TEXT;
 ALTER TABLE agent_message ADD COLUMN run_id TEXT;
 ALTER TABLE agent_message ADD COLUMN attachments TEXT;
+ALTER TABLE agent_run ADD COLUMN parent_run_id TEXT;
 CREATE INDEX agent_tool_call_message_idx ON agent_tool_call (message_id);
 ```
 </Callout>
@@ -85,12 +86,12 @@ CREATE INDEX agent_tool_call_message_idx ON agent_tool_call (message_id);
 | Export | Kind | Purpose |
 |---|---|---|
 | `DrizzleAgentStoreModule` | `DynamicModule` factory | `.forRoot({ db })` binds `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` + `AGENT_PRICING_STORE` globally over your db handle |
-| `DrizzleAgentStore` | class | `AgentStore` implementation — the write side, including `updateThread` (title and/or the thread's `defaultAgent`), the projected `defaultAgentForThread` read, `referencedMediaIds` (which media a live message still carries — the library half of [attachment collection](/docs/agent/guides/persistence#which-media-a-message-still-references-optional)), and the optional `recordRunStart`/`recordRunEnd`/`bumpRunRetries` run-reliability hooks the loop and durable runners call |
+| `DrizzleAgentStore` | class | `AgentStore` implementation — the write side, including `updateThread` (title and/or the thread's `defaultAgent`), the projected `defaultAgentForThread` and `loadThreadForTurn` reads (see [what a turn reads off a thread](/docs/agent/guides/persistence#what-a-turn-reads-off-a-thread)), `referencedMediaIds` (which media a live message still carries — the library half of [attachment collection](/docs/agent/guides/persistence#which-media-a-message-still-references-optional)), and the optional `recordRunStart`/`recordRunEnd`/`bumpRunRetries` run-reliability hooks the loop and durable runners call |
 | `DrizzleGovernanceQueries` | class | `AgentGovernanceQueries` implementation — the full read-model: spend by model/actor/thread, usage trend, recent activity, run reliability (`runMetrics`/`runsByAgent`/`runErrors`/`runTrend`/`recentRuns`), the approvals inbox (`pendingApprovals`), per-tool stats (`toolStats`), and paged/filterable reads (`toolCallsPage`/`threadsPage`/`runsPage`) |
 | `DrizzlePricingStore` | class | `AgentPricingStore` implementation — `upsertModelPrice` / `listCurrentPrices`, the write side of model pricing (see [Cost & Governance](/docs/agent/guides/cost-and-governance#seeding-prices)) |
 | `agentSchema` | Drizzle schema object | The six agent tables (`agentThread`, `agentMessage`, `agentToolCall`, `agentTokenUsage`, `agentModelPricing`, `agentRun`) |
 | `ensureAgentSchema(db)` | function | Idempotent `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` DDL for all six tables, plus an add-column pass for columns introduced after a table shipped |
-| `AgentDrizzleDb` | type | The db handle shape (`drizzle(client, { schema: agentSchema })`) the module and store expect |
+| `AgentDrizzleDb` | type | The db handle shape the module and store expect — any SQLite-dialect driver, sync or async, schema-aware (`drizzle(client, { schema: agentSchema })`) or not |
 | `AgentRunRow` / `AgentThreadRow` / `AgentMessageRow` | type | `$inferSelect` row shapes for the `agentRun`/`agentThread`/`agentMessage` tables |
 
 <Callout type="info" title="referencedMediaIds needs no migration">

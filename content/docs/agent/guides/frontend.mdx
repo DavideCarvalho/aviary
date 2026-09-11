@@ -294,6 +294,45 @@ thread or tool call) is easy to distinguish from a `404` or a `5xx`.
 
 ---
 
+## Sub-agents the chat did not wait for
+
+A [detached delegation](/docs/agent/guides/multi-agent#delegate-without-waiting) finishes after the
+turn that started it, so its answer is not something the current stream will ever carry. Set
+`background: true` and the hook tracks them:
+
+```tsx
+const chat = useAgentChat({ threadId, background: true });
+
+{chat.background.isWorking && (
+  <p>{chat.background.runs.filter((r) => r.status === 'running').length} agent(s) working…</p>
+)}
+```
+
+| Field | What it is |
+|---|---|
+| `background.runs` | One `BackgroundRun` per delegation this thread started: `{ runId, agent, toolCallId, toolName, status, message? }` |
+| `background.isWorking` | Whether any of them is still `running` |
+| `background.refresh()` | Re-read now instead of waiting for the next poll |
+
+When one lands, its message is appended to `chat.messages` — no reload, and no re-seeding of the
+list, so a tool card mid-flight or a question set awaiting an answer is left alone.
+
+Everything comes from **one thread read**, because both halves are the same fact persisted: the
+receipt is a tool result on the delegating turn, and the answer is a message stamped with the run
+that wrote it. So a reload, or a second tab, sees exactly what the tab that started it sees. The
+interval (`backgroundPollMs`, default `5000`; `0` disables it) runs only while something is
+outstanding — a conversation with nothing in flight costs no requests, and neither does one that
+never opted in, which is why `background` is off by default.
+
+<Callout type="info" title="Why a poll and not a second stream">
+What a background run produces is a persisted **message**, not tokens this chat should render as they
+arrive: it can land while the user is mid-turn or has the tab shut, and it has to be there on the next
+read either way. Its own token stream is still subscribable on its own run id
+(`GET /agent/chat/:runId/stream`) if you want to show it working.
+</Callout>
+
+---
+
 ## Threads, quota, and cancel
 
 Beyond the streaming surface, the hook returns loaders and state for the rest of the REST API. Each

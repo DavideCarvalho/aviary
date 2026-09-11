@@ -123,6 +123,57 @@ Precedence, most specific first: `@Agent({ history })` → `historyPolicy` → `
   on exactly the sequence it recorded.
 </Callout>
 
+## The ceiling also bounds the READ
+
+The window decides what the model is sent and what the journal carries. It can also decide what the
+database is asked for — and where it does, the thread's transcript is never materialized at all.
+
+`AgentStore.getThread` returns every message row, every attachment and every tool output a thread ever
+recorded. On a 50-turn thread whose turns each ran a 50 KB tool, that is **~2.6 MB per load, over 99%
+of it tool output**, to build a prompt bounded to the last few messages. Both SQL stores implement the
+core SPI's `ThreadTurnReader` instead:
+
+```ts
+interface ThreadTurnReader {
+  loadThreadForTurn(query: { threadId: string; messageLimit?: number }): Promise<ThreadTurnPage | null>;
+}
+```
+
+The loop probes the store for it and uses it when present — nothing to configure, and a store that
+does not implement it keeps working through the full read. The bound it is handed is your policy's
+`maxMessages`, so the same four-message window above reads 103 KB instead of 2.6 MB.
+
+<Callout type="warn" title="Declaring `maxMessages` is a promise about `select`">
+  A `HistoryPolicy` may declare `maxMessages`: the most messages `select` can ever keep. The loop
+  passes it to the store as the read bound, which only works if `select` keeps at most that many and
+  keeps the NEWEST ones — a window that size has to be indistinguishable, to `select`, from the full
+  transcript. `windowHistory({ maxMessages })` declares it for you. A custom policy that can keep
+  something older than its newest `maxMessages` (the `pinTheBrief` example above keeps the thread's
+  first message) must NOT declare it, or it will select over rows the store was never asked for.
+
+  Two ceilings deliberately name no bound, and read the whole thread:
+
+  - **A policy that summarizes.** `summarize` is handed what `select` *dropped*, and a read bounded to
+    what `select` keeps drops nothing — the turn would fold an empty summary into a prompt that is
+    missing the messages it stands in for, with nothing raised anywhere.
+  - **A ceiling expressed only in `maxTokens`.** No row count follows from a token budget: one message
+    can be four tokens or forty thousand. Naming one too low reads fewer rows than `select` would have
+    kept, which changes the prompt itself; leaving it out only costs the read. Set `maxMessages`
+    alongside `maxTokens` if you want the bound to reach the database.
+</Callout>
+
+<Callout title="This changes the read, not the journal">
+  Both reads answer the same three questions — the messages, the title, and whether the thread has ever
+  been answered — so what `load:thread` records is byte-identical either way. No checkpoint moved, no
+  payload changed, and no patch marker was spent: which read your store supports cannot decide a run's
+  checkpoints, and a run already in flight is unaffected.
+
+  `hasAssistantMessage` is answered over the whole thread rather than the returned page, because it is
+  what a `thread-start` intake asks. A long conversation whose window happens to hold only the user's
+  last questions has still been answered — derived from the page, it would re-introduce itself on every
+  turn.
+</Callout>
+
 ## Building blocks
 
 `-core` exports the pieces the NestJS options are made of, for composing a policy of your own:
@@ -133,6 +184,8 @@ Precedence, most specific first: `@Agent({ history })` → `historyPolicy` → `
 | `summarizeWithModel(model, instruction?)` | A `summarize` implementation over any `ModelProvider` — what `summarize: true` binds, with `DEFAULT_HISTORY_SUMMARY_INSTRUCTION`. |
 | `estimateMessageTokens(message)` | The default ~4-chars-per-token estimator. |
 | `HistoryPolicy`, `HistorySelection`, `HistorySummary`, `HistoryPolicyContext` | The SPI types. |
+| `HistoryPolicy.maxMessages` | Optional row ceiling the loop hands to the store as its read bound. |
+| `ThreadTurnReader`, `ThreadTurnQuery`, `ThreadTurnPage` | The bounded thread read the loop probes a store for. |
 
 ## Where to go next
 
