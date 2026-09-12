@@ -37,7 +37,7 @@ behaviour, including what each runner does about a turn parked on a human.
 |---|---|---|
 | The pause | an in-process runner holds the turn open | a real durable **suspend** — the run is checkpointed to the state store |
 | Surviving a restart | no — the pending turn is lost | yes — the run resumes from cache on approval |
-| Where the turn executes | the pod that received the request, start to finish | whichever worker picks up the `agent.run` workflow — and, by default, the model call and each tool call can each land on a *different* worker again (see below) |
+| Where the turn executes | the pod that received the request, start to finish | whichever worker picks up the `agent.run` workflow — and the model call and each tool call can each land on a *different* worker again (see below) |
 | Requires | nothing extra | `@dudousxd/nestjs-durable` + `AgentDurableModule` + a configured `DurableModule` |
 | Wire protocol | identical | identical |
 
@@ -56,24 +56,32 @@ set — inline is the real, zero-dependency default, not a fallback.
 Because the `AgentRunner` SPI is the only seam, you can develop against inline and flip to durable in
 production by changing configuration, not code.
 
-## Dispatched steps: the durable runner's default posture
+## Dispatched steps: what the durable runner does with a turn
 
 Under `durable: true`, the workflow's bookkeeping (persisting a message, bumping quota, stream
-markers) checkpoints as `ctx.localStep` — pinned to whichever worker is running the workflow. But
-the turn's two genuinely *long* operations — the model call and each tool execution — are, **by
-default**, dispatched as separately-routed durable steps instead (`AgentRunSteps.llm` /
-`AgentRunSteps.tool`), so a turn isn't pinned to one pod for however long the model takes to
-respond or a tool takes to run. Set `dispatchedSteps: false` (requires `durable: true`) to opt back
-into the pre-dispatch behavior and keep those two steps as `ctx.localStep`s as well.
+markers) checkpoints as `ctx.localStep` — pinned to whichever worker is running the workflow. The
+turn's two genuinely *long* operations — the model call and each tool execution — are dispatched as
+separately-routed durable steps instead (`AgentRunSteps.llm` / `AgentRunSteps.tool`), so a turn
+isn't pinned to one pod for however long the model takes to respond or a tool takes to run. That is
+not a setting: `ctx.step` is the one step primitive in [`nestjs-durable`](/docs/durable), whose
+`ctx.localStep` is the deliberate escape hatch for work that must run in the body, and the agent's
+bookkeeping is what uses it.
 
 A turn that asks for several `read` tools dispatches them **together** — one suspend, N workers busy
 at once, rather than a suspend/resume round trip per call. See
 [The agent loop](/docs/agent/concepts/the-agent-loop#several-tool-calls-in-one-turn) for the ordering
 rules that keep that replay-safe.
 
-Both worker groups are always registered by `AgentDurableModule` regardless of this flag — only
-whether the workflow actually *routes* to them is controlled by `dispatchedSteps` — so a fleet
-never ends up with an unserved worker group after a config change either way.
+Both worker groups are registered by `AgentDurableModule` under every surface but `'http'`, so a
+fleet never ends up routing to an unserved worker group.
+
+Your tool handlers are what pays for this: an `@AiTool` handler runs in the serving worker with
+nothing of the originating request ambient around it, exactly like any `@Step` handler in this
+ecosystem. A handler that reaches for a request-scoped ORM EntityManager, an AsyncLocalStorage
+tenant or a CLS transaction has to establish it — `@CreateRequestContext()` /
+`@EnsureRequestContext()` under MikroORM. A handler that does not throws in the worker: the call is
+recorded `failed`, the model receives the error, the turn completes, and an `action` tool's human
+approval has been spent on something that never ran.
 
 The workflow routes by the `@Step`-stamped NAME, read off `AgentRunSteps.prototype`, and never holds
 the instance. That matters on the `'http'` surface, which registers the workflow but deliberately
@@ -99,12 +107,13 @@ library: it is a `WorkflowEngineDeps` field, applied to every workflow in the pr
 for the deployment, not for the agent.
 </Callout>
 
-<Callout type="warn" title="Turning dispatching on for a fleet that has been running">
-Dispatching changes which checkpoint names a turn writes, so it is gated on `ctx.patched`: a fresh
-run dispatches, and a run already journaled under the in-process names finishes on them. In-flight
-turns survive the upgrade. What does not follow automatically is capacity — a fleet that has been
-running everything in-process starts sending `AgentRunSteps.llm`/`.tool` to whichever workers serve
-those groups. Confirm they are served, and that the sink below is cross-process, before rolling out.
+<Callout type="warn" title="Upgrading a fleet that has been running everything in-process">
+Dispatching changes which checkpoint names a turn writes, so it is read from the journal via
+`ctx.patched('agent:dispatched-steps')`: a fresh run dispatches, and a run already journaled under
+the in-process names finishes on them, so in-flight turns survive the upgrade. What does not follow
+automatically is the rest of it. Your `@AiTool` handlers start running in whichever workers serve
+`AgentRunSteps.llm`/`.tool` — confirm those groups are served, that the handlers establish their own
+execution context, and that the sink below is cross-process, before rolling out.
 </Callout>
 
 <Callout type="warn" title="Multi-pod fleets need a cross-process sink">

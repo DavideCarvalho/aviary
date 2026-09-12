@@ -91,7 +91,6 @@ import { GetWeatherTool } from './tools/get-weather.tool.js';
       actorResolver: new HeaderActorResolver(), // who's calling — see below
       // path: 'agent',                // route prefix (default 'agent')
       // durable: true,                // run each turn as the durable `agent.run` workflow
-      // dispatchedSteps: false,       // under durable:true this defaults to true — opt out to keep steps in-process
       defaultAgent: {
         systemPrompt: 'You are a helpful ops assistant.',
       },
@@ -102,14 +101,16 @@ import { GetWeatherTool } from './tools/get-weather.tool.js';
 export class AppModule {}
 ```
 
-<Callout type="warn" title="durable: true dispatches the turn across your worker fleet by default">
-With `durable: true`, the turn's model call and tool executions are — by default — routed durable
-steps (`AgentRunSteps.llm` / `AgentRunSteps.tool`), so the run isn't pinned to the pod that started
-it; set `dispatchedSteps: false` to keep them as in-process steps instead. Either way, a multi-pod
-deployment under `durable: true` needs a cross-process `TokenStreamSink` (e.g.
-`RedisTokenStreamSink` from `@dudousxd/nestjs-agent-transport-redis`) so the pod that ends up
-executing the step can still reach whichever pod holds the client's SSE connection — a boot warning
-fires if it's missing. See [Architecture](/docs/agent/concepts/architecture) and
+<Callout type="warn" title="durable: true dispatches the turn across your worker fleet">
+With `durable: true`, the turn's model call and each tool execution are routed durable steps
+(`AgentRunSteps.llm` / `AgentRunSteps.tool`) — `ctx.step`, the one step primitive — so the run is
+never pinned to the pod that started it. There is no option to place them elsewhere. Two things
+follow. Your `@AiTool` handlers run in a worker with no caller context to inherit, so a handler that
+touches infrastructure needs `@CreateRequestContext()`/`@EnsureRequestContext()` on it, exactly as a
+`@Step` handler does. And a multi-pod deployment needs a cross-process `TokenStreamSink` (e.g.
+`RedisTokenStreamSink` from `@dudousxd/nestjs-agent-transport-redis`) so the worker executing the
+step can reach whichever pod holds the client's SSE connection — a boot warning fires if it's
+missing. See [Architecture](/docs/agent/concepts/architecture) and
 [Runners](/docs/agent/concepts/runners).
 </Callout>
 

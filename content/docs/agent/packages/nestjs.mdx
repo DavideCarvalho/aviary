@@ -64,15 +64,16 @@ internal `AgentApprovalPortAdapter` that routes through the same decision path c
 (`AgentService.signalToolCall`) — this is what lets `@dudousxd/nestjs-agent-dashboard`'s approvals
 inbox work out of the box whenever `AgentModule` is imported anywhere in the app.
 
-<Callout type="warn" title="Dispatched steps are on by default under durable: true">
-`dispatchedSteps` defaults to `true` whenever `durable: true` — the turn's model call and tool
-executions are routed through `AgentRunSteps.llm`/`AgentRunSteps.tool` (see [Durable
-subpath](#durable-subpath--dudousxdnestjs-agentdurable) below) instead of in-process `ctx.localStep`s,
-so the run isn't pinned to the pod that started it. Set `dispatchedSteps: false` to opt back into
-in-process steps. Either way, `durable: true` already means the turn may resume on a different worker
-than the one holding the SSE connection — **multi-pod fleets must wire a cross-process
-`TokenStreamSink`** (e.g. `RedisTokenStreamSink` from the `/sink-redis` subpath) via
-`AgentModule.forRoot({ sink })`. Boot logs a warning when the effective config is durable with the
+<Callout type="warn" title="Under durable: true the turn's long steps are dispatched">
+The turn's model call and each tool execution are routed through
+`AgentRunSteps.llm`/`AgentRunSteps.tool` (see [Durable
+subpath](#durable-subpath--dudousxdnestjs-agentdurable) below) rather than run in the workflow body,
+and no option places them elsewhere. So an `@AiTool` handler runs in the serving worker with no
+caller context to inherit: one that touches infrastructure needs
+`@CreateRequestContext()`/`@EnsureRequestContext()`, exactly as a `@Step` handler does. And since
+the turn may run on a different worker than the one holding the SSE connection, **multi-pod fleets
+must wire a cross-process `TokenStreamSink`** (e.g. `RedisTokenStreamSink` from the `/sink-redis`
+subpath) via `AgentModule.forRoot({ sink })`. Boot logs a warning when durable is on with the
 default in-process sink.
 </Callout>
 
@@ -134,9 +135,9 @@ export class AppModule {}
 | Export | What it is |
 |---|---|
 | `agentDurable(options: AgentModuleOptions)` | One-import helper — returns `[AgentModule.forRoot({ ...options, durable: true }), AgentDurableModule.forRoot()]` to spread into `imports`. |
-| `AgentDurableModule` | `@Global` module registering the `agent.run` workflow and binding `AGENT_DURABLE_RUNNER` (which `AgentModule` wires to `AGENT_RUNNER`). Always registers `AgentRunSteps` regardless of `dispatchedSteps`, so the worker group is never left unserved by a config flag. |
+| `AgentDurableModule` | `@Global` module registering the `agent.run` workflow and binding `AGENT_DURABLE_RUNNER` (which `AgentModule` wires to `AGENT_RUNNER`). Registers `AgentRunSteps` under every surface but `'http'`, so the routed groups are served wherever a run may be driven. |
 | `DurableAgentRunner` | The `AgentRunner` implementation backing durable turns — same interface as `InlineAgentRunner`. |
-| `AgentRunSteps` | The two dispatched-step handlers, `@Step`-decorated: `llm` (`@Step({ retries: 3 })`, resolves model/tools/sink from the serving worker's own DI) and `tool` (`@Step()`, no retries — tool idempotency is the app's concern; applies the tool timeout handler-side). Under the default `dispatchedSteps: true` these are what actually execute the turn's long steps, on whichever worker takes the routed step; `dispatchedSteps: false` keeps them unused (the workflow runs `ctx.localStep` instead). |
+| `AgentRunSteps` | The two dispatched-step handlers, `@Step`-decorated: `llm` (`@Step({ retries: 3 })`, resolves model/tools/sink from the serving worker's own DI) and `tool` (`@Step()`, no retries — tool idempotency is the app's concern; applies the tool timeout handler-side). These are what execute every turn's long steps, on whichever worker takes the routed step. |
 
 Using the helper collapses the two imports above to one line:
 

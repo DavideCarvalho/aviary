@@ -26,7 +26,7 @@ an answer:
 | `AgentGovernanceQueries` | Spend/usage read-model (the analytics path) | Same MikroORM/Drizzle store packages; `InMemoryGovernanceQueries` (`-testing`) |
 | `ActorResolver` | Who's calling | `HeaderActorResolver` (`-nestjs`, gateway-only) — required, no default; you must supply one |
 | `RolesPolicy` | May this actor call this tool | `DefaultRolesPolicy` (role set-intersection, `-core`); `AuthzRolesPolicy` (`-authz`, delegates to a `nestjs-authz` Gate) |
-| `TokenStreamSink` | Live token transport (the data plane) | `InProcessTokenStreamSink` (`-nestjs`, the module default); for multi-pod fleets — required under `durable: true`, whose steps dispatch across the fleet by default — `RedisTokenStreamSink` (`-transport-redis`) via `forRoot({ sink })` |
+| `TokenStreamSink` | Live token transport (the data plane) | `InProcessTokenStreamSink` (`-nestjs`, the module default); for multi-pod fleets — required under `durable: true`, whose steps dispatch across the fleet — `RedisTokenStreamSink` (`-transport-redis`) via `forRoot({ sink })` |
 | `QuotaStore` | Per-actor daily token budget | `LedgerQuotaStore` (`-core`, ledger-backed — turns on with `quotaLimitTokens`, no shared state needed); `InMemoryQuotaStore` (`-testing`); omit both to skip quota checking |
 | `AgentRunner` | Executing a turn | `InlineAgentRunner` (`-nestjs`, the module default); the durable runner from `AgentDurableModule` |
 
@@ -63,7 +63,7 @@ This split is why streaming and durability compose instead of trading off — se
 ## Dispatched steps: the turn's two long operations are routed, not pinned
 
 The model call and each tool execution are the turn's two genuinely long-running operations — under
-the durable runner they are **dispatched as routed durable steps** by default
+the durable runner they are **dispatched as routed durable steps**
 (`AgentRunSteps.llm` / `AgentRunSteps.tool`), not run as `ctx.localStep`s on whichever pod happens to
 be hosting the workflow:
 
@@ -75,10 +75,16 @@ be hosting the workflow:
   (`LlmStepEnvelope`) and the handler re-derives the tool set from the actor.
 - `AgentRunSteps.tool` (no retries — tool idempotency is the app's own concern) rebuilds the tool
   `ctx` handler-side and applies the tool timeout there too.
-- Both worker groups are **always registered** by `AgentDurableModule`, regardless of configuration —
-  only whether the workflow *dispatches* to them is controlled by the `dispatchedSteps` option
-  (`AgentModuleOptions.dispatchedSteps`, default `true` under `durable: true`; set `false` to keep
-  the turn's steps as `ctx.localStep`s instead, the pre-dispatch behavior).
+- Both worker groups are registered by `AgentDurableModule` under every surface but `'http'`, and
+  every turn dispatches to them. There is no option that keeps the two long steps in the workflow
+  body: `ctx.step` is the one step primitive in
+  [`nestjs-durable`](/docs/durable), and this library follows it.
+- The bill lands on your tool handlers, so it is worth saying plainly: an `@AiTool` handler inherits
+  no caller context in the serving worker, exactly as a `@Step` handler does not. A handler that
+  touches infrastructure needs `@CreateRequestContext()`/`@EnsureRequestContext()` on it. Without
+  one it throws, the call is recorded `failed`, the model is handed the error and the turn
+  completes — and for an `action` tool that means a human's approval spent on an action nobody
+  performed.
 
 The practical consequence: a dispatched turn is **not pinned to the pod that started it**. The
 model call or a tool execution can land on any worker in the fleet, which is exactly why a
@@ -86,14 +92,14 @@ multi-pod deployment needs a **cross-process** `TokenStreamSink` — the worker 
 `AgentRunSteps.llm` streams tokens through the sink, and that sink has to reach whichever pod is
 still holding the client's SSE connection. `InProcessTokenStreamSink` (the module default) cannot
 do this; wire `RedisTokenStreamSink` (`-transport-redis`) instead. A boot warning fires when
-`dispatchedSteps` is effectively on with the default in-process sink still bound.
+`durable: true` is on with the default in-process sink still bound.
 
-<Callout type="info" title="This is orthogonal to durable: true itself">
-Even with `dispatchedSteps: false`, a turn under `durable: true` already runs on whichever worker
-picks up the `agent.run` workflow — which may not be the pod that received the original HTTP
-request. The cross-process-sink requirement is a property of `durable: true`, not specifically of
-dispatched steps; dispatching just widens *which* steps can move mid-turn, from "the whole run" to
-"the model call and every tool call, individually."
+<Callout type="info" title="A run journaled before dispatch finishes the way it started">
+Which names a turn writes — `AgentRunSteps.llm`/`.tool` or the in-process `llm:<i>`/`tool:<callId>` —
+is read from the run's own journal via `ctx.patched('agent:dispatched-steps')`, never from
+configuration: a fresh run records the marker and dispatches, and a run recorded by an older release
+keeps the names its history holds. So the answer cannot differ between two pods of one deployment,
+and an in-flight turn survives the upgrade.
 </Callout>
 
 ## Run reliability: every run's outcome is durably recorded

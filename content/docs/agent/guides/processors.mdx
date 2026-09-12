@@ -276,9 +276,9 @@ consequences worth knowing:
 - **The release happens inside the gate's own checkpoint**, so "refused" and "nothing was streamed"
   are one journaled fact rather than two a suspend could separate — and a replay does not flush the
   same answer into the stream a second time.
-- **`dispatchedSteps: true`** (the production default) runs the model on another worker, whose sink
-  the loop cannot wrap. The envelope therefore carries a `bufferOutput` flag and `AgentRunSteps.llm`
-  hands the held frames back on its step result. Without that, the gate would be bypassed on exactly
+- **Under `durable: true`** the model runs on another worker, whose sink the loop cannot wrap. The
+  envelope therefore carries a `bufferOutput` flag and `AgentRunSteps.llm` hands the held frames
+  back on its step result. Without that, the gate would be bypassed on exactly
   the deployment that needs it. **An incremental chain falls back to full buffering here** — there is
   no prefix to release, because the model wrote its chunks into a sink on the far side of the
   dispatch.
