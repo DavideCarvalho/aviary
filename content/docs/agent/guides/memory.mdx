@@ -63,17 +63,46 @@ optional one.
 
 ## Turning it on
 
+Name a provider, and memory is on. Each store package ships one over its own `agent_memory` table,
+and the testing package ships one in a `Map`:
+
 ```ts
-AgentModule.forRoot({
-  // ...model, store, actorResolver
-  memory: { provider: myMemoryProvider },
+import { MikroOrmMemoryProvider } from '@dudousxd/nestjs-agent-store-mikro-orm';
+// or DrizzleMemoryProvider from …-store-drizzle, or InMemoryMemoryProvider from …-testing
+
+AgentModule.forRootAsync({
+  externalStore: true, // AGENT_STORE comes from the store module, which is global
+  inject: [MikroOrmMemoryProvider],
+  useFactory: (memory: MikroOrmMemoryProvider) => ({
+    // ...model, actorResolver
+    memory: { provider: memory },
+  }),
 });
 ```
 
-There is no decorator and no zero-config form, unlike [skills](/docs/agent/guides/skills). A memory
-is by definition something the agent worked out about someone, so a memory a developer wrote in a
-class would be an instruction wearing a memory's clothes — which is what `@Skill` and
-`@SystemPromptContributor()` are for. The rows are yours from the start.
+A store module **exports** its provider but never binds `AGENT_MEMORY`, because that token's
+*presence* is what turns the feature on: binding it would give memory to every host that installed
+the store. Naming the provider is how you opt in.
+
+There is still no decorator and no zero-config form, unlike [skills](/docs/agent/guides/skills). A
+memory is by definition something the agent worked out about someone, so a memory a developer wrote
+in a class would be an instruction wearing a memory's clothes — which is what `@Skill` and
+`@SystemPromptContributor()` are for.
+
+<Callout type="info">
+**The library owns `agent_memory`; a skill table is still yours.** The two look like the same
+question and are not. A skill row plausibly joins your own entities — who authored it, which sector
+it belongs to, which review approved it — while a memory row is a key, a fact, an opaque scope token
+and an origin, with nothing to relate to. And every other part of memory was already the library's:
+the `remember` tool, `writeMemory`, the `memory:digest` checkpoint, and the
+[read-back and delete](#forgetting). `agent_memory` is in `agentManagedTables()`, so your migration
+differ skips it like `agent_thread`.
+</Callout>
+
+### Writing your own
+
+The SPI is still the seam, and a deployment whose memories live somewhere the built-ins do not reach
+implements it directly:
 
 ```ts
 const myMemoryProvider: MemoryProvider = {
@@ -292,10 +321,24 @@ search: async ({ scopes, query, limit }) => {
 },
 ```
 
-**The host owns the index, as it owns the rows.** A deployment with twenty memories must not have to
-stand up a vector store to keep working — omit `search` and every turn is served by `list`, exactly as
-before. One with two thousand uses whatever it already runs: pgvector, a full-text index, a hybrid
-service. The library owns the resolution, the precedence, the budget and the journal.
+**The host owns the index, even where the library owns the rows.** A deployment with twenty memories
+must not have to stand up a vector store to keep working — omit `search` and every turn is served by
+`list`, exactly as before. One with two thousand uses whatever it already runs: pgvector, a full-text
+index, a hybrid service. The library owns the resolution, the precedence, the budget and the journal.
+
+<Callout type="info">
+**Neither built-in store adapter implements `search`**, and that is a decision rather than a gap. An
+index's shape depends entirely on what a deployment already runs, so shipping one would make the
+adapter require infrastructure most hosts do not have, for a ceiling most of them never reach. The
+signal that it is worth building is [`MemoryDigest.omitted`](#what-it-costs-the-prompt) going
+non-zero — and `pinnedOmitted` especially, which means a standing policy stopped reaching any prompt.
+Both are on the `aviary:agent:memory.resolved` diagnostic. When you get there, implement `search`
+against your own index and pass that as the provider, or wrap the built-in one.
+
+`InMemoryMemoryProvider` from the testing package *does* implement it, under `{ recall: true }`,
+ranked by word overlap — enough to exercise this path, and this section's three clauses, without an
+index.
+</Callout>
 
 Three clauses, and the third is the one that is easy to miss:
 
@@ -383,7 +426,9 @@ until someone disagrees".
 <Callout type="info">
 This library reads `pinned` and never writes it, the same way it never mints an `id`. If your `write`
 upserts on (`scope`, `key`), **preserve the flag** — an upsert that drops it has silently unpinned the
-row.
+row. The built-in providers keep it out of the conflict merge for exactly that reason, and expose
+`pin({ id, pinned })` for the console side: an operator's act, deliberately not a method on the SPI,
+so nothing an agent can reach is able to call it.
 </Callout>
 
 ---

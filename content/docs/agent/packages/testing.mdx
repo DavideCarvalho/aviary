@@ -7,7 +7,7 @@ description: In-memory store, governance queries, quota, token sink, and a deter
 import { Callout } from 'fumadocs-ui/components/callout';
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
-Every SPI the agent depends on, in-memory: `AgentStore`, `AgentGovernanceQueries`, `QuotaStore`,
+Every SPI the agent depends on, in-memory: `AgentStore`, `AgentGovernanceQueries`, `MemoryProvider`, `QuotaStore`,
 `TokenStreamSink`, and a scripted `ModelProvider`. Exercise auto-executing reads, a suspending action
 tool, and multi-agent delegation with no API key, no database, and no Redis.
 
@@ -69,6 +69,9 @@ const model = new FakeModelProvider(script);
 | `InMemoryAttachmentStagingOptions` | type | `{ now?: () => Date; urlFor?: (mediaId: string) => string }` |
 | `InMemoryGovernanceQueries` | class (`AgentGovernanceQueries`) | In-memory read-model over an `InMemoryAgentStore` — spend, usage trend, recent activity, run reliability (`runMetrics`, `runsByAgent`, `runErrors`, `runTrend`, `recentRuns`), the approvals inbox (`pendingApprovals`), tool stats (`toolStats`), and paged reads (`toolCallsPage`/`threadsPage`/`runsPage`); takes an optional pricing map |
 | `InMemoryModelPrice` | type | `{ inputPricePer1m; outputPricePer1m; cacheWritePricePer1m?; cacheReadPricePer1m? }` — one entry in the pricing map |
+| `InMemoryMemoryProvider` | class (`MemoryProvider`) | Full in-memory [memory](/docs/agent/guides/memory) — scope-gated `list`, a `write` that upserts on (`scope`, `key`) and preserves `pinned`, a `forget` restricted to the actor's own scope, and `pin()`. `{ recall: true }` also serves `search`, ranked by word overlap, so the relevance path is exercised without an index |
+| `InMemoryMemoryProviderOptions` | type | `{ recall?: boolean }` — whether the provider has a `search` property at all, which is the switch the loop reads |
+| `everyMemoryField(ctx)` / `expectedMemoryRecord(written, minted)` / `EveryMemoryField` | functions + type | The memory round-trip fixtures, typed `Required<StoreMemoryInput>` and `Required<MemoryRecord>` — a new field on either shape fails to **compile** until an adapter can name it |
 | `InMemoryPricingStore` | class (`AgentPricingStore`) | In-memory `upsertModelPrice` / `listCurrentPrices` — the write side of model pricing, for tests that assert on `seedModelPrices` behavior without a database |
 | `InMemoryQuotaStore` | class (`QuotaStore`) | In-memory per-actor/day token budget; constructor takes an optional `limitTokens` (default `1_000_000`) |
 | `InMemoryTokenStreamSink` | class (`TokenStreamSink`) | Buffers streamed chunks per run so a late subscriber (reconnect) replays everything emitted so far, then follows live |

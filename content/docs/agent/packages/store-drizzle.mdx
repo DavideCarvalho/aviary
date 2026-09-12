@@ -87,12 +87,13 @@ CREATE INDEX agent_tool_call_message_idx ON agent_tool_call (message_id);
 |---|---|---|
 | `DrizzleAgentStoreModule` | `DynamicModule` factory | `.forRoot({ db })` binds `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` + `AGENT_PRICING_STORE` globally over your db handle |
 | `DrizzleAgentStore` | class | `AgentStore` implementation — the write side, including `updateThread` (title and/or the thread's `defaultAgent`), the projected `defaultAgentForThread` and `loadThreadForTurn` reads (see [what a turn reads off a thread](/docs/agent/guides/persistence#what-a-turn-reads-off-a-thread)), `referencedMediaIds` (which media a live message still carries — the library half of [attachment collection](/docs/agent/guides/persistence#which-media-a-message-still-references-optional)), and the optional `recordRunStart`/`recordRunEnd`/`bumpRunRetries` run-reliability hooks the loop and durable runners call |
+| `DrizzleMemoryProvider` | class | `MemoryProvider` implementation over `agent_memory` — `list` (scope-gated in the query), `write` (upsert on the (`scope`, `key`) unique index, whose conflict `set` names exactly what a rewrite may change, so `pinned`/`created_at`/`id` are left alone), `forget` (the actor's own scope in the `where`), plus `pin({ id, pinned })` for the console. No `search` — see [Memory](/docs/agent/guides/memory#search-on-the-provider) |
 | `DrizzleGovernanceQueries` | class | `AgentGovernanceQueries` implementation — the full read-model: spend by model/actor/thread, usage trend, recent activity, run reliability (`runMetrics`/`runsByAgent`/`runErrors`/`runTrend`/`recentRuns`), the approvals inbox (`pendingApprovals`), per-tool stats (`toolStats`), and paged/filterable reads (`toolCallsPage`/`threadsPage`/`runsPage`) |
 | `DrizzlePricingStore` | class | `AgentPricingStore` implementation — `upsertModelPrice` / `listCurrentPrices`, the write side of model pricing (see [Cost & Governance](/docs/agent/guides/cost-and-governance#seeding-prices)) |
-| `agentSchema` | Drizzle schema object | The six agent tables (`agentThread`, `agentMessage`, `agentToolCall`, `agentTokenUsage`, `agentModelPricing`, `agentRun`) |
-| `ensureAgentSchema(db)` | function | Idempotent `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` DDL for all six tables, plus an add-column pass for columns introduced after a table shipped |
+| `agentSchema` | Drizzle schema object | The seven agent tables (`agentThread`, `agentMessage`, `agentToolCall`, `agentTokenUsage`, `agentModelPricing`, `agentRun`, `agentMemory`) |
+| `ensureAgentSchema(db)` | function | Idempotent `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` DDL for every table, plus an add-column pass for columns introduced after a table shipped |
 | `AgentDrizzleDb` | type | The db handle shape the module and store expect — any SQLite-dialect driver, sync or async, schema-aware (`drizzle(client, { schema: agentSchema })`) or not |
-| `AgentRunRow` / `AgentThreadRow` / `AgentMessageRow` | type | `$inferSelect` row shapes for the `agentRun`/`agentThread`/`agentMessage` tables |
+| `AgentRunRow` / `AgentThreadRow` / `AgentMessageRow` / `AgentMemoryRow` | type | `$inferSelect` row shapes for the `agentRun`/`agentThread`/`agentMessage`/`agentMemory` tables |
 
 <Callout type="info" title="referencedMediaIds needs no migration">
 It reads the `attachments` JSON column `agent_message` has carried since attachments shipped, so an
@@ -102,11 +103,24 @@ indexes that), bounded to one actor's attachment-bearing messages. A soft-delete
 counts as holding its references: the rows survive, so the bytes are still reachable.
 </Callout>
 
+<Callout type="info" title="agent_memory — the library owns this one, and not a skill table">
+[Memory](/docs/agent/guides/memory) rows live in `agent_memory`, created by `ensureAgentSchema` like
+the rest. That looks inconsistent next to skills, whose rows are always the host's, and the
+difference is what a row can be related to: a skill plausibly joins your own entities, while a memory
+is a key, a fact, an **opaque** scope token and an origin. `origin_thread_id` is the one column here
+that is deliberately *not* a foreign key — a memory outlives the conversation it came from, and a
+cascade off `agent_thread` would delete beliefs when a transcript aged out.
+
+`DrizzleAgentStoreModule.forRoot({ db })` exports `DrizzleMemoryProvider` but never binds
+`AGENT_MEMORY`: that token's presence is what turns memory on, so binding it would give the feature
+to every host that installed the store.
+</Callout>
+
 <Callout type="info" title="agent_run — the reliability + approvals table">
 Every turn is recorded as a run in `agentRun` (status, duration, error code/message, retry count, a
 `promptHash` for correlating error-rate shifts with prompt changes). `DrizzleGovernanceQueries` reads
 it for the dashboard's Reliability section and for `pendingApprovals`/`toolStats` — no separate table
-or wiring needed, it's created by `ensureAgentSchema` like the other five.
+or wiring needed, it's created by `ensureAgentSchema` like every other table here.
 </Callout>
 
 ## Peer dependencies
