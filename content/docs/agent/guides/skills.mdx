@@ -77,7 +77,7 @@ a config entry. For a body that never varies, `@Skill({ name, description, body:
 
 ## Serving them from your own table
 
-Skills a person administers — per user, per base, edited in a console — belong in your own storage.
+Skills a person administers — per user, per tenant, edited in a console — belong in your own storage.
 Implement `SkillProvider` and hand it over:
 
 ```ts
@@ -132,7 +132,7 @@ one), and `global` — which is everything an `Actor` alone can say.
 Most specific wins. The scopes it outranked are recorded on the entry's `shadows`, shown to the model
 in the catalog line (`overrides the one from global`) and returned on the endpoint. A silent override
 is indistinguishable from an instruction nobody wrote; this way the agent can say *"I followed your
-base's version, which differs from the org default"*.
+depot's version, which differs from the tenant default"*.
 
 ### Who may write one
 
