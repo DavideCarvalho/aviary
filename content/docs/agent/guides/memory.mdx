@@ -25,7 +25,7 @@ Stated by people. A person wrote each of these deliberately — the user about t
 administering their organisation. Treat them as you would any other instruction you were given. If
 the user says something that contradicts one, say which note it conflicts with and at what scope it
 is held, rather than quietly setting it aside.
-- [global] units: report distances in nautical miles
+- [global] units: report distances in kilometres
 Concluded by you. These are your own notes from earlier turns, not documents anyone wrote: they may
 be wrong or out of date, so prefer what the user says now, and say where a note came from if you act
 on it.
@@ -91,7 +91,7 @@ in a class would be an instruction wearing a memory's clothes — which is what 
 
 <Callout type="info">
 **The library owns `agent_memory`; a skill table is still yours.** The two look like the same
-question and are not. A skill row plausibly joins your own entities — who authored it, which sector
+question and are not. A skill row plausibly joins your own entities — who authored it, which depot
 it belongs to, which review approved it — while a memory row is a key, a fact, an opaque scope token
 and an origin, with nothing to relate to. And every other part of memory was already the library's:
 the `remember` tool, `writeMemory`, the `memory:digest` checkpoint, and the
@@ -144,13 +144,19 @@ memory: {
   scopes: {
     resolve: async ({ actor }) => [
       `actor:${actor.id}`,
-      `sector:${await this.sectors.of(actor.id)}`,
+      `depot:${await this.depots.of(actor.id)}`,
       `tenant:${actor.tenantRef}`,
       'global',
     ],
   },
 }
 ```
+
+`depot:` is invented entirely by the example above. The library knows `actor:`, `tenant:` and
+`global` because `Actor` carries an id and a tenant ref — every other token is a string you mint, and
+adding one is a line in your resolver rather than a change in this package. Put it where its
+precedence belongs: the ORDER is the whole of the ranking, and only you know whether a depot's facts
+should outrank its tenant's.
 
 One resolver on purpose. A deployment that could answer *"which scopes does this actor have"* twice
 would eventually answer it differently, and the two answers would be a skills bug and a privacy bug
@@ -195,11 +201,11 @@ departing from.
 
 ```ts
 const verdict = memoryWriteVerdict({
-  scope: 'tenant:base-7',
+  scope: 'tenant:berlin',
   actor,
   scopes: await resolver.resolve({ actor, threadId }),
   author: { kind: 'human', actorRef: actor.id },
-  elevated: await this.gate.administers(actor, 'tenant:base-7'),
+  elevated: await this.gate.administers(actor, 'tenant:berlin'),
 });
 ```
 
@@ -289,7 +295,7 @@ Making it by **scope** is the wrong answer, and it fails quietly:
 
 <Callout type="warn">
 A turn's candidates are the **union** of every resolved scope — a few hundred of yours, several
-hundred of your unit's, thousands of your base's. Selecting narrowest-first means that as soon as one
+hundred of your depot's, thousands of your tenant's. Selecting narrowest-first means that as soon as one
 person has twenty notes of their own, **nothing their organisation knows ever reaches the prompt
 again**. The facts that apply to the most people are the first to be dropped, and the only trace is a
 non-zero `omitted`. That failure looks exactly like the feature working.
@@ -343,8 +349,8 @@ index.
 Three clauses, and the third is the one that is easy to miss:
 
 1. **Filter to `scopes` before ranking.** A search that ranks before it filters is a cross-tenant leak
-   wearing a relevance score — the nearest neighbour to *"what is our rollback policy"* is another
-   base's rollback policy. Records returned outside `scopes` are dropped rather than trusted, so a
+   wearing a relevance score — the nearest neighbour to *"how do we label a pallet"* is another
+   tenant's pallet-labelling rule. Records returned outside `scopes` are dropped rather than trusted, so a
    mistake costs throughput rather than privacy, but **the drop is a backstop, not the boundary**.
 2. **Rank the *keys*** and take the best `limit` of them. Precedence resolves a key to one line, so
    `limit` keys is `limit` lines — the block's own unit.
@@ -378,14 +384,14 @@ section is about searching the **memories**, which are conclusions, not messages
 
 ## Always-on memories
 
-Some facts must be present regardless of what the turn is about. *"Never purge the app-config cache
-during business hours"* is never semantically close to a question about rollbacks, so under pure
-relevance it silently stops appearing.
+Some facts must be present regardless of what the turn is about. *"Never dispatch a pallet without a
+printed manifest"* is never semantically close to a question about labelling, so under pure relevance
+it silently stops appearing.
 
 `MemoryRecord.pinned` marks those:
 
 ```json
-{ "key": "cache-purge", "text": "never purge the app-config cache in business hours", "scope": "tenant:base-7", "pinned": true }
+{ "key": "manifest-required", "text": "never dispatch a pallet without a printed manifest", "scope": "tenant:berlin", "pinned": true }
 ```
 
 **It is categorical, not a priority number**, and that is deliberate:
@@ -484,8 +490,8 @@ Five things write the system block, in this fixed order — most durable first:
 
 Memory is in the system block, where a skill's **body** deliberately is not — and the difference is
 not inconsistency. A body is read *because the model went and asked for it*. A memory is worthless
-unless it is in front of the model on the turn nobody thought to look: *"they report in nautical
-miles"* only works unprompted.
+unless it is in front of the model on the turn nobody thought to look: *"they report distances in
+kilometres"* only works unprompted.
 
 What makes that affordable is that **a memory has no body**. `maxMemories` lines (default 20), each
 capped at `maxFactChars` (default 240) **when it is written** — so the block's whole ceiling is a
