@@ -118,7 +118,7 @@ the agent tables alone, and a Drizzle deployment using RAG owns that table itsel
 <Callout type="info" title="agent_memory — the library owns this one, and not a skill table">
 [Memory](/docs/agent/guides/memory) rows live in `agent_memory`, created and healed like the rest.
 That looks inconsistent next to skills, whose rows are always the host's, and the difference is what
-a row can be related to: a skill plausibly joins your own entities (who authored it, which sector,
+a row can be related to: a skill plausibly joins your own entities (who authored it, which depot,
 which review approved it), while a memory is a key, a fact, an **opaque** scope token and an origin.
 Every other part of memory was already the library's — the `remember` tool, `writeMemory`, the
 `memory:digest` checkpoint, and the read-back and delete endpoints — so storage was the only half a
