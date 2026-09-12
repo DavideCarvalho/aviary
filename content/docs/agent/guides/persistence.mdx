@@ -278,7 +278,7 @@ an already-opened db handle that the host owns.
 pnpm add @dudousxd/nestjs-agent-store-mikro-orm @mikro-orm/core @mikro-orm/nestjs
 ```
 
-`MikroOrmAgentStoreModule.forFeature()` registers the five agent entities (`EntitySchema`) and binds
+`MikroOrmAgentStoreModule.forFeature()` registers the agent entities (`EntitySchema`) and binds
 all three tokens. It needs a `MikroOrmModule.forRoot(...)` in scope for the `EntityManager`.
 
 ```ts
