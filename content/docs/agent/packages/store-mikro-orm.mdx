@@ -108,6 +108,13 @@ managed schema) therefore fails the boot with the pending statements in the mess
 recorded as applied — apply them with [`agentSchemaSql`](#exports) in a migration.
 </Callout>
 
+<Callout type="info" title="Why this list is one longer than Drizzle's">
+This adapter also owns `rag_ingestion_log` — `@dudousxd/nestjs-agent-rag` writes its ingest
+ledger through the same `EntityManager`, so this store creates and heals that table too even
+though it carries no `agent_` prefix. `store-drizzle` has no counterpart: its `agentSchema` is
+the agent tables alone, and a Drizzle deployment using RAG owns that table itself.
+</Callout>
+
 <Callout type="info" title="agent_memory — the library owns this one, and not a skill table">
 [Memory](/docs/agent/guides/memory) rows live in `agent_memory`, created and healed like the rest.
 That looks inconsistent next to skills, whose rows are always the host's, and the difference is what
@@ -139,7 +146,7 @@ healed by `ensureAgentSchema` like every other table here, no separate wiring ne
 ## When to use it
 
 Reach for this adapter when MikroORM is already your app's ORM — `MikroOrmModule.forRoot(...)`
-owns the connection, and `forFeature()` just registers the agent's six entities alongside your own.
+owns the connection, and `forFeature()` just registers the agent's entities alongside your own.
 If you'd rather bring an already-opened handle and skip MikroORM entirely, see
 [`store-drizzle`](/docs/agent/packages/store-drizzle).
 
