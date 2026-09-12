@@ -46,7 +46,7 @@ durable in production without touching your tools or UI. See
 - **Inline or durable** — an in-process runner by default, or opt into the durable runner (add
   `@dudousxd/nestjs-durable`, set `durable: true`) for checkpointed, replay-safe turns — one
   `AgentRunner` SPI, identical wire protocol. Durable turns dispatch their model/tool steps across
-  the worker fleet by default (`AgentRunSteps.llm`/`.tool`).
+  the worker fleet (`AgentRunSteps.llm`/`.tool`).
 - **Run reliability + tracing** — every run's start/end is durably recorded (`agent_run`, with a
   `promptHash` of the resolved system prompt) and every turn emits diagnostics spans
   (`traceId = runId`) that Telescope renders as a waterfall in its TRACES tab.
@@ -76,7 +76,7 @@ durable in production without touching your tools or UI. See
 
 <Callout type="warn" title="Status">
 Early development (`0.x`). The full family ships today — core, the NestJS module (inline + durable
-runners, the latter dispatching model/tool steps across the fleet by default), MikroORM and Drizzle
+runners, the latter dispatching model/tool steps across the fleet), MikroORM and Drizzle
 persistence (including model pricing and run reliability), the governance read-model (spend, run
 reliability, tool stats, a cross-thread approvals inbox, paginated/filterable lists), the standalone
 dashboard, the telescope extension (including run tracing), governed SQL (`-data`), the React

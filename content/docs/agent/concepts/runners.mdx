@@ -37,7 +37,7 @@ behaviour, including what each runner does about a turn parked on a human.
 |---|---|---|
 | The pause | an in-process runner holds the turn open | a real durable **suspend** — the run is checkpointed to the state store |
 | Surviving a restart | no — the pending turn is lost | yes — the run resumes from cache on approval |
-| Where the turn executes | the pod that received the request, start to finish | whichever worker picks up the `agent.run` workflow — and, by default, the model call and each tool call can each land on a *different* worker again (see below) |
+| Where the turn executes | the pod that received the request, start to finish | whichever worker picks up the `agent.run` workflow — and the model call and each tool call can each land on a *different* worker again (see below) |
 | Requires | nothing extra | `@dudousxd/nestjs-durable` + `AgentDurableModule` + a configured `DurableModule` |
 | Wire protocol | identical | identical |
 
