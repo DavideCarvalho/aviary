@@ -89,11 +89,12 @@ CREATE INDEX agent_tool_call_message_idx ON agent_tool_call (message_id);
 | `DrizzleAgentStore` | class | `AgentStore` implementation — the write side, including `updateThread` (title and/or the thread's `defaultAgent`), the projected `defaultAgentForThread` and `loadThreadForTurn` reads (see [what a turn reads off a thread](/docs/agent/guides/persistence#what-a-turn-reads-off-a-thread)), `referencedMediaIds` (which media a live message still carries — the library half of [attachment collection](/docs/agent/guides/persistence#which-media-a-message-still-references-optional)), and the optional `recordRunStart`/`recordRunEnd`/`bumpRunRetries` run-reliability hooks the loop and durable runners call |
 | `DrizzleMemoryProvider` | class | `MemoryProvider` implementation over `agent_memory` — `list` (scope-gated in the query), `write` (upsert on the (`scope`, `key`) unique index, whose conflict `set` names exactly what a rewrite may change, so `pinned`/`created_at`/`id` are left alone), `forget` (the actor's own scope in the `where`), plus `pin({ id, pinned })` for the console. No `search` — see [Memory](/docs/agent/guides/memory#search-on-the-provider) |
 | `DrizzleGovernanceQueries` | class | `AgentGovernanceQueries` implementation — the full read-model: spend by model/actor/thread, usage trend, recent activity, run reliability (`runMetrics`/`runsByAgent`/`runErrors`/`runTrend`/`recentRuns`), the approvals inbox (`pendingApprovals`), per-tool stats (`toolStats`), and paged/filterable reads (`toolCallsPage`/`threadsPage`/`runsPage`) |
+| `DrizzleRagIngestionLog` | class | Records every RAG ingestion outcome into `rag_ingestion_log` by subscribing to the `aviary:rag:*` diagnostics — the only place a **skipped** or **failed** document is visible, since one that produced no chunks does not exist as far as `VectorStore.listDocuments()` is concerned. Reads: `list`/`listPage` (a page plus the unpaginated total), `get`, `remove`, `removeByCollection`, the delete-safe keyset `iterate`, and `listDocumentIds` for an orphan sweep. On by default; `forRoot({ db, ragIngestionLog: false })` binds nothing |
 | `DrizzlePricingStore` | class | `AgentPricingStore` implementation — `upsertModelPrice` / `listCurrentPrices`, the write side of model pricing (see [Cost & Governance](/docs/agent/guides/cost-and-governance#seeding-prices)) |
-| `agentSchema` | Drizzle schema object | The seven agent tables (`agentThread`, `agentMessage`, `agentToolCall`, `agentTokenUsage`, `agentModelPricing`, `agentRun`, `agentMemory`) |
+| `agentSchema` | Drizzle schema object | The tables this store owns — `agentThread`, `agentMessage`, `agentToolCall`, `agentTokenUsage`, `agentModelPricing`, `agentRun`, `agentMemory`, `ragIngestionLog` |
 | `ensureAgentSchema(db)` | function | Idempotent `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` DDL for every table, plus an add-column pass for columns introduced after a table shipped |
 | `AgentDrizzleDb` | type | The db handle shape the module and store expect — any SQLite-dialect driver, sync or async, schema-aware (`drizzle(client, { schema: agentSchema })`) or not |
-| `AgentRunRow` / `AgentThreadRow` / `AgentMessageRow` / `AgentMemoryRow` | type | `$inferSelect` row shapes for the `agentRun`/`agentThread`/`agentMessage`/`agentMemory` tables |
+| `AgentRunRow` / `AgentThreadRow` / `AgentMessageRow` / `AgentMemoryRow` / `RagIngestionLogRow` | type | `$inferSelect` row shapes for the `agentRun`/`agentThread`/`agentMessage`/`agentMemory`/`ragIngestionLog` tables |
 
 <Callout type="info" title="referencedMediaIds needs no migration">
 It reads the `attachments` JSON column `agent_message` has carried since attachments shipped, so an
@@ -114,6 +115,25 @@ cascade off `agent_thread` would delete beliefs when a transcript aged out.
 `DrizzleAgentStoreModule.forRoot({ db })` exports `DrizzleMemoryProvider` but never binds
 `AGENT_MEMORY`: that token's presence is what turns memory on, so binding it would give the feature
 to every host that installed the store.
+</Callout>
+
+<Callout type="info" title="rag_ingestion_log — the ingest ledger, and why it carries no agent_ prefix">
+`@dudousxd/nestjs-agent-rag-media` owns no storage: it publishes `aviary:rag:*` diagnostics, and a
+store *subscribes*. `DrizzleRagIngestionLog` is this adapter's subscriber, which is why
+`ensureAgentSchema` creates a table named outside the `agent_` family, indexed by
+(`collection`, `updated_at`) for the per-collection listing.
+[`store-mikro-orm`](/docs/agent/packages/store-mikro-orm) carries the same capability as
+`MikroOrmRagIngestionLog` — the choice of ORM adapter does not decide whether a deployment can audit
+its ingestions.
+
+The table is the only place a document that produced **no chunks** is visible at all: an extraction
+that came back empty, a mime type with no extractor, an embedding call that threw.
+`VectorStore.listDocuments()` knows only about successes, so without this table a scanned PDF that
+silently failed to index reads exactly like one nobody ever uploaded.
+
+`DrizzleAgentStoreModule.forRoot({ db })` binds and exports it by default;
+`{ ragIngestionLog: false }` binds nothing at all, for a host that records outcomes itself or
+ingests no media.
 </Callout>
 
 <Callout type="info" title="agent_run — the reliability + approvals table">

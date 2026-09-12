@@ -74,6 +74,7 @@ no re-binding. Do not import it more than once expecting scoped behavior.
 | `MikroOrmAgentStore` | class | `AgentStore` implementation — the write side (threads, messages, tool calls, usage), including `updateThread` (title and/or the thread's `defaultAgent`), the projected `defaultAgentForThread` and `loadThreadForTurn` reads (see [what a turn reads off a thread](/docs/agent/guides/persistence#what-a-turn-reads-off-a-thread)), `referencedMediaIds` (which media a live message still carries — the library half of [attachment collection](/docs/agent/guides/persistence#which-media-a-message-still-references-optional)), and the optional `recordRunStart`/`recordRunEnd`/`bumpRunRetries` run-reliability hooks the loop and durable runners call |
 | `MikroOrmMemoryProvider` | class | `MemoryProvider` implementation over `agent_memory` — `list` (scope-gated in the query), `write` (upsert on the (`scope`, `key`) unique index, with `pinned`/`created_at`/`id` out of the conflict merge), `forget` (the actor's own scope in the `where`), plus `pin({ id, pinned })` for the console. No `search` — see [Memory](/docs/agent/guides/memory#search-on-the-provider) |
 | `MikroOrmGovernanceQueries` | class | `AgentGovernanceQueries` implementation — the full read-model: spend by model/actor/thread, usage trend, recent activity, run reliability (`runMetrics`/`runsByAgent`/`runErrors`/`runTrend`/`recentRuns`), the approvals inbox (`pendingApprovals`), per-tool stats (`toolStats`), and paged/filterable reads (`toolCallsPage`/`threadsPage`/`runsPage`) |
+| `MikroOrmRagIngestionLog` | class | Records every RAG ingestion outcome into `rag_ingestion_log` by subscribing to the `aviary:rag:*` diagnostics — the only place a **skipped** or **failed** document is visible, since one that produced no chunks does not exist as far as `VectorStore.listDocuments()` is concerned. Reads: `list`/`listPage` (a page plus the unpaginated total), `get`, `remove`, `removeByCollection`, the delete-safe keyset `iterate`, and `listDocumentIds` for an orphan sweep. On by default; `forFeature({ ragIngestionLog: false })` binds nothing |
 | `MikroOrmPricingStore` | class | `AgentPricingStore` implementation — `upsertModelPrice` / `listCurrentPrices`, the write side of model pricing (see [Cost & Governance](/docs/agent/guides/cost-and-governance#seeding-prices)) |
 | `ensureAgentSchema(orm, opts?)` | function | Non-destructive `schema.update({ safe: true })` — create + add-column, never drop or alter. Re-diffs afterwards and throws `AgentSchemaHealError` rather than record a heal that did not apply |
 | `AgentSchemaHealError` | class | Thrown when structure the diff asked for is still pending after the heal; carries the pending statements. The schema fingerprint is NOT recorded, so the next boot retries |
@@ -108,11 +109,21 @@ managed schema) therefore fails the boot with the pending statements in the mess
 recorded as applied — apply them with [`agentSchemaSql`](#exports) in a migration.
 </Callout>
 
-<Callout type="info" title="Why this list is one longer than Drizzle's">
-This adapter also owns `rag_ingestion_log` — `@dudousxd/nestjs-agent-rag` writes its ingest
-ledger through the same `EntityManager`, so this store creates and heals that table too even
-though it carries no `agent_` prefix. `store-drizzle` has no counterpart: its `agentSchema` is
-the agent tables alone, and a Drizzle deployment using RAG owns that table itself.
+<Callout type="info" title="rag_ingestion_log — the ingest ledger, and why it carries no agent_ prefix">
+`@dudousxd/nestjs-agent-rag-media` owns no storage: it publishes `aviary:rag:*` diagnostics, and a
+store *subscribes*. `MikroOrmRagIngestionLog` is this adapter's subscriber, which is why this store
+creates and heals a table named outside the `agent_` family.
+[`store-drizzle`](/docs/agent/packages/store-drizzle) carries the same capability as
+`DrizzleRagIngestionLog` — the choice of ORM adapter does not decide whether a deployment can audit
+its ingestions.
+
+The table is the only place a document that produced **no chunks** is visible at all: an extraction
+that came back empty, a mime type with no extractor, an embedding call that threw.
+`VectorStore.listDocuments()` knows only about successes, so without this table a scanned PDF that
+silently failed to index reads exactly like one nobody ever uploaded.
+
+`MikroOrmAgentStoreModule.forFeature()` binds and exports it by default; `{ ragIngestionLog: false }`
+binds nothing at all, for a host that records outcomes itself or ingests no media.
 </Callout>
 
 <Callout type="info" title="agent_memory — the library owns this one, and not a skill table">
