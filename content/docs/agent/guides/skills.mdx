@@ -6,9 +6,9 @@ description: Authored procedures the model pulls in when a task calls for one �
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Every deployment accumulates instructions that are true *sometimes*. How base 7 formats a unit
-designation. What counts as a valid work order this quarter. The three-step normalisation someone
-worked out and wrote down.
+Every deployment accumulates instructions that are true *sometimes*. How the Berlin warehouse labels a pallet.
+What counts as an expedited order this quarter. The three-step reconciliation someone worked out
+and wrote down.
 
 They have nowhere good to live. In the system prompt they are paid for on every turn by every user,
 whether the question needs them or not — and an agent carrying five of them is an agent whose prompt
@@ -21,8 +21,8 @@ A **skill** splits the two halves:
 <skills>
 Procedures available to you. Each line is a name, the scope it came from, and what it covers — not
 the procedure itself.
-- normalize-unit [tenant:base-7] — Normalise a unit designation to DPAS form. (overrides the one from global)
-- work-order     [global]        — Open and route a work order.
+- label-pallet [tenant:berlin] — Label a pallet for outbound freight. (overrides the one from global)
+- expedite     [global]        — Decide whether an order is expedited, and route it.
 </skills>
 ```
 
@@ -57,16 +57,16 @@ flight when that deployment rolled would replay against a sequence one position 
 
 ```ts
 @Skill({
-  name: 'normalize-unit',
-  description: 'Normalise a unit designation to DPAS form.',
-  scope: 'tenant:base-7',
+  name: 'label-pallet',
+  description: 'Label a pallet for outbound freight.',
+  scope: 'tenant:berlin',
 })
 @Injectable()
 export class NormalizeUnitSkill implements SkillBody {
   constructor(private readonly units: UnitService) {}
 
   body(ctx: SkillContext): string {
-    return `Strip any squadron suffix, then match against DPAS.
+    return `Strip any carrier prefix, then match against the outbound manifest.
 Known aliases for this base: ${this.units.aliasesFor(ctx.actor.tenantRef).join(', ')}`;
   }
 }
@@ -77,7 +77,7 @@ a config entry. For a body that never varies, `@Skill({ name, description, body:
 
 ## Serving them from your own table
 
-Skills a person administers — per user, per base, edited in a console — belong in your own storage.
+Skills a person administers — per user, per tenant, edited in a console — belong in your own storage.
 Implement `SkillProvider` and hand it over:
 
 ```ts
@@ -132,7 +132,7 @@ one), and `global` — which is everything an `Actor` alone can say.
 Most specific wins. The scopes it outranked are recorded on the entry's `shadows`, shown to the model
 in the catalog line (`overrides the one from global`) and returned on the endpoint. A silent override
 is indistinguishable from an instruction nobody wrote; this way the agent can say *"I followed your
-base's version, which differs from the org default"*.
+depot's version, which differs from the tenant default"*.
 
 ### Who may write one
 
@@ -141,11 +141,11 @@ What it ships is the rule, as a pure function you call from your own console:
 
 ```ts
 const verdict = skillWriteVerdict({
-  scope: 'tenant:base-7',
+  scope: 'tenant:berlin',
   actor,
   scopes: await resolver.resolve({ actor, threadId }),
   author: { kind: 'human', actorRef: actor.id },
-  elevated: await this.gate.administers(actor, 'tenant:base-7'),
+  elevated: await this.gate.administers(actor, 'tenant:berlin'),
 });
 ```
 
@@ -168,9 +168,9 @@ GET /agent/skills?threadId=<optional>
 ```json
 [
   {
-    "name": "normalize-unit",
-    "description": "Normalise a unit designation to DPAS form.",
-    "scope": "tenant:base-7",
+    "name": "label-pallet",
+    "description": "Label a pallet for outbound freight.",
+    "scope": "tenant:berlin",
     "shadows": ["global"]
   },
   { "name": "work-order", "description": "Open and route a work order.", "scope": "global" }

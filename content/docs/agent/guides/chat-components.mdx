@@ -252,8 +252,8 @@ for a mention is another entry in the array rather than a second component:
 `createSkillsSource({ client: chat.client, getThreadId })` is the concrete one behind `/`: it reads
 `GET /agent/skills`, the scope-resolved list of what this actor can invoke, built by the same call
 that offers the catalog to the model — so what a user can type and what the agent can reach cannot
-drift apart. Each row shows where its skill came from — `tenant:base-7`, or
-`tenant:base-7 · overrides global` when one shadows another, since `shadows` is set only on a clash
+drift apart. Each row shows where its skill came from — `tenant:berlin`, or
+`tenant:berlin · overrides global` when one shadows another, since `shadows` is set only on a clash
 — and the raw `{ scope, shadows? }` stays on the item's `data` for a host that draws it its own way.
 The list keeps the order it arrived in, because that order is the precedence. Everything else about
 the menu is the same for it as for any other source.
