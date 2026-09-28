@@ -1,6 +1,6 @@
 ---
 title: RBAC (roles & permissions)
-description: The opt-in, persisted roles-and-permissions layer — coarse @Roles checks in the core, and database-backed providers via the typeorm / mikro-orm / prisma adapters.
+description: The opt-in, persisted roles-and-permissions layer — coarse @Roles checks in the core, and database-backed providers via the typeorm / mikro-orm / prisma / drizzle adapters.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -15,7 +15,7 @@ This mirrors how Laravel keeps `Gate`/`Policy` in the framework while roles-and-
 RBAC in authz is two cooperating pieces:
 
 1. **The seam (in the core).** The `@Roles` decorator + `RolesGuard`, and the `RoleProvider` / `PermissionProvider` interfaces behind the `ROLE_PROVIDER` / `PERMISSION_PROVIDER` tokens. These let your code *ask* for a user's roles and permissions without knowing where they're stored.
-2. **The store (an adapter).** A persisted implementation of those providers, backed by your database, shipped as `@dudousxd/nestjs-authz-typeorm`, `-mikro-orm`, or `-prisma`.
+2. **The store (an adapter).** A persisted implementation of those providers, backed by your database, shipped as `@dudousxd/nestjs-authz-typeorm`, `-mikro-orm`, `-prisma`, or `-drizzle`.
 
 Crucially, the seam works **on its own**. With no adapter installed, coarse role checks still function — they read roles straight off the current user object (`user.roles` / `user.role`) via the built-in `defaultRoleResolver`. Nothing in the core touches a database; the adapter is what lets roles and permissions live in one *and* be edited at runtime.
 
@@ -104,7 +104,7 @@ import { ROLE_PROVIDER, PERMISSION_PROVIDER } from '@dudousxd/nestjs-authz';
 
 When you want roles and permissions stored in your database, install the adapter for your ORM. It provides the `RoleProvider`/`PermissionProvider` implementations *and* manages the schema.
 
-<Tabs items={['TypeORM', 'MikroORM', 'Prisma']}>
+<Tabs items={['TypeORM', 'MikroORM', 'Prisma', 'Drizzle']}>
 <Tab value="TypeORM">
 
 ```bash
@@ -123,6 +123,13 @@ pnpm add @dudousxd/nestjs-authz-mikro-orm
 
 ```bash
 pnpm add @dudousxd/nestjs-authz-prisma
+```
+
+</Tab>
+<Tab value="Drizzle">
+
+```bash
+pnpm add @dudousxd/nestjs-authz-drizzle drizzle-orm
 ```
 
 </Tab>
@@ -183,6 +190,7 @@ Adapter specifics:
 - **TypeORM** — `TypeOrmAuthzStore`, schema via `ensureAuthzSchema`.
 - **MikroORM** — applies updates through `getUpdateSchemaSQL({ safe: true })`, so generated DDL is non-destructive by construction.
 - **Prisma** — consumer-managed: Prisma owns the schema, so you add the models to your `schema.prisma` and run `prisma migrate`; the adapter reads/writes through your `PrismaClient`.
+- **Drizzle (Postgres)** — `DrizzleAuthzStore(db)`. `createAuthzTables({ tableNames, schema })` returns the tables as `pgTable`s. Spread them into your drizzle-kit schema and pass the same object to the store (`{ tables }`), and drizzle-kit owns the migration. Because the schema is usually drizzle-kit's, `autoCreateSchema` defaults to `false` here. Turn it on to run the idempotent `CREATE ... IF NOT EXISTS` instead. The package also compiles `gate.scope(Entity)` into a Drizzle `WHERE`: `db.select().from(posts).where(await applyScope(gate, Post, posts))`.
 
 ### Tenant-scoped permissions
 
