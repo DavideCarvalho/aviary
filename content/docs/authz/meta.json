@@ -12,6 +12,7 @@
     "current-user",
     "resource-resolution",
     "rbac",
+    "external-engines",
     "ecosystem"
   ]
 }

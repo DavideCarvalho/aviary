@@ -192,6 +192,29 @@ Adapter specifics:
 - **Prisma** — consumer-managed: Prisma owns the schema, so you add the models to your `schema.prisma` and run `prisma migrate`; the adapter reads/writes through your `PrismaClient`.
 - **Drizzle (Postgres)** — `DrizzleAuthzStore(db)`. `createAuthzTables({ tableNames, schema })` returns the tables as `pgTable`s. Spread them into your drizzle-kit schema and pass the same object to the store (`{ tables }`), and drizzle-kit owns the migration. Because the schema is usually drizzle-kit's, `autoCreateSchema` defaults to `false` here. Turn it on to run the idempotent `CREATE ... IF NOT EXISTS` instead. The package also compiles `gate.scope(Entity)` into a Drizzle `WHERE`: `db.select().from(posts).where(await applyScope(gate, Post, posts))`.
 
+### Role sources (manual vs SSO/SCIM)
+
+Every role assignment records a `source`. It defaults to `'manual'`, so existing calls and rows
+keep their meaning. `setUserRoles` replaces **only that source's** assignments, so an SSO sync
+never removes a role an admin granted by hand:
+
+```ts
+// On each SSO login: exactly these roles come from SSO. Manual grants are untouched.
+await store.setUserRoles(user, rolesFromIdpGroups, { source: 'sso', tenantId });
+
+await store.assignRole(user, 'editor', { source: 'scim' });
+await store.removeRole(user, 'editor', { source: 'scim' }); // without `source`: removed from every source
+await store.getRoleAssignments(user); // [{ role, source, tenantId }]
+```
+
+Adapter notes:
+
+- **Existing databases:** schema sync adds the `source` column, and existing rows become manual
+  assignments. It never rewrites a primary key. Widening the key so that one role can come from
+  two sources is a one-time migration; each adapter's changelog and README have the SQL.
+- **Prisma:** this is opt-in with `roleSources: true` after you add
+  `source String @default("manual")` to `UserRole` and its `@@id`.
+
 ### Tenant-scoped permissions
 
 Because authz reads the current tenant from [`@dudousxd/nestjs-context`](/docs/context) (`Context.tenantId()`), permission lookups can be **scoped to the active tenant** automatically — the same user can be an `editor` in one tenant and a `viewer` in another, and the provider resolves the right set for the request in flight. No per-call tenant argument required.
