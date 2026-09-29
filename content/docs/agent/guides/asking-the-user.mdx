@@ -97,6 +97,49 @@ issues, so it can fix its own mistake. It does not fail the run and it does not 
 
 ---
 
+## Typed questions
+
+A question does not have to be a pick from options. Give it an `input` and it asks for a value — a
+count, a date, an email, a sentence:
+
+```ts
+intake: {
+  questions: [
+    {
+      id: 'seats',
+      prompt: 'How many seats?',
+      description: 'Between 1 and 9.',
+      input: { type: 'number', min: 1, max: 9, required: true, placeholder: 'e.g. 2' },
+      defaults: ['2'],
+    },
+    { id: 'contact', prompt: 'Who should we email?', input: { type: 'email', required: true } },
+    { id: 'notes', prompt: 'Anything else?', input: { type: 'textarea', max: 500 } },
+  ],
+}
+```
+
+`input.type` is `text` · `textarea` · `number` · `boolean` · `date` · `email` · `url` · `select`;
+`select` picks from `options` like a plain question. `min`/`max` mean the smallest/largest number, the
+shortest/longest text, or the earliest/latest `YYYY-MM-DD`; `pattern` is a regex the whole value must
+match. A typed question may leave `options` and `defaults` out — there is no honest default for "who
+should we email?" — but any default it does declare has to pass its own rules. The model's `ask` tool
+takes the same fields.
+
+**Answers stay `string[]`**, in one canonical form per type: numbers as decimals (`"42"`), booleans as
+`"true"`/`"false"`, dates as `YYYY-MM-DD`, everything else as typed. `POST /agent/tool-call/answer`
+checks them against the parked questions and answers `400` — `answers["seats"] must be at most 9` —
+for a value a question refuses or a `required` question left with neither an answer nor a default,
+so the person hears why instead of the agent silently proceeding without it. The loop applies the
+same rules when it settles, dropping anything it cannot use.
+
+On the client, the transcript's questions carry `description`, `input`, `value`, `setValue(raw)`
+(coerced with the headless `coerceAnswer`) and `error`, and the block carries `isValid` — see
+[Bring your own UI](/docs/agent/guides/bring-your-own-ui). A runner that is not this library's loop
+maps its own forms onto the same shape; the [stream reference](/docs/agent/reference/stream-events#asking-the-user)
+has the mapping for an OpenCode `question` tool.
+
+---
+
 ## Answering
 
 ```bash
