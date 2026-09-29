@@ -279,6 +279,25 @@ them. Render them from the `reasoning` block — `MessageItem` shows one way (a 
 overridable through `renderReasoning` and `reasoningLabel`), and a host is free to show a "thinking"
 shimmer instead, or nothing at all.
 
+Thinking is timed and persisted. The backend reports each step's `reasoningMs` on `step-finish`, the
+transport stamps it on the reasoning part (`providerMetadata.agent.reasoningMs`), and the stored
+message keeps it, so `block.durationMs` reads the same live and after a reload — `null` while the
+block still streams. `useElapsed(running)` is the headless ticker for that window and
+`formatElapsed(ms)` the label:
+
+```tsx
+import { formatElapsed, useElapsed, type TranscriptReasoningBlock } from '@dudousxd/nestjs-agent-react';
+
+function ThoughtFor({ block }: { block: TranscriptReasoningBlock }) {
+  const elapsed = useElapsed(block.isStreaming);
+  const ms = block.isStreaming ? elapsed : block.durationMs;
+  return ms === null ? null : <span>Thought for {formatElapsed(ms)}</span>;
+}
+```
+
+A reloaded thread gets the same parts back: `storedThreadToUiMessages` puts a step's persisted
+reasoning before its text, and its pushed components after it as `data-ui` parts.
+
 ### Stopping a turn
 
 `POST /agent/chat/:runId/cancel` closes the SSE client-side and hard-aborts the run server-side;
