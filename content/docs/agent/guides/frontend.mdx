@@ -420,6 +420,25 @@ same as `cancel`, is ownership-scoped over HTTP — it operates on the caller's 
 
 ---
 
+## Quota
+
+`useQuota` reads `GET /agent/quota` — every budget window with its usage and ceilings, and
+`blocked` when one is exhausted — and re-reads after each run a chat on the same backend settles
+(`pollMs` to poll as well). Pass `blocked` to the chat and it refuses to send while it holds:
+
+```tsx
+import { QuotaBlockedError, useQuota } from '@dudousxd/nestjs-agent-react';
+
+const quota = useQuota({ backend });
+const chat = useAgentChat({ backend, blocked: quota.blocked });
+
+<meter value={quota.month?.usedUsd ?? 0} max={quota.month?.limitUsd ?? 1} />
+{quota.blocked ? <p role="alert">{quota.blocked.reason}</p> : null}
+```
+
+`sendMessage` and `regenerate` then reject with `QuotaBlockedError` (carrying the `block`) instead
+of starting a turn the server would refuse with `429`.
+
 ## Run failures and quota errors
 
 A run that fails mid-stream (quota exceeded, an unhandled error) doesn't append error text to the

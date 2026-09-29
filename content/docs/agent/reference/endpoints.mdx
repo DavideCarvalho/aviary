@@ -134,11 +134,16 @@ The run is derived server-side from the `toolCallId` — the call's own `runId` 
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| `GET` | `/agent/quota/today` | — | `{ usedTokens: number }` |
+| `GET` | `/agent/quota` | — | `QuotaReport` — `{ windows: { period: 'day' \| 'month'; usedTokens; limitTokens?; usedUsd; limitUsd?; resetsAt? }[]; blocked?: { period; reason? } }` |
+| `GET` | `/agent/quota/today` | — | `{ usedTokens: number; limitTokens: number \| null; withinLimit: boolean; costUsd: number }` |
 
-<Callout type="warn" title="Only usedTokens comes back">
-  The controller returns `{ usedTokens }` only — it does not echo `limitTokens` or `withinLimit`, even though the core `QuotaState` type has both. Compute against the configured limit client-side if you need it. See [Cost & governance](/docs/agent/guides/cost-and-governance).
-</Callout>
+`GET /agent/quota` is the bound `QuotaProvider`'s report. The default, `LedgerQuotaProvider`, reads
+the usage ledger: a `day` window (its token ceiling from the configured daily quota) and a `month`
+window when the store implements `usageBetween`. `blocked` names the first exhausted window.
+
+When the host configured a budget — `quotaProvider` or `quotaLimits` — a `blocked` report also gates
+`POST /agent/chat`: the send is refused with `429` and `{ code: 'quota_exceeded', period, message }`
+before the turn starts. See [Cost & governance](/docs/agent/guides/cost-and-governance#budgets-across-windows).
 
 ## Dashboard JSON API
 

@@ -39,6 +39,8 @@ Every option below is passed to `AgentModule.forRoot({ … })`. `model` and `act
 |---|---|---|---|
 | `quota` | `QuotaStore` | _none_ | Daily token budget, explicit store. Omit both `quota` and `quotaLimitTokens` to disable quotas entirely. Wins over `quotaLimitTokens` if both are set. |
 | `quotaLimitTokens` | `number` | _none_ | Daily token budget, no extra wiring: turns on quotas backed by the built-in `LedgerQuotaStore`, which reads the persisted usage ledger. |
+| `quotaProvider` | `QuotaProvider` | `LedgerQuotaProvider` | The budget behind `GET /agent/quota` — windows (`day`/`month`) of tokens and USD against their ceilings. Setting it turns on the send gate: a `blocked` report refuses `POST /agent/chat` with `429`. For a budget the host owns (an AI-gateway spend cap). |
+| `quotaLimits` | `{ day?: { tokens?, usd? }; month?: { tokens?, usd? } }` | _none_ | Ceilings for the default `LedgerQuotaProvider`'s windows; setting it turns on the send gate. Ignored when `quotaProvider` is given. |
 
 ### Routing
 
