@@ -65,6 +65,12 @@ Subpath `@dudousxd/nestjs-agent-react/markdown` exports `AgentMarkdown` — a st
 KaTeX + Mermaid renderer for `renderText`, behind its own peers so a plain-text app never pulls them
 in.
 
+Subpath `@dudousxd/nestjs-agent-react/genui` exports `GenerativeUI`, `useGenerativeUI`,
+`GenerativeUIScope` and `GenuiTree` — the headless renderer for server-pushed components (registry,
+optional catalog validation, versioned `resolveComponent`, per-item error boundaries, `genui:tree`
+frames). `/genui/json-render` adds a json-render adapter. See the
+[Generative UI guide](/docs/agent/guides/generative-ui).
+
 ## Headless, in the TanStack sense
 
 The components are style-agnostic, but style-agnostic is not headless: a `classNames` map lets you
@@ -148,6 +154,7 @@ mount) are the client-side hooks that make that invisible.
 | `react` (>=18) | Always. |
 | `ai`, `@ai-sdk/react` | The hook — `useAgentChat` returns the SDK's own `useChat` result, extended. |
 | `streamdown`, `@streamdown/code`, `@streamdown/math`, `@streamdown/mermaid`, `react-markdown`, `remark-gfm`, `remark-math`, `rehype-katex`, `rehype-sanitize`, `katex`, `prism-react-renderer`, `unist-util-visit` | Optional — only if you import the `/markdown` subpath. |
+| `@json-render/react` (>=0.21) | Optional — only if you import the `/genui/json-render` subpath. |
 
 ## When to use it
 

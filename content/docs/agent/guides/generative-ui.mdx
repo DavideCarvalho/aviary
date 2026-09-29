@@ -1,0 +1,189 @@
+---
+title: Generative UI
+icon: Shapes
+description: Let the model (or your own tools) push components into the conversation — a catalog the server validates against, a `ui` frame on the stream, and your own renderers on the client.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Some answers are a table, a chart or a checklist, not prose. Generative UI lets the server push a
+**component** into the assistant message: a name, props, and optionally a version. The library
+carries it and persists it. How it looks is always up to your app.
+
+```text
+server                      stream                          client
+catalog ──► tool validates ──► { kind: 'ui', id, component, ──► registry[component]
+            ctx.emitUi          props, version? }                (your renderer)
+                                   │
+                                   └─► persisted on the message → reload shows the same thing
+```
+
+Three pieces:
+
+1. **A catalog** (`@dudousxd/nestjs-agent-genui`): which components exist, their props schemas, what
+   the model is told, how each reads as plain text.
+2. **Tools that push**: generated from the catalog, or your own tools calling `ctx.emitUi`.
+3. **Renderers** on the client, looked up by component name.
+
+<Callout type="info">
+Headless by design. The library ships component *definitions*, never visuals, so two apps with very
+different looks can share one catalog.
+</Callout>
+
+## 1. A catalog
+
+```ts
+import { defineCatalog, defineComponent } from '@dudousxd/nestjs-agent-genui';
+import { BUILTIN_COMPONENTS, LAYOUT_COMPONENTS } from '@dudousxd/nestjs-agent-genui/builtins';
+import { z } from 'zod';
+
+const DealCard = defineComponent({
+  name: 'DealCard',
+  title: 'Deal',
+  description: 'One deal in the pipeline: name, stage, amount.',
+  props: z.object({ name: z.string(), stage: z.string(), amount: z.number() }),
+  fallbackText: (p) => `*${p.name}* — ${p.stage} (${p.amount})`,
+  version: 1,
+});
+
+export const catalog = defineCatalog([...BUILTIN_COMPONENTS, ...LAYOUT_COMPONENTS, DealCard]);
+```
+
+Props may be any [Standard Schema](https://standardschema.dev) or a **JSON Schema object**. JSON
+Schema is plain data, so components can come from a database, for example components each tenant
+defines and versions for itself. JSON Schema props go through a small built-in validator by default.
+Pass `ajvValidator(new Ajv())` to `defineCatalog` for the whole spec.
+
+`fallbackText` is what a channel that cannot draw the component shows (Slack, email, a CLI):
+`componentToText(catalog, component, props)`.
+
+## 2. Tools for the model
+
+`genuiTools(catalog, options)` returns ordinary lib tools. There are two shapes.
+
+**Per component**, one tool per component, whose input *is* the props:
+
+```ts
+const tools = genuiTools(catalog); // ui__show_data_table, ui__show_deal_card, …
+@Module({ providers: tools.map((tool) => provideAgentTool(tool)) })
+export class GenuiModule {}
+```
+
+**Tree**, one tool whose input is a nested layout composed from the catalog:
+
+```ts
+const [renderResult] = genuiTools(catalog, {
+  mode: 'tree',
+  treeToolName: 'renderResult',
+  treeInstructions: 'Call this after reading the data, to present the answer.',
+  terminal: true,
+});
+```
+
+```json
+{ "type": "Card", "props": { "title": "Signups" }, "children": [
+  { "type": "KpiCards", "props": { "items": [{ "label": "New", "value": 12 }] } },
+  { "type": "DataTable", "props": { "columns": [{ "key": "day", "label": "Day" }], "rows": [] } }
+] }
+```
+
+The tree tool's description carries `catalogToModelText(catalog)`, so the model sees every
+component, its props and which ones take children. Each node is validated against the catalog. A
+refused call reaches the model as a tool error naming each problem, and the model can fix it. A
+valid tree is pushed as one frame, `component: 'genui:tree'`, `props: { root }`.
+
+`terminal: true` ends the turn once the call succeeds. When the UI *is* the answer, there is no
+model call to narrate it.
+
+| | Per component | Tree |
+|---|---|---|
+| Tools | one per component | one |
+| Model effort | pick a tool, fill props | compose a layout |
+| Best for | "show this table", several independent pieces | one composed answer (dashboards, reports) |
+| Frame | `component: <Name>` | `component: 'genui:tree'` |
+
+## 3. Pushing from your own tools: `ctx.emitUi`
+
+Any lib tool can push a component. The generated genui tools call this for you.
+
+```ts
+@AiTool({ name: 'forecast', kind: 'read', description: '…', input: z.object({ city: z.string() }) })
+export class ForecastTool {
+  async execute({ city }: { city: string }, ctx: AiToolCtx) {
+    const days = await this.weather.week(city);
+    const pushed = await ctx.emitUi?.('Chart', {
+      type: 'line', xKey: 'day', series: [{ key: 'maxC' }], data: days,
+    });
+    return { shown: pushed?.id, days: days.length }; // what the model is told
+  }
+}
+```
+
+- **Live.** The frame streams while the tool runs, in the inline runner, the durable runner, and on
+  the worker that serves a dispatched tool step.
+- **Persisted.** When the step's tools have settled, the loop writes every component of the step
+  onto the assistant message (`AgentStore.setMessageUi`, which the Drizzle, MikroORM and in-memory
+  stores implement). The model turn's own frames come first, then the tools' pushes in call order.
+  A reload shows each one right after the tool call that pushed it.
+- **Updates in place.** `id` defaults to `<toolCallId>:ui:<n>`. Pass your own `id` to update one
+  component across pushes, for example streaming rows into a table.
+- **Replay-safe.** The pushes ride the tool step's journaled result. A durable replay re-runs
+  nothing, so it neither re-streams nor re-persists them. A tool that pushes nothing journals
+  exactly what it always did.
+
+`ctx.emitUi` is optional on `AiToolCtx`. Surfaces with no conversation, such as the MCP server,
+don't provide it, so a tool served there should call `ctx.emitUi?.(…)`.
+
+<Callout type="info">
+`@AiTool({ terminal: true })` (and `genuiTools(…, { terminal: true })`) ends the turn once the call
+succeeds. The flag is settled in the call's `persist:toolcall` checkpoint, so a replay takes the
+same branch. A failed call does not end the turn, so the model can fix it. Ending early skips
+follow-ups and the `outputSchema` formatting pass.
+</Callout>
+
+### Another runner
+
+A backend that is not this library's loop (a sandboxed agent, an OpenCode runner) pushes the same
+way. It writes `{ kind: 'ui', id, component, props, version?, toolCallId? }` between the call's
+announcement and its outcome, with an id derived from the call so a retry replaces it. It also
+persists the list on the assistant message's `ui` field. See the
+[stream protocol](https://github.com/DavideCarvalho/nestjs-agent/blob/master/docs/stream-protocol.md#generative-ui).
+
+## 4. Rendering: `@dudousxd/nestjs-agent-react/genui`
+
+```tsx
+import { GenerativeUI, type GenuiRegistry } from '@dudousxd/nestjs-agent-react/genui';
+
+const registry: GenuiRegistry = { DataTable: MyTable, Chart: MyChart, Card: MyCard, Text: MyText };
+
+<MessageItem
+  message={message}
+  renderUi={(block) => (
+    <GenerativeUI
+      part={block}
+      registry={registry}
+      catalog={catalog}
+      resolveComponent={(name, version) => loadTenantComponent(name, version)}
+      fallback={({ reason, item }) => <Unknown name={item.component} reason={reason} />}
+    />
+  )}
+/>;
+```
+
+- Renderers receive the props spread, and `children` when they are a layout node in a tree.
+- `catalog` validates before drawing, synchronously when the schema allows, so nothing flashes.
+- `resolveComponent(name, version)` covers components the registry lacks, such as tenant components
+  at the exact version a message was rendered with. It is cached, and it may be async (`loading`
+  shows meanwhile).
+- Every item, and every tree node, has its own error boundary. An unknown component, invalid props
+  or a renderer that throws each end up in your `fallback`.
+- `genui:tree` frames render node by node through the same registry. `useGenerativeUI(part, options)`
+  gives you the state for custom chrome.
+
+**json-render.** If your app already renders json-render specs, send tree frames through it with
+`@dudousxd/nestjs-agent-react/genui/json-render` (optional peer `@json-render/react` >= 0.21):
+
+```ts
+import { jsonRenderTree, toJsonRenderRegistry } from '@dudousxd/nestjs-agent-react/genui/json-render';
+registry[GENUI_TREE_COMPONENT] = jsonRenderTree(toJsonRenderRegistry(registry));
+```
