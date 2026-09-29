@@ -71,11 +71,12 @@ Subpath `@dudousxd/nestjs-agent-react/markdown` exports `AgentMarkdown` — a st
 KaTeX + Mermaid renderer for `renderText`, behind its own peers so a plain-text app never pulls them
 in.
 
-Subpath `@dudousxd/nestjs-agent-react/genui` exports `GenerativeUI`, `useGenerativeUI`,
-`GenerativeUIScope` and `GenuiTree` — the headless renderer for server-pushed components (registry,
-optional catalog validation, versioned `resolveComponent`, per-item error boundaries, `genui:tree`
-frames). `/genui/json-render` adds a json-render adapter. See the
-[Generative UI guide](/docs/agent/guides/generative-ui).
+Subpath `@dudousxd/nestjs-agent-react/genui` exports `GenuiProvider`, `GenerativeUI`,
+`useGenerativeUI`, `GenerativeUIScope` and `GenuiTree` — the headless renderer for server-pushed
+components (registry, optional catalog validation, versioned `resolveComponent`, per-item error
+boundaries, `genui:tree` frames). Put `<GenuiProvider>` at the root and `MessageItem` draws pushed
+components with no `renderUi`. `/genui/json-render` exports the same provider with a `jsonRender`
+option. See the [Generative UI guide](/docs/agent/guides/generative-ui).
 
 ## Headless, in the TanStack sense
 

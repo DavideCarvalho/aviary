@@ -25,7 +25,7 @@ module, the React frontend). Which tables, which tenant column, which roles, whi
 | [`-rag-media`](/docs/agent/packages/rag-media) | Auto-ingest `nestjs-media` uploads into agent RAG — extract, chunk, embed, index, owner-scoped, delete-synced. |
 | [`-mcp`](/docs/agent/packages/mcp) | MCP client — import an external Model Context Protocol server's tools as governed agent tools (stdio + streamable HTTP). |
 | [`-mcp-server`](/docs/agent/packages/mcp-server) | MCP server — expose this deployment's tools to an external MCP client, over the agent's own registry and roles policy. |
-| [`-genui`](/docs/agent/packages/genui) | Headless generative-UI catalog — component definitions (Standard Schema or JSON Schema props), validation, model text, plain-text fallbacks, and tools that push `ui` frames. |
+| [`/genui`](/docs/agent/packages/genui) | Generative UI across the packages — the isomorphic catalog (`-core/genui`), `AgentGenuiModule` (`nestjs-agent/genui`) and `GenuiProvider` (`-react/genui`). |
 | [`-evals`](/docs/agent/packages/evals) | Answer-quality scoring over stored runs — a `Scorer` SPI, a resumable batch runner, and rule / statistical / model-graded built-ins. |
 | [`-dashboard`](/docs/agent/packages/dashboard) | Standalone AI-gateway governance console (bundled SPA + API), no Telescope required. |
 | [`-store-mikro-orm`](/docs/agent/packages/store-mikro-orm) | `AgentStore` + `AgentGovernanceQueries` + `AgentPricingStore` on MikroORM. |
