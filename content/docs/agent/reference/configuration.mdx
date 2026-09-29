@@ -15,6 +15,7 @@ Every option below is passed to `AgentModule.forRoot({ … })`. `model` and `act
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `model` | `ModelProvider` | — (required) | The LLM provider (e.g. a Vercel AI SDK wrapper). |
+| `models` | `ModelCatalog` | _none_ (empty catalog) | Which models a caller may pick: answers `GET /agent/models?agent=` and gates a send's `model` and a thread's pinned `model` (400 unless listed as `available` for that actor and agent). The pick reaches `model` as `ModelTurnArgs.model` for every call of the turn. `staticModelCatalog(view)` wraps a fixed list. See [Picking a model](/docs/agent/guides/frontend#picking-a-model-and-an-agent). |
 | `store` | `AgentStore` | _none_ | Persistence adapter. Omit it and import a store module (e.g. `MikroOrmAgentStoreModule.forFeature()`) to bind `AGENT_STORE` globally instead — passing it here takes precedence within this module's scope. |
 | `sink` | `TokenStreamSink` | in-memory sink | Live token transport. The default is single-process only — for multi-replica, use `@dudousxd/nestjs-agent-transport-redis`'s `RedisTokenStreamSink` instead. |
 | `tools` | `FunctionalTool[]` | `[]` | Static functional tools (`{ spec, handler }`) registered at boot. DI-dependent tools use `provideAgentTool(factory, inject)` in a module's `providers` instead. |

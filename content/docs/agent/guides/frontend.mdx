@@ -180,6 +180,38 @@ method whose member is missing throws `AgentBackendUnsupportedError`. The body `
 receives is `{ message, threadId?, agent?, attachments?, pageContext?, regenerate? }`. The
 [endpoints reference](/docs/agent/reference/endpoints) lists the REST shapes each member mirrors.
 
+## Picking a model and an agent
+
+`useModels` reads `GET /agent/models?agent=` — models grouped by provider, with badges and
+availability — and `useAgents` reads `GET /agent/agents`. Both are headless; the pick goes back
+through `useAgentChat`:
+
+```tsx
+import { useAgents, useModels } from '@dudousxd/nestjs-agent-react';
+
+const [model, setModel] = useState<string>();
+const chat = useAgentChat({ model }); // sent as the body's `model` on every turn
+const { providers, defaultModel, find } = useModels({ backend: chat.backend });
+const { agents, defaultAgent } = useAgents({ backend: chat.backend });
+
+<select value={model ?? defaultModel ?? ''} onChange={(e) => setModel(e.target.value)}>
+  {providers.map((p) => (
+    <optgroup key={p.id} label={p.label}>
+      {p.models.map((m) => (
+        <option key={m.id} value={m.id} disabled={!m.available}>
+          {m.label}{m.available ? '' : ` — ${m.unavailableReason ?? 'unavailable'}`}
+        </option>
+      ))}
+    </optgroup>
+  ))}
+</select>
+```
+
+A single send can override with `sendMessage(msg, { body: { model } })`. `chat.setThreadModel(id)`
+pins a model on the thread (`null` unpins), so later turns without their own `model` run on it; the
+thread reads back with `model`. The server refuses any model its catalog does not offer as
+available — see [Endpoints → Models](/docs/agent/reference/endpoints#models).
+
 ## When the connection drops
 
 Against a server that numbers its frames (this library's does), a stream that drops mid-run is
