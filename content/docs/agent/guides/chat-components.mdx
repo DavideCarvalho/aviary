@@ -123,7 +123,7 @@ Every component below takes model values as props. None of them holds chat state
 | `ChatReasoning` | A `reasoning` block: `isOpen`, `toggle()`, `text`, `isStreaming` |
 | `ChatSources` / `ChatSourceChips` | A `sources` block: `sources[]`, `passageCount`, `query` |
 | `ChatToolGroup` / `ChatToolCard` | A `tools` block's `calls` — the run the model already grouped, each call with `isAwaitingApproval` and its `approve`/`reject` machines |
-| `ChatElicitation` | An `elicitation` block: `preamble`, `questions[].{position,prompt,options,selected,isPristine}`, `questionCount`, `outcome`, `error`, `answer`/`skip` |
+| `ChatElicitation` | An `elicitation` block: `preamble`, `questions[].{position,prompt,options,selected,isPristine}`, `questionCount`, `outcome`, `error`, `answer`/`skip`. Renders option picks; for [typed questions](/docs/agent/guides/asking-the-user#typed-questions) (`questions[].input`, `setValue`, `error`) render your own controls from the block |
 | `ChatComposer` | `stop.{available,isStopping,stop}` — the submit control becomes the cancel control; `useComposerAutocomplete` when given `autocompleteSources` |
 | `ChatCommandPalette` | Either a hand-supplied `suggestions` list, or the autocomplete's `items`/`activeIndex` with its `getListboxProps`/`getOptionProps` — the same rows, wired as a combobox listbox |
 | `ChatFollowUps`, `ChatModePills`, `ChatContextStrip`, `ChatWelcome`, `ChatPanel` | Presentation only — they report events and hold no chat state |
