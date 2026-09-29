@@ -100,8 +100,8 @@ tool call as its own step so a turn stays replay-safe when it's executing as a d
 | Type | What it holds |
 |---|---|
 | `Actor` | `{ id, roles?, tenantRef? }` — the caller, resolved by an `ActorResolver`. |
-| `ToolSpec` | `{ name, kind: 'read' \| 'action' \| 'agent', description, inputSchema, roles?, ability?, targetAgent? }` — the declared shape of a tool. |
-| `AiToolCtx` | `{ actor, threadId, runId, requestId, agentName?, pageContext?, host? }` — handed to every `ToolHandler.execute`. `agentName` is the agent running this turn (provenance a tool can scope on). |
+| `ToolSpec` | `{ name, kind: 'read' \| 'action' \| 'agent', description, inputSchema, roles?, ability?, targetAgent?, detached?, terminal? }` — the declared shape of a tool. `terminal` ends the turn after a successful call. |
+| `AiToolCtx` | `{ actor, threadId, runId, requestId, agentName?, pageContext?, host?, emitUi? }` — handed to every `ToolHandler.execute`. `agentName` is the agent running this turn (provenance a tool can scope on). `emitUi(component, props, { id?, version? })` pushes a generative-UI component, streamed live and persisted on the message (see [Generative UI](/docs/agent/guides/generative-ui)). |
 | `MessageUsage` | `{ inputTokens, outputTokens, cacheWriteTokens?, cacheReadTokens?, reasoningTokens? }` — the cache-aware usage shape behind cost accounting. |
 | `AgentDefinition` | `{ name, description?, systemPrompt?, tools?, delegatesTo?, modelId?, maxSteps? }` — one named agent, authored as an `@Agent`-decorated class and populated into the `AgentRegistry` by discovery. |
 | `ModelPriceInput` | `{ modelId, inputPricePer1m, outputPricePer1m, cacheWritePricePer1m?, cacheReadPricePer1m? }` — the shape `AgentPricingStore.upsertModelPrice` accepts. |

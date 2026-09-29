@@ -1,0 +1,53 @@
+---
+title: '@dudousxd/nestjs-agent-genui'
+icon: Shapes
+description: Headless, isomorphic generative-UI catalog — component definitions with Standard Schema or JSON Schema props, validation, model-facing catalog text, plain-text fallbacks, and tools that push `ui` frames.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The catalog half of generative UI. It ships **definitions** — a name, a props schema, what the model
+is told, a plain-text fallback — and never visuals: each app draws the components its own way, keyed
+by name. For the walkthrough see the [Generative UI guide](/docs/agent/guides/generative-ui).
+
+## Install
+
+```bash
+pnpm add @dudousxd/nestjs-agent-genui
+```
+
+`@dudousxd/nestjs-agent-core` is an optional peer: only the tool factories need its types. The
+catalog, validation and text helpers run in the browser as well as on the server.
+
+## API
+
+| Export | What it is |
+|---|---|
+| `defineComponent(def)` | Declares one component: `{ name, title, description, props, children?, fallbackText?, internal?, version? }`. |
+| `defineCatalog(defs, { jsonSchemaValidator? })` | A `Catalog`: `get`, `has`, `modelComponents()`, `validate(name, props)`, `jsonSchemaFor(name)`, `extend(defs)`. |
+| `ajvValidator(ajv)` / `builtinJsonSchemaValidator` | JSON Schema checking: bring your Ajv for the full spec, or use the dependency-free subset. |
+| `catalogToModelText(catalog, { mode, namePrefix })` | The catalog as model text: each component, its description, a compact props signature. |
+| `componentToText(catalog, component, props)` | A pushed component as plain text / Slack mrkdwn (`fallbackText`, else JSON). Handles `genui:tree`. |
+| `genuiTools(catalog, options)` | Lib tools (`{ spec, handler }`) that validate against the catalog and push `ui` frames. |
+| `validateTree`, `treeJsonSchema`, `treeToText`, `treeToFlatSpec` | Tree mode: validation, the tool's input schema, text, json-render flat spec. |
+| `GENUI_TREE_COMPONENT` | `'genui:tree'` — the component name a tree frame is pushed under. |
+| `/builtins` | `BUILTIN_COMPONENTS` (DataTable, Chart, KpiCards, SourceCards, Checklist, Timeline, CodeBlock, Diff, Callout) and `LAYOUT_COMPONENTS` (Stack, Card, Heading, Text, Badge, Link, Image) — definitions only. |
+
+## `genuiTools` options
+
+| Option | Default | |
+|---|---|---|
+| `mode` | `'per-component'` | One `ui__show_<snake>` tool per component, or `'tree'`: one tool taking `{ type, props, children? }`. |
+| `terminal` | `false` | The turn ends once a call succeeds. |
+| `namePrefix` | `'ui__show_'` | Per-component tool names. |
+| `treeToolName` | `'ui__render'` | |
+| `treeInstructions` | | Prepended to the tree tool's description. |
+| `treeLimits` | `{ maxDepth: 12, maxNodes: 200 }` | |
+| `roles` | | `ToolSpec.roles` for every generated tool. |
+| `presentation(name)` | label/running/done from `title`, `result: { kind: 'elsewhere' }` | |
+
+<Callout type="info">
+A genui tool pushes through `ctx.emitUi`. Where the context has none (an older core, the MCP server
+surface) it returns `{ shown, props }` instead, so a client can still render the call from its own
+tool part.
+</Callout>

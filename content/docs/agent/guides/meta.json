@@ -19,6 +19,7 @@
     "frontend",
     "bring-your-own-ui",
     "chat-components",
+    "generative-ui",
     "governed-sql"
   ]
 }

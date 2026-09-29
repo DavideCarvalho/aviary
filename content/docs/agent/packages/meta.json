@@ -7,6 +7,7 @@
     "nestjs",
     "ai-sdk",
     "react",
+    "genui",
     "data",
     "rag",
     "rag-media",
