@@ -32,11 +32,34 @@ Frames are separated by a blank line (`\n\n`). Four shapes:
 | `event: done` + `data: {}` | The run ended normally (including a cancel — see `cancelled`). |
 | `event: error` + `data: {"code": string, "message": string}` | The run failed. `message` is shown to the user. Codes this library uses: `quota_exceeded`, `output_rejected`, `structured_output_invalid`, `run_failed`. |
 
-A stream that closes without `done` is treated as finished. Multi-line `data:` is joined with `\n`.
+Multi-line `data:` is joined with `\n`.
 
 `GET <base>/chat/:runId/stream` replays the run's buffered frames from the beginning and then tails
 it. Answer `404` when nothing is streaming under that id — the client reads that as "nothing to
 resume", not an error.
+
+### Sequence numbers and reconnecting
+
+Number every event frame with an SSE `id:` line — its 1-based position in the run:
+
+```text
+id: 7
+data: {"kind":"text","text":"…"}
+```
+
+- The number belongs to the frame, not the connection: the same frame carries the same id on the
+  `POST` that started the run and on every later `GET …/stream`. This library derives it from the
+  run's buffered stream, which every sink replays from its first chunk in write order.
+- `meta`, `done` and `error` carry no id. Send `meta` again on every attach.
+- `GET <base>/chat/:runId/stream?after=<n>` sends only the frames numbered above `n` (still after
+  `meta`). Honour the standard `Last-Event-ID` header the same way; `after` wins when both are sent.
+
+The React transport uses this to survive a dropped connection: when a numbered stream errors or
+closes without `done`, it re-attaches with `?after=<last id it saw>` (exponential backoff,
+`status: 'reconnecting'` meanwhile) and continues the same message. It also drops frames at or below
+its cursor, so a server that ignores `after` still resumes correctly. A `404` on re-attach means the
+run ended while the client was away, and `useAgentChat` reloads the thread. A stream **without** ids
+is never resumed: one that closes without `done` is treated as finished.
 
 ## Event rules
 
@@ -225,6 +248,8 @@ message may carry, per step:
 | `reasoningMs?: number` | that part's `providerMetadata.agent.reasoningMs` (the transcript's `durationMs`) |
 | `ui?: { id, component, props, version? }[]` | `data-ui` parts, first-seen order, last props per `id` |
 | `approvals?: { toolCallId, approver, expiresAt?, status, remember?, decidedBy?, decidedVia?, reason? }[]` | a `data-approval-requested` part per entry, plus a `data-approval-settled` part once `status` is not `pending` — the same parts the live frames become |
+
+| `feedback?: { value: 'up' \| 'down', comment?, updatedAt }` | `message.metadata.feedback` (a merged turn reads its last row's) — what `useMessageFeedback` shows |
 
 A runner serving these routes should persist the same values it streamed, so a reload shows what
 the live stream did.
