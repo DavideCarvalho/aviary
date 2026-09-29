@@ -108,8 +108,20 @@ const chat = useAgentChat({
 ```
 
 Use `headers` for values fixed for the session (a tenant ref), `getHeaders` for anything short-lived.
-When the backend authenticates from a cookie, drop the headers entirely and set
-`credentials: 'include'`. See [Identity & Authorization](/docs/agent/guides/identity-and-authorization)
+When the backend authenticates from a cookie, drop the bearer header and set
+`credentials: 'include'` (or leave the fetch default, `same-origin`, when the API shares the page's
+origin). A cookie session usually wants a CSRF header on mutating requests — read it from its cookie
+in `getHeaders`, so a rotated token is picked up:
+
+```tsx
+const readCookie = (name: string) =>
+  decodeURIComponent(document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`))?.[1] ?? '');
+
+const chat = useAgentChat({
+  credentials: 'include',
+  getHeaders: () => ({ 'X-XSRF-TOKEN': readCookie('XSRF-TOKEN') }),
+});
+``` See [Identity & Authorization](/docs/agent/guides/identity-and-authorization)
 for how the server turns these into an actor.
 
 <Callout type="warn" title="Headers are only as trusted as your gateway">
@@ -119,6 +131,67 @@ session server-side, in which case the client sends a token, not an actor.
 </Callout>
 
 ---
+
+## Your own backend
+
+Every call the hooks make goes through one interface, `AgentBackend`. `AgentClient` — `fetch` over
+this library's routes — is the default. An app with its own client (a generated one, its own auth,
+or a server that is not this library but speaks the [stream protocol](/docs/agent/reference/stream-events))
+implements it and passes it in:
+
+```tsx
+import type { AgentBackend } from '@dudousxd/nestjs-agent-react';
+
+const backend: AgentBackend = {
+  async openChatStream({ body, headers, signal }) {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json', ...csrfHeader(), ...headers },
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!res.ok || !res.body) throw new Error(`chat failed: ${res.status}`);
+    return { body: res.body }; // SSE bytes, stream-protocol framing
+  },
+  async resumeChatStream({ runId, after, signal }) {
+    const res = await fetch(`/api/chat/${runId}/stream${after ? `?after=${after}` : ''}`, {
+      credentials: 'include',
+      signal,
+    });
+    return res.status === 404 ? null : { body: res.body! };
+  },
+  cancelStream: (runId) => api.chat.cancel(runId),
+  listThreads: () => api.threads.list(),
+  getThread: (id) => api.threads.get(id),
+  updateThread: (id, patch) => api.threads.update(id, patch),
+  deleteThread: (id) => api.threads.remove(id),
+  // optional: forkFromMessage, promoteThread, truncateFromMessage, approveToolCall,
+  // rejectToolCall, answerToolCall, skipToolCall, uploadAttachment, listTools, listSkills,
+  // getQuotaToday, setMessageFeedback
+  setMessageFeedback: (id, input) => api.messages.feedback(id, input),
+};
+
+const chat = useAgentChat({ backend }); // chat.backend is typed as yours
+```
+
+The streaming, thread and cancel members are required; the rest are optional, and calling a hook
+method whose member is missing throws `AgentBackendUnsupportedError`. The body `openChatStream`
+receives is `{ message, threadId?, agent?, attachments?, pageContext?, regenerate? }`. The
+[endpoints reference](/docs/agent/reference/endpoints) lists the REST shapes each member mirrors.
+
+## When the connection drops
+
+Against a server that numbers its frames (this library's does), a stream that drops mid-run is
+re-attached from its last frame — `GET <base>/chat/:runId/stream?after=<n>` — with exponential
+backoff. `chat.status` is `'reconnecting'` meanwhile (the transcript treats it like `streaming`) and
+`chat.connection` carries the attempt. If the run finished while the client was away, the hook
+reloads the thread so the full answer replaces the partial one. Tune or turn it off with
+`reconnect: { maxAttempts, baseDelayMs, maxDelayMs }` / `reconnect: false`.
+
+```tsx
+{chat.status === 'reconnecting' ? <p role="status">Reconnecting…</p> : null}
+```
 
 ## Rendering the conversation
 
@@ -380,7 +453,9 @@ loader calls the backend and caches the result in the paired state field.
 | Field | Type | What it does |
 |---|---|---|
 | `runId` | `string \| undefined` | Current run — the target of `approve` / `reject` / `cancel`. |
-| `client` | `AgentClient` | The underlying REST client, usable standalone. |
+| `backend` / `client` | your `AgentBackend` (default `AgentClient`) | The backend the chat talks to, usable standalone. |
+| `getThreadId()` | `string \| undefined` | The thread the chat is on now — the `threadId` option, or the one the first send created. |
+| `connection` | `StreamConnectionState` | `live`, or `reconnecting` with the attempt number. |
 | `threads` / `loadThreads()` | `ThreadSummary[]` | List thread history into state. |
 | `loadThread(id)` | `Promise<ThreadDetail>` | Fetch one thread's messages (to seed `initialMessages`). |
 | `deleteThread(id)` | `Promise<void>` | Delete a thread; drops it from `threads`. |
@@ -406,6 +481,29 @@ function Sidebar({ chat }: { chat: ReturnType<typeof useAgentChat> }) {
     </aside>
   );
 }
+```
+
+### A sidebar and thumbs, headless
+
+`useThreads` keeps the list current on its own: a chat on the same backend that creates a thread or
+settles a run makes it refetch, and a streamed title is patched in place. `rename` and `remove` are
+optimistic and roll back if the server refuses. `useMessageFeedback` rates messages through
+`POST /agent/messages/:id/feedback` — a replayed message carries its rating in
+`metadata.feedback`, and a message streamed in this session is mapped to the row its run persisted.
+
+```tsx
+import { useMessageFeedback, useThreads } from '@dudousxd/nestjs-agent-react';
+
+const { threads, rename, remove } = useThreads({ backend: chat.backend });
+const feedback = useMessageFeedback({ backend: chat.backend, threadId: chat.getThreadId });
+
+<button
+  aria-pressed={feedback.feedbackOf(message)?.value === 'down'}
+  disabled={feedback.isPending(message)}
+  onClick={() => feedback.toggle(message, 'down')}
+>
+  Not helpful
+</button>
 ```
 
 To reopen an existing thread, load its detail, convert its stored history to `UIMessage[]`, seed the
