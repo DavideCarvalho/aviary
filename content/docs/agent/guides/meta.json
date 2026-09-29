@@ -18,6 +18,7 @@
     "persistence",
     "frontend",
     "bring-your-own-ui",
+    "file-uploads",
     "chat-components",
     "generative-ui",
     "governed-sql"

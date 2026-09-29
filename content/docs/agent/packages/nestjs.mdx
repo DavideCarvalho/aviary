@@ -22,8 +22,10 @@ import { Callout } from 'fumadocs-ui/components/callout';
 
 `@dudousxd/nestjs-agent` is the package you import in a Nest app. It wires
 [`-core`](/docs/agent/packages/core)'s loop and SPIs into NestJS DI: `AgentModule`, the `@AiTool`
-discovery mechanism, the `/agent` controllers, (opt-in) the durable runner under `/durable`, and
-generative UI under `/genui` (`AgentGenuiModule` — see [Generative UI](/docs/agent/packages/genui)).
+discovery mechanism, the `/agent` controllers, (opt-in) the durable runner under `/durable`,
+generative UI under `/genui` (`AgentGenuiModule` — see [Generative UI](/docs/agent/packages/genui)), and
+chat attachments on Aviary media under `/media` (`AgentMediaAttachmentsModule`, optional peer
+`@dudousxd/nestjs-media` — see [File uploads](/docs/agent/guides/file-uploads)).
 
 ```ts
 import { Module } from '@nestjs/common';

@@ -58,6 +58,18 @@ second ownership path would be new risk for information the client already holds
 url**: `resolve` mints those per turn so they can be short-lived, and a listing that returned one
 per row would undo that just to render a file list.
 
+### Resumable uploads (`@dudousxd/nestjs-agent/media`)
+
+Mounted by `AgentMediaAttachmentsModule` (not by `AgentModule`). The bytes go to nestjs-media's own
+tus endpoint (`PATCH /media/uploads/:uploadId`), never through these routes. See
+[File uploads](/docs/agent/guides/file-uploads).
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `POST` | `/agent/attachments/uploads` | `{ filename; contentType; size }` | `{ mediaId; uploadId; location }`, or `415` / `413` / `400` |
+| `POST` | `/agent/attachments/uploads/:mediaId/complete` | — | `MessageAttachment`, or `409` while bytes are missing, `422` on a size mismatch, `404` when the id is not the caller's |
+| `DELETE` | `/agent/attachments/uploads/:mediaId` | — | `204`, or `404` when the id is not the caller's |
+
 <Callout type="info" title="Collecting unreferenced media is not an endpoint">
   A sweep needs a host-chosen age threshold and ends in deleting files, so it stays an in-process
   call — `AgentService.collectableAttachments(actor, { olderThan })`, which returns candidates and
