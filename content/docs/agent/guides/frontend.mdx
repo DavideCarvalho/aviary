@@ -253,6 +253,41 @@ output yet. Render an Approve/Reject affordance and wire the buttons to the hook
 `reason`) tells the model the human declined. Both throw if there is no active run. The wire protocol
 is identical whether the backend runs the turn durably or in-process, so the UI code never changes.
 
+### Who decides, until when, and "always allow"
+
+Through the transcript model (`useChatTranscript`), every call in a `tools` block carries
+`call.approval` once the backend said who has to decide:
+
+```ts
+call.approval = {
+  approver,       // 'requester' | a role — show "waiting on finance" instead of buttons
+  expiresAt,      // ISO-8601 | null
+  reason,         // why it needs a person, when the backend said
+  status,         // 'pending' | 'approved' | 'rejected' | 'expired'
+  remember,       // this approval also covers later calls of the tool in this thread
+  decidedBy,      // who decided, once settled
+  decidedVia,     // 'web' | 'slack' | 'remembered' | …
+  decisionReason, // what the person said when declining
+};
+```
+
+`call.approve.run({ remember: true })` approves this tool for the rest of the thread (with
+`useAgentChat` directly: `chat.approve({ toolCallId, remember: true })`). For a countdown, the
+headless `useApprovalCountdown(expiresAt)` ticks `{ remainingMs, isExpired }`:
+
+```tsx
+import { formatElapsed, useApprovalCountdown } from '@dudousxd/nestjs-agent-react';
+
+function Deadline({ expiresAt }: { expiresAt: string | null }) {
+  const { remainingMs, isExpired } = useApprovalCountdown(expiresAt);
+  if (remainingMs === null) return null;
+  return <small>{isExpired ? 'Expired' : `${formatElapsed(remainingMs)} left`}</small>;
+}
+```
+
+A decision the server refuses — `403` (not your approval), `410` (lapsed) — lands on `call.error`
+with the affordance still live.
+
 <Callout type="info" title="Where the decision goes">
 `approve` / `reject` POST to `/agent/tool-call/approve` · `/reject` for the hook's current `runId`.
 The same run id backs `cancel`, which stops the SSE client-side and then hard-aborts the run server-side.

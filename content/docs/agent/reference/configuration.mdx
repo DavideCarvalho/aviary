@@ -29,6 +29,7 @@ Every option below is passed to `AgentModule.forRoot({ … })`. `model` and `act
 |---|---|---|---|
 | `actorResolver` | `ActorResolver` | — (required) | Resolves the acting `Actor` per request — the identity seam. Compile-time required: no default fabricates a caller. Supply an `ActorResolver` (or the opt-in `HeaderActorResolver`). |
 | `rolesPolicy` | `RolesPolicy` | `DefaultRolesPolicy` | Tool authorization gate. A tool that declares no `roles` reaches the policy with `roles: undefined`; `DefaultRolesPolicy` applies `defaultRoles` at that point (not baked into the tool spec earlier). |
+| `approvalPolicy` | `ApprovalPolicy` | the requester, no expiry | Who approves an `action` call (`requirementFor → { required, approver, ttlMs? }`) and who may decide (`canDecide`). See [Human-in-the-loop](/docs/agent/guides/human-in-the-loop-and-durability#who-approves-and-for-how-long). |
 | `defaultRoles` | `string[]` | `['ADMIN']` | Roles `DefaultRolesPolicy` requires when a tool's own `roles` is omitted. |
 
 ### Quota
