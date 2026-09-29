@@ -81,6 +81,8 @@ The return value is the AI SDK `useChat` result (`messages`, `sendMessage`, `sta
 | `getPageContext` | `() => Record \| null` | Read at each send to attach a page snapshot (page-assistant). |
 | `onFinish` | `() => void` | Fired after each streamed turn (e.g. refetch the sidebar). |
 | `onRunSettled` | `(outcome: { runId, status: 'completed' \| 'failed' }) => void` | Fired exactly once per run when the stream settles (send **and** resume paths) — by then the server has persisted the thread's title and the run's outcome, so this is the right place to refetch thread/list queries (fixes a sidebar stuck on "Untitled"). |
+| `onTitle` | `(title: string) => void` | The server set or changed the thread's title while the turn streamed (a `title` stream frame) — update a header/sidebar immediately instead of waiting for `onRunSettled`. |
+| `onData` | `(part: DataUIPart) => void` | Every data part as it arrives, transient ones included: pushed components (`data-ui`), `data-approval-requested`, `data-title`, `data-cancelled`, and `data-<kind>` for any frame this client version does not map. See [Stream events](/docs/agent/reference/stream-events). |
 | `client` / `fetch` | `AgentClient` / `typeof fetch` | Inject an existing client or a custom fetch (tests / non-browser). |
 
 <Callout type="info" title="Only the latest message goes over the wire">
@@ -224,7 +226,9 @@ output yet. Render an Approve/Reject affordance and wire the buttons to the hook
   messages={chat.messages}
   status={chat.status}
   renderToolPart={(part, key) => {
-    const awaitingDecision = part.state === 'input-available';
+    // `approval-requested` when the backend said who has to decide (see the stream reference).
+    const awaitingDecision =
+      part.state === 'input-available' || part.state === 'approval-requested';
     return (
       <div key={key} className="tool-call">
         <code>{part.type}</code>
