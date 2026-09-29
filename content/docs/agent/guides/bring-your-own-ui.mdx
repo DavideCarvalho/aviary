@@ -209,7 +209,7 @@ function CustomChat({ threadId }: { threadId: string }) {
 | | Shape | Notes |
 |---|---|---|
 | `items` | `TranscriptItem[]` | The mounted window, oldest first. `item.index` is the position in the FULL thread. |
-| `item.blocks` | `{ kind: 'text' \| 'reasoning' \| 'tools', key, … }[]` | See below. |
+| `item.blocks` | `{ kind: 'text' \| 'reasoning' \| 'tools' \| 'files' \| 'sources' \| 'elicitation' \| 'ui', key, … }[]` | See below. |
 | `item.text` | `string` | The prose alone — what `copy` writes and what an edit starts from. Reasoning is excluded. |
 | `item.copy` | `{ available, copied, copy() }` | `copied` resets after `copyResetMs` (default 1500ms). `available` is false when there is no prose. |
 | `item.edit` | `{ available, isEditing, draft, canSave, start(), cancel(), setDraft(), save(), getTextareaProps() }` | `available` only for user messages, and only when `editable` + `onEditSubmit` are both wired. Blank drafts are refused; the saved text is trimmed. |
@@ -238,9 +238,37 @@ every host writes the same buffer-and-flush loop. `item.blocks` has already run 
   `item.isStreaming` (the message's).
 - **`reasoning`** — a run of the model's thinking, with its own `isOpen` / `toggle(open?)`
   disclosure state. It defaults to open while streaming and folded once done, per run.
+- **`ui`** — a component the server pushed into the message (the stream's `ui` frame):
+  `{ id, component, props, version }`. `component` is a key into YOUR registry — the library ships
+  none. A repeat `id` updates the component in place.
 
-Blocks the model has no shape for (files, sources, `data-*` parts) are omitted, but they still end a
-tool run — where they sit in the transcript is meaningful even when their content isn't modelled.
+Each `tools` block also carries `calls` (the same parts with their human-decision state) and
+`roots` — the calls as a tree. A call the stream sent with a `parentId` (the inner calls of a
+code-mode `execute`, a delegated agent's tools) sits in its parent's `children`; a parent that is not
+in the block, or a cycle, leaves the call at the top level. Every call also exposes `toolKind`,
+`parentId` and `approval` — `{ approver, expiresAt, reason }` when the runner said who has to
+decide, else `null`.
+
+```tsx
+function ToolTree({ calls }: { calls: TranscriptToolCall[] }) {
+  return (
+    <ul>
+      {calls.map((call) => (
+        <li key={call.toolCallId} data-state={call.part.state}>
+          {call.name}
+          {call.approval ? <small> waiting on {call.approval.approver}</small> : null}
+          {call.children.length > 0 ? <ToolTree calls={call.children} /> : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+// <ToolTree calls={block.roots} />
+```
+
+Other `data-*` parts are omitted, but they still end a tool run — where they sit in the transcript
+is meaningful even when their content isn't modelled. (`data-approval-requested` is the exception:
+it is folded into its call's `approval` and takes no position.)
 
 ### Reasoning
 
@@ -294,6 +322,17 @@ const transport = new AgentChatTransport({
 const chat = useChat({ transport });
 ```
 
+Beyond text, reasoning and tool calls, the transport maps the rest of the
+[stream vocabulary](/docs/agent/reference/stream-events) to AI SDK data parts, which `useChat`'s
+`onData` — and `useAgentChat({ onData })` — sees as they arrive:
+
+| Stream frame | Becomes |
+|---|---|
+| `ui` | a `data-ui` part keyed by the component id (a repeat id updates it in place) |
+| `approval-requested` | a `data-approval-requested` part keyed by the call id, plus the SDK's native approval request — the tool part moves to `state: 'approval-requested'` |
+| `title` / `cancelled` | transient `data-title` / `data-cancelled` — never stored on the message. `useAgentChat({ onTitle })` fires with the title |
+| a kind this version does not know | a `data-<kind>` part — forwarded, never dropped |
+
 ---
 
 ## Rendering tool parts: read vs. action cards
@@ -309,7 +348,9 @@ the tool's own `@AiTool({ kind })` declaration (see [Tools](/docs/agent/guides/t
 ```tsx
 function MyToolCard({ part }: { part: AnyToolUIPart }) {
   const isAction = part.toolMetadata?.toolKind === 'action';
-  const awaitingDecision = isAction && part.state === 'input-available';
+  // `approval-requested` when the runner sent who has to decide; `input-available` when it did not.
+  const awaitingDecision =
+    part.state === 'approval-requested' || (isAction && part.state === 'input-available');
 
   return (
     <div className={isAction ? 'tool-card tool-card--action' : 'tool-card tool-card--read'}>

@@ -31,7 +31,7 @@ client).
 A turn's `attachments` may carry **only a `mediaId`** — see [Attachments](#attachments) below.
 
 <Callout type="info" title="The chat response is a stream, not JSON">
-  `POST /agent/chat` responds `Content-Type: text/event-stream` with headers `X-Agent-Run-Id` and `X-Agent-Thread-Id`. The first frame is `event: meta` carrying `data: { runId, threadId }`, followed by `data: { delta: string }` frames as tokens arrive, and a closing `event: done`. `GET /agent/chat/:runId/stream` pipes the same format to resume/tail a run (its `meta` frame's `threadId` is `undefined`, since the thread isn't re-resolved on reconnect). A failed run (e.g. quota exceeded) ends the stream with `event: error` carrying `data: { code, message }` (`code` is `quota_exceeded` or `run_failed`) instead of appending error text to the assistant message.
+  `POST /agent/chat` responds `Content-Type: text/event-stream` with headers `X-Agent-Run-Id` and `X-Agent-Thread-Id`. The first frame is `event: meta` carrying `data: { runId, threadId }`, followed by one `data:` frame per [stream event](/docs/agent/reference/stream-events) (`{ kind: 'text', text }`, tool calls, `ui`, `title`, …), and a closing `event: done`. `GET /agent/chat/:runId/stream` pipes the same format to resume/tail a run (its `meta` frame's `threadId` is `undefined`, since the thread isn't re-resolved on reconnect). A failed run (e.g. quota exceeded) ends the stream with `event: error` carrying `data: { code, message }` (`code` is `quota_exceeded` or `run_failed`) instead of appending error text to the assistant message.
 </Callout>
 
 ## Attachments
