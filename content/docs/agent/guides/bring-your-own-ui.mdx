@@ -354,6 +354,46 @@ Beyond text, reasoning and tool calls, the transport maps the rest of the
 
 ---
 
+## Talking about tool calls
+
+Tools declare how they are spoken about on the server
+([`@AiTool({ presentation })`](/docs/agent/guides/tools#how-a-chat-talks-about-a-tool)).
+`useToolCatalog` fetches `GET /agent/tools` once per client + agent and shares the answer; hand the
+catalog to the transcript and every tool call carries a `description`, and every tool block an
+`activity` grouping:
+
+```tsx
+import { useAgentChat, useChatTranscript, useToolCatalog } from '@dudousxd/nestjs-agent-react';
+
+const chat = useAgentChat({ baseUrl: '/agent' });
+const { catalog } = useToolCatalog({ client: chat.client }); // client must be stable
+const transcript = useChatTranscript({
+  messages: chat.messages,
+  status: chat.status,
+  toolCatalog: catalog,
+});
+
+// inside a `tools` block:
+<ul>
+  {block.activity.map((group) => (
+    <li key={group.key} data-state={group.status}>
+      <MyGlyph name={group.icon} /> {group.phrase}
+      {group.count > 1 ? ` ×${group.count}` : null}
+    </li>
+  ))}
+</ul>;
+```
+
+| Helper | What it gives you |
+|---|---|
+| `call.description` / `describeToolCall(part, catalog)` | `{ status, phrase, label, icon, tone, detail, confirm, result, error }`. `status` is `running` / `awaiting-approval` / `done` / `failed` / `denied` (a tool that returns `{ error }` has failed). `confirm` is the approval prompt filled from the input; `result` the output read through the declared view. |
+| `groupToolActivity(block.roots, options)` | Calls folded by key — the presentation label by default — with `count`, the worst `status` (running › awaiting-approval › failed › denied › done), the latest `phrase`, and `innerCount` of nested calls. `expandNested: true` replaces a parent (a code-mode `execute`) with the calls it made; `keyOf` groups by anything (e.g. source + action); `hideCorrected: true` drops failures the model later fixed. |
+| `phraseFor` / `fillTemplate` / `readPath` | The template engine. An undescribed tool reads `Working` / `Done` (overridable), never its name. |
+| `resolveResultView(output, view)` / `inferResultView(output)` | The output as plain data — `metrics` readings, `table` rows as text, `log` lines, `note` text — never a serialized payload. |
+| `toolCallState` / `correctedCallIds` / `isActionCall` | The pieces the above are built from. |
+
+---
+
 ## Rendering tool parts: read vs. action cards
 
 Every tool call arrives as a `ToolUIPart` (or `DynamicToolUIPart` for tools registered at runtime) on

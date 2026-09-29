@@ -95,6 +95,7 @@ Every option lives on the `@AiTool({ … })` object.
 | `input` | Standard Schema | yes | Zod, Valibot, or ArkType. Validated before `execute` runs. |
 | `roles` | `string[]` | no | Roles allowed to invoke. Omit to inherit the module's `defaultRoles`. |
 | `ability` | `string` | no | An authz ability checked by an ability-aware policy instead of `roles`. |
+| `presentation` | `ToolPresentation` | no | How a chat talks about the tool without naming it. Never shown to the model. See [How a chat talks about a tool](#how-a-chat-talks-about-a-tool). |
 
 <Callout type="info" title="Standard Schema, not just Zod">
 `input` is a [Standard Schema](https://standardschema.dev), so Zod, Valibot, and ArkType all work.
@@ -116,6 +117,47 @@ sees the shape too.
 There's a third kind, `agent`, but you never author it. The library synthesizes an `agent`-kind
 delegate tool for each `handoff` edge in a multi-agent setup; the loop handles it directly and
 your handler is never called. See [Multi-agent](/docs/agent/guides/multi-agent).
+
+---
+
+## How a chat talks about a tool
+
+A tool's name is an identifier, not copy — `executeSql` should never reach a person's screen, and a
+client that kept its own name-to-sentence map would go stale on the next rename. Declare the words
+beside the input schema instead, so whoever renames an input field is the one who re-words the
+sentence that mentions it:
+
+```ts
+@AiTool({
+  name: 'purgeCache',
+  kind: 'action',
+  description: 'Purge a cache key.',
+  input: z.object({ key: z.string() }),
+  presentation: {
+    label: 'Cache purge',            // noun phrase, for counts and headings
+    running: 'Purging {key}',        // while in flight — {dotted.path} over the call's INPUT
+    done: 'Purged {key}',            // once settled
+    icon: 'cache',                   // a key into the client's own glyph map
+    detail: 'Evicts one key from the shared Redis cache',
+    tone: 'destructive',             // earns the warning treatment on the approval prompt
+    confirm: { title: 'Purge {key}?', verb: 'Purge' },
+    result: { kind: 'metrics', fields: [{ path: 'evicted', label: 'Evicted' }] }, // over the OUTPUT
+  },
+})
+```
+
+| Field | Meaning |
+|---|---|
+| `label` | Noun phrase: "Database query". Also what a phrase falls back to while its slots are still empty. |
+| `running` / `done` | Sentence templates. A `{slot}` with nothing behind it collapses with the space before it, so "Reading {bucket}" degrades to "Reading", never to braces. |
+| `icon`, `detail`, `tone` | Glyph key, one explanatory line, `neutral` / `destructive`. |
+| `confirm` | `{ title, verb, detail? }` — the approval prompt for an `action` tool, templated over the input. |
+| `result` | How the output reads as content: `{ kind: 'metrics', fields }`, `{ kind: 'table', rows, columns, empty? }`, `{ kind: 'log', lines }`, `{ kind: 'note', text }`, or `{ kind: 'elsewhere' }` when it is drawn somewhere else already. Every variant names dotted paths, never shapes. |
+
+`GET /agent/tools?agent=<name>` serves `{ name, kind, presentation? }` for the tools the caller can
+reach through that agent — the same gates the model is offered tools through — and the React
+package's [`useToolCatalog`](/docs/agent/guides/bring-your-own-ui#talking-about-tool-calls) reads it.
+A tool with no `presentation` is narrated generically ("Working" / "Done"), never by its name.
 
 ---
 
