@@ -1,0 +1,231 @@
+---
+title: File uploads
+icon: Paperclip
+description: Attach images and PDFs to a chat turn — ready-made on Aviary media with resumable tus uploads, or on storage you bring yourself.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A chat turn carries a file by **`mediaId` only**. The server turns that id back into something the
+model provider can read through the `AttachmentStagingStore` bound to `AGENT_ATTACHMENT_STAGING`,
+and refuses the id when it is not the caller's. Everything in this guide is about the two halves of
+that: getting the bytes somewhere (the upload), and resolving an id back into bytes (the staging
+store).
+
+There are two ways to fill them in:
+
+| | With Aviary media | Bring your own storage |
+|---|---|---|
+| Server | `AgentMediaAttachmentsModule` from `@dudousxd/nestjs-agent/media` | your `AttachmentStagingStore` on `AGENT_ATTACHMENT_STAGING` |
+| Upload | resumable tus, straight to nestjs-media's own endpoint | `POST /agent/attachments` (buffered multipart) or your own route |
+| Client | `withMediaUploads(backend)` from `@dudousxd/nestjs-agent-react/media` | `useAttachments({ backend })` or `useAttachments({ upload })` |
+| Extra packages | `@dudousxd/nestjs-media` (+ `-client` in the browser) | none |
+
+Both media packages are **optional peers** used only by the `/media` subpaths. Nothing on the root
+entries imports them.
+
+## With Aviary media
+
+### Server
+
+```ts title="app.module.ts"
+import { AgentModule } from '@dudousxd/nestjs-agent';
+import { AgentMediaAttachmentsModule } from '@dudousxd/nestjs-agent/media';
+import { MediaModule } from '@dudousxd/nestjs-media';
+import { DrizzleMediaStore } from '@dudousxd/nestjs-media-database-drizzle';
+import { S3Driver } from '@dudousxd/nestjs-media-disk-s3';
+import { RedisUploadSessionStore } from '@dudousxd/nestjs-media-upload-redis';
+
+@Module({
+  imports: [
+    MediaModule.forRoot({
+      default: 's3',
+      disks: { s3: new S3Driver({ bucket: 'uploads' /* … */ }) },
+      store: new DrizzleMediaStore(db), // chat attachments are media records
+      uploadSessions: new RedisUploadSessionStore(redis), // resumable uploads
+      tus: { disk: 's3' }, // mounts HEAD/PATCH/DELETE /media/uploads/:id
+      guards: [SessionGuard], // the tus routes are OPEN unless you guard them
+    }),
+    AgentModule.forRoot({ /* … */ }),
+    AgentMediaAttachmentsModule.forRoot({
+      maxBytes: 20 * 1024 * 1024,
+      allowedContentTypes: ['image/png', 'image/jpeg', 'application/pdf'],
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+```ts title="main.ts"
+// nestjs-media's own requirement: tus PATCH bodies arrive as Buffers.
+app.useBodyParser('raw', { type: 'application/offset+octet-stream' });
+```
+
+`MediaModule` needs all three of `store`, `uploadSessions` and `tus`. Each attachment becomes a media
+record: `ownerType: 'agent-actor'`, `ownerId` the actor's id, collection `agent-attachments` (all
+three configurable).
+
+### Client
+
+```tsx title="backend.ts"
+import { AgentClient } from '@dudousxd/nestjs-agent-react';
+import { withMediaUploads } from '@dudousxd/nestjs-agent-react/media';
+
+const connection = {
+  getHeaders: () => ({ 'X-XSRF-TOKEN': readCookie('XSRF-TOKEN') }),
+};
+export const backend = withMediaUploads(new AgentClient(connection), connection);
+```
+
+```tsx title="composer.tsx"
+const chat = useAgentChat({ backend });
+const files = useAttachments({ backend, accept: 'image/*,.pdf', maxBytes: 20 * 1024 * 1024 });
+// … the same useAttachments UI as in Bring your own UI; send with { attachments: files.refs }
+```
+
+`withMediaUploads` swaps only `uploadAttachment`, so it is wired once and every composer that takes
+the backend uploads resumably. `createMediaUpload(options)` is the same function on its own, for
+`useAttachments({ upload })`. Options are `AgentClient`'s connection fields (`baseUrl`, `headers`,
+`getHeaders`, `credentials`, `fetch`) plus `path` (the agent prefix, default `/agent`), `chunkSize`
+(default 5 MiB) and `retries` (per chunk, default 3). No markup, no styles.
+
+### How an upload flows
+
+The bytes never pass through the agent:
+
+| Step | Request | Served by |
+|---|---|---|
+| 1. Open | `POST /agent/attachments/uploads` `{ filename, contentType, size }` → `{ mediaId, uploadId, location }` | agent: checks type and size, opens a tus session the actor owns |
+| 2. Bytes | `PATCH <location>`, chunked, progress, abortable | **nestjs-media** |
+| 3. Complete | `POST /agent/attachments/uploads/:mediaId/complete` → `MessageAttachment` | agent: checks the bytes landed at the declared size (`409` still missing, `422` wrong size) |
+| Remove | `DELETE /agent/attachments/uploads/:mediaId` | agent: aborts the session, deletes bytes and record |
+
+`remove` in `useAttachments` aborts step 2 and calls step 4. A failed upload is discarded the same
+way. Refusals throw `MediaUploadError` with the HTTP `status` (`413`, `415`, …).
+
+`POST /agent/attachments`, the buffered multipart route behind `attachments: { upload: true }`, still
+works with this module because its `stage()` writes a media record too. You do not need it, though.
+`GET /agent/attachments` lists attachments from either route.
+
+### What the model receives
+
+| Disk / option | `resolve` returns |
+|---|---|
+| can presign (S3), `visibility: 'private'` (default) | a presigned url, `urlExpiresInSeconds` (default 7 days) |
+| `visibility: 'public'` | the disk's stable `url()` |
+| neither (local disk in development) | the bytes inline as a `data:` url. A warning is logged once, and the url is stored with the message |
+| `resolveUrl(record, { disk })` | whatever you return. It overrides everything above |
+
+<Callout type="warn" title="Who may use an id">
+  The actor may use media they own, and media that a message in one of **their own** threads already
+  carries (a fork, a regenerate). Any other id resolves `null`, and the chat route answers `403` the
+  same way for an unknown id and for another person's id.
+</Callout>
+
+### Cleanup
+
+Records are created at step 1, so an upload abandoned half-way is still in the actor's inventory. It
+ages into `collectableAttachments` like any other unsent file. Delete it through the store so the tus
+session is aborted too:
+
+```ts
+import { MediaAttachmentStaging } from '@dudousxd/nestjs-agent/media';
+
+const media = app.get(MediaAttachmentStaging);
+const olderThan = new Date(Date.now() - 48 * 60 * 60 * 1000);
+for (const entry of await agents.collectableAttachments(actor, { olderThan })) {
+  await media.remove(entry.mediaId);
+}
+```
+
+### Searching attachments with RAG
+
+`indexForRag: true` announces every ready attachment on `aviary:media:attach` and every removal on
+`aviary:media:delete`. [`@dudousxd/nestjs-agent-rag-media`](/docs/agent/packages/rag-media) then
+indexes and un-indexes them. It is off by default because a chat attachment belongs to the person
+who sent it. Turn it on only when retrieval is filtered by owner (`FilteredRetriever` on
+`ownerType`/`ownerId`), and limit rag-media's `collections` to the ones you mean.
+
+### Options
+
+| Option | Default | |
+|---|---|---|
+| `collection` | `'agent-attachments'` | media collection |
+| `ownerType` | `'agent-actor'` | record owner type (owner id is the actor's id) |
+| `disk` | media's default disk | where the bytes land |
+| `maxBytes` | 20 MiB | per file |
+| `allowedContentTypes` | png, jpeg, gif, webp, pdf, text, csv | |
+| `visibility` | `'private'` | see the table above |
+| `urlExpiresInSeconds` | 7 days | presigned url lifetime |
+| `resolveUrl` | — | mint the url yourself |
+| `tusBasePath` | `'/media/uploads'` | media's `tus.basePath` including the global prefix, used to build `location` |
+| `indexForRag` | `false` | publish attach/delete for rag-media |
+| `path` | `'agent'` | must match `AgentModule`'s `path` |
+| `guards` | `[]` | guards for the upload routes |
+| `routes` | `true` | `false` binds the store without mounting the routes |
+
+`forRootAsync({ imports, inject, useFactory, path, guards, routes })` takes the same options. `path`,
+`guards` and `routes` stay static.
+
+## Bring your own storage
+
+Implement `AttachmentStagingStore` over your own storage and bind it:
+
+```ts title="s3-staging.ts"
+import type {
+  AttachmentStagingStore,
+  ResolveAttachmentInput,
+  StageAttachmentInput,
+} from '@dudousxd/nestjs-agent-core';
+
+@Injectable()
+export class S3Staging implements AttachmentStagingStore {
+  async stage({ data, filename, contentType, actor }: StageAttachmentInput) {
+    const mediaId = randomUUID();
+    await this.s3.put(`chat/${actor.id}/${mediaId}`, data, { contentType });
+    await this.files.insert({ mediaId, owner: actor.id, filename, contentType });
+    return { mediaId, url: '', contentType, name: filename };
+  }
+
+  async resolve({ mediaId, actor }: ResolveAttachmentInput) {
+    const row = await this.files.find(mediaId);
+    if (!row || row.owner !== actor.id) return null; // unknown and foreign look the same
+    const url = await this.s3.presign(`chat/${actor.id}/${mediaId}`, 3600);
+    return { mediaId, url, contentType: row.contentType, name: row.filename };
+  }
+}
+```
+
+```ts title="app.module.ts"
+@Global()
+@Module({
+  providers: [{ provide: AGENT_ATTACHMENT_STAGING, useClass: S3Staging }],
+  exports: [AGENT_ATTACHMENT_STAGING],
+})
+class StagingModule {}
+
+// AgentModule.forRoot({ …, attachments: { upload: true } }) mounts POST /agent/attachments,
+// which calls your stage(). Or skip it and upload through a route of your own.
+```
+
+On the client, `useAttachments({ backend })` uses `AgentClient.uploadAttachment` (the multipart
+route). To upload some other way, pass your own function:
+
+```ts
+const files = useAttachments({
+  upload: async (file, { signal, onProgress }) => {
+    const { mediaId } = await myUpload(file, { signal, onProgress });
+    return { mediaId, url: '', contentType: file.type, name: file.name };
+  },
+});
+```
+
+The only contract is that `resolve` recognises the `mediaId` you return. `list` is optional. You
+need it only for `GET /agent/attachments` and for sweeping (see
+[Persistence](/docs/agent/guides/persistence#which-media-a-message-still-references-optional)).
+
+<Callout type="info" title="Whichever path you choose">
+  `resolve` is the **only** place a url the model fetches can come from. Build it from your own
+  records and never from the request. The chat route has already dropped every field except
+  `mediaId`.
+</Callout>
