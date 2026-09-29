@@ -69,6 +69,7 @@ per row would undo that just to render a file list.
 | Method | Path | Body | Returns |
 |---|---|---|---|
 | `GET` | `/agent/agents` | — | `AgentCatalogEntry[]` (`{ name; description; isDefault? }`) — the discovered `@Agent` classes, for a client picker instead of a hardcoded list |
+| `GET` | `/agent/tools?agent=<name>` | — | `ToolCatalogEntry[]` (`{ name; kind; presentation? }`) — the tools the resolved actor can reach through that agent (default agent when omitted), with each tool's [`presentation`](/docs/agent/guides/tools#how-a-chat-talks-about-a-tool). Built by the same gates the model is offered tools through. `404` for an unknown agent. |
 
 ## Threads
 
