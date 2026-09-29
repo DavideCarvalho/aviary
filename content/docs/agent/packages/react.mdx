@@ -51,6 +51,7 @@ function Assistant() {
 | `AgentClient` | The default `AgentBackend`: a framework-agnostic REST client over this library's routes; usable standalone. |
 | `useThreads(options)` | The thread list, kept current by chats on the same backend; optimistic rename/remove. |
 | `useModels(options)` / `useAgents(options)` | The model catalog (grouped, flattened, `find`, `defaultModel`) and the agent list, for pickers. |
+| `useAttachments(options)` | A composer's staged files, headless: validation, uploads with progress/cancel/retry, previews, and input/drop/paste handlers. `messageFiles(message)` reads files back off a message. |
 | `useQuota(options)` | Budget windows (`day`/`month`), usage vs ceilings, and `blocked` — pass it to `useAgentChat({ blocked })`. |
 | `useMessageFeedback(options)` | Thumbs-up/down (+ comment) state and calls for messages, optimistic. |
 | `AgentChatTransport` | The `useChat` transport implementing the `/agent/chat` SSE protocol. |
