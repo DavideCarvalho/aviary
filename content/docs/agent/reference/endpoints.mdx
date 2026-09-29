@@ -93,12 +93,12 @@ All `:id` routes are ownership-scoped: they resolve the acting actor and check t
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| `POST` | `/agent/tool-call/approve` | `{ toolCallId: string }` | `{ ok: boolean }` |
-| `POST` | `/agent/tool-call/reject` | `{ toolCallId: string; reason?: string }` | `{ ok: boolean }` |
+| `POST` | `/agent/tool-call/approve` | `{ toolCallId: string; remember?: boolean; via?: string }` | `{ ok: boolean }` |
+| `POST` | `/agent/tool-call/reject` | `{ toolCallId: string; reason?: string; via?: string }` | `{ ok: boolean }` |
 | `POST` | `/agent/tool-call/answer` | `{ toolCallId: string; answers?: Record<string, string[]> }` | `{ ok: boolean }` |
 | `POST` | `/agent/tool-call/skip` | `{ toolCallId: string }` | `{ ok: boolean }` |
 
-Approving/rejecting signals the run's `AgentRunner` (`approved: true`, or `approved: false` with an optional `reason`) — see [Human-in-the-loop & durability](/docs/agent/guides/human-in-the-loop-and-durability). `answer`/`skip` settle a parked question set on the same channel — see [Asking the user](/docs/agent/guides/asking-the-user). An omitted question (or an omitted `answers` entirely) takes the request's own pre-picked default, resolved server-side, so an empty body is a valid confirmation; `skip` is recorded as a rejection rather than as an answer.
+Approving/rejecting signals the run's `AgentRunner` (`approved: true`, or `approved: false` with an optional `reason`) — see [Human-in-the-loop & durability](/docs/agent/guides/human-in-the-loop-and-durability). The caller must be the call's recorded approver (`403` otherwise — the thread's owner for `requester`, a holder of the role otherwise) and the request must not have lapsed (`410`). `remember: true` approves later calls of the same tool in the same thread; `via` (1–64 chars, default `'web'`) is recorded as the surface the decision came through. `answer`/`skip` settle a parked question set on the same channel — see [Asking the user](/docs/agent/guides/asking-the-user). An omitted question (or an omitted `answers` entirely) takes the request's own pre-picked default, resolved server-side, so an empty body is a valid confirmation; `skip` is recorded as a rejection rather than as an answer.
 
 All four bodies are validated before anything is signalled — a human reply is journaled and re-read on every replay of the run it settles, so a payload the loop cannot read is a run that fails identically forever rather than one failed request. `toolCallId` must be a non-empty string; `answers` must be an object of questionId → array of strings (at most 100 questions, 100 values each, 4096 characters per value); `reason` must be a string of at most 4096 characters. Anything else is a `400`.
 

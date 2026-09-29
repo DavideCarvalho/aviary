@@ -65,6 +65,50 @@ gets a `403` (`404` if the tool call doesn't exist at all).
 "Approve?" prompt inline in the conversation. See [Frontend](/docs/agent/guides/frontend).
 </Callout>
 
+## Who approves, and for how long
+
+By default every `action` call waits on the person chatting, forever. An `ApprovalPolicy` answers,
+per call, whether anyone has to approve it, **who**, and **until when**:
+
+```ts
+AgentModule.forRoot({
+  // …
+  approvalPolicy: {
+    requirementFor: (tool, actor, thread) =>
+      tool.name === 'issueRefund'
+        ? { required: true, approver: 'finance', ttlMs: 15 * 60_000 }
+        : { required: true, approver: 'requester' },
+    // Optional — the default: 'requester' is the thread's own actor, anything else is a role the
+    // decider must hold. Plug an authz Gate here for abilities.
+    // canDecide: (actor, { approver, requesterRef, toolCallId }) => …,
+  },
+});
+```
+
+- **`required: false`** runs the call straight away; it is still recorded as an action.
+- **`approver`** is streamed on `approval-requested` and persisted on the call. The approve/reject
+  routes enforce it: a caller who is not the approver gets `403`, and the decider — not the
+  requester — is recorded as `executedByRef`.
+- **`ttlMs`** bounds the wait. The durable runner hands it to `ctx.waitForSignal(…, { timeoutMs })`
+  (the runtime journals the deadline and wakes the run); the inline runner arms a timer. When it
+  lapses the call settles as `expired`: the model is told the approval expired (not that someone
+  said no), the stream gets `tool-output-denied` with `reason: "approval expired"` plus
+  `approval-settled { status: 'expired' }`, and a late approve gets `410 Gone`.
+- **`remember`** — `POST /agent/tool-call/approve { toolCallId, remember: true }` approves later calls
+  of the same tool in the same thread without asking (they settle with `decidedVia: 'remembered'`).
+- **`via`** names the surface the decision came through (`'web'` by default, `'slack'`, …) and is
+  stored as `decided_via`.
+
+The answer is taken inside the call's own `persist:toolcall` checkpoint, together with the thread's
+remembered approvals, so a durable replay reads it back instead of re-asking a policy that changed
+while the run was parked. A run that was already parked when you deploy this keeps waiting on the
+requester with no timeout.
+
+The tool-call row gains `approver`, `expires_at`, `remember` and `decided_via` (the Drizzle and
+MikroORM stores add them in `ensureAgentSchema`), and a reloaded thread carries them as
+`StoredMessage.approvals` — the React transcript exposes the whole record as `call.approval`, see
+[Frontend](/docs/agent/guides/frontend).
+
 ---
 
 ## Two runners, one protocol
@@ -213,8 +257,14 @@ ownership check the chat endpoints do — the console's own guards are expected 
 
 ```ts
 interface AgentApprovalPort {
-  approve(toolCallId: string, opts?: { executedByRef?: string }): Promise<void>;
-  reject(toolCallId: string, opts?: { executedByRef?: string; reason?: string }): Promise<void>;
+  approve(
+    toolCallId: string,
+    opts?: { executedByRef?: string; remember?: boolean; decidedVia?: string },
+  ): Promise<void>;
+  reject(
+    toolCallId: string,
+    opts?: { executedByRef?: string; reason?: string; decidedVia?: string },
+  ): Promise<void>;
 }
 ```
 
