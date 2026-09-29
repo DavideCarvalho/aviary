@@ -59,6 +59,16 @@ import { ensureAgentSchema } from '@dudousxd/nestjs-agent-store-mikro-orm';
 await ensureAgentSchema(orm); // orm.schema.update({ safe: true }) — create + add-column only
 ```
 
+Upgrading from a release before reasoning was persisted: `agent_message` gained three nullable
+columns. `ensureAgentSchema` adds them; `migration:create` picks them up from the entity diff; or by
+hand:
+
+```sql
+alter table agent_message add column reasoning text null;
+alter table agent_message add column reasoning_ms integer null;
+alter table agent_message add column ui json null;
+```
+
 <Callout type="warn" title="MikroOrmAgentStoreModule.forFeature() is global">
 It binds `AGENT_STORE`, `AGENT_GOVERNANCE_QUERIES`, and `AGENT_PRICING_STORE` on a **global** Nest
 module. Import it once —

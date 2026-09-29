@@ -146,6 +146,33 @@ is `CREATE TABLE IF NOT EXISTS` DDL, which is inert against a table that already
 carries an explicit additive-column pass that adds `run_id` when the table predates it.
 </Callout>
 
+### What the model thought, and what it showed
+
+`AppendMessageInput` / `StoredMessage` also carry, per step:
+
+| Field | What it is |
+|---|---|
+| `reasoning?: string` | The model's thinking, as it streamed (`reasoning` frames). |
+| `reasoningMs?: number` | How long it thought: the sum of each burst of consecutive `reasoning` frames, up to the next frame that was not reasoning. |
+| `ui?: AgentUiComponent[]` | Components pushed during the step (`ui` frames) — first-seen order, last props per `id`. |
+
+The loop derives all three from the frames the model provider writes (`observeTurnFrames`), inside
+the `llm:<i>` checkpoint — so they are journaled with the turn and a replay persists the same
+thinking instead of re-measuring a turn that is not happening. A provider that knows better may
+report them on `ModelTurnResult` itself; its values win. The client replays them as a `reasoning`
+part before the text (with its duration) and `data-ui` parts — see
+[Bring your own UI](/docs/agent/guides/bring-your-own-ui#reasoning).
+
+A custom adapter should hold itself to `EVERY_MESSAGE_FIELD` from `-testing`: it includes these, so a
+round-trip spec against it fails until the adapter persists them.
+
+<Callout type="info" title="Adding the columns to a database that already exists">
+`agent_message` gains `reasoning` (text), `reasoning_ms` (integer) and `ui` (JSON), all nullable.
+Both adapters' `ensureAgentSchema` add them on boot; on your own migrations, see
+[`-store-drizzle`](/docs/agent/packages/store-drizzle) and
+[`-store-mikro-orm`](/docs/agent/packages/store-mikro-orm).
+</Callout>
+
 ---
 
 ## Which media a message still references (optional)
