@@ -498,49 +498,58 @@ sums to a real number, so only an all-unknown turn reports `null`.
 
 ## Attachments
 
-`uploadAttachment` and the rest of `AgentClient` work outside `useAgentChat` too — from a
-file-picker, a drag-and-drop zone, or a standalone screen that never touches the chat state:
+`useAttachments` is the composer's file tray, minus the tray. It validates each file, uploads it
+with progress and cancel, keeps the per-file state, and hands you the handlers for a file input, a
+drop zone and paste. The markup is yours:
 
-```ts
-const attachment = await chat.client.uploadAttachment(file); // → MessageAttachment
-await chat.sendMessage({ text: 'what is in this?' }, { body: { attachments: [attachment] } });
+```tsx
+import { messageFiles, useAttachments } from '@dudousxd/nestjs-agent-react';
+
+const files = useAttachments({
+  backend: chat.backend, // or `upload: (file, { signal, onProgress }) => myUpload(file)`
+  accept: 'image/*,.pdf',
+  maxBytes: 20 * 1024 * 1024,
+  maxFiles: 5,
+});
+
+<form {...files.dropZoneProps} data-dragging={files.isDragging}>
+  <textarea onPaste={files.onPaste} />
+  <input {...files.inputProps} hidden ref={pickerRef} />
+  {files.items.map((item) => (
+    <FileChip
+      key={item.id}
+      name={item.name}
+      preview={item.previewUrl}
+      status={item.status} // 'uploading' | 'ready' | 'error' | 'rejected'
+      progress={item.progress} // 0..1
+      error={item.error}
+      onRetry={() => files.retry(item.id)}
+      onRemove={() => files.remove(item.id)} // cancels an upload in flight
+    />
+  ))}
+  <button
+    disabled={files.isUploading}
+    onClick={async () => {
+      await chat.sendMessage({ text }, { body: { attachments: files.refs } });
+      files.clear();
+    }}
+  />
+</form>
 ```
 
-`uploadAttachment` is a single multipart POST to `/agent/attachments` — the library gives you the
-one round-trip and its typed result, not a queue or a progress event. The server reads only
-`mediaId` off each attachment a turn sends and resolves the rest itself, so passing the whole
-`MessageAttachment` back (as above) is fine; passing a url you built by hand is not, and neither is
-passing an id you did not upload. A composer with **per-file**
-upload states (queued → uploading → done/error, a progress percentage, a retry button) is host UI:
-track that state yourself, e.g. one entry per file keyed by a local id, resolved to a
-`MessageAttachment` on success or a failure marker on rejection, and only call `sendMessage` once
-every attached file has settled:
+`rejected` items failed `accept` / `maxBytes` / `maxFiles` and were never uploaded (`error` says
+why, `describeRejection` rewords it). `error` items failed the upload and can be retried. `refs` are
+the `{ mediaId }`s `POST /agent/chat` takes — the server reads only the id and resolves the rest
+from its own storage, so a url you built by hand never reaches the model. `onPaste` stages pasted
+screenshots and leaves a text paste alone; `dropZoneProps` only reacts to drags that carry files.
 
-```ts
-type UploadState =
-  | { status: 'uploading' }
-  | { status: 'done'; attachment: MessageAttachment }
-  | { status: 'error'; message: string };
+`AgentClient.uploadAttachment(file, { signal, onProgress })` is the single round-trip underneath —
+progress via XHR when no `fetch` was injected — for a screen that stages files on its own.
 
-const [uploads, setUploads] = useState<Record<string, UploadState>>({});
-
-async function attach(localId: string, file: File) {
-  setUploads((current) => ({ ...current, [localId]: { status: 'uploading' } }));
-  try {
-    const attachment = await chat.client.uploadAttachment(file);
-    setUploads((current) => ({ ...current, [localId]: { status: 'done', attachment } }));
-  } catch (error) {
-    setUploads((current) => ({
-      ...current,
-      [localId]: { status: 'error', message: error instanceof Error ? error.message : 'Upload failed' },
-    }));
-  }
-}
-```
-
-This is exactly the shape a product-grade composer needs — per-file rows, a spinner or progress bar
-per row, a way to retry or remove a failed file before sending — and none of it is in the package,
-because the right shape is a product decision, not a library one.
+To show the files on a message, `messageFiles(message)` reads them off live or replayed messages —
+`url`, `mediaType`, `filename`, `kind` (`image`, `pdf`, `text`, `audio`, `video`, `other`),
+`extension`, and the stored `mediaId` for replayed ones. The transcript model's `files` blocks carry
+the same data grouped for layout.
 
 ### Files the user uploaded but never sent
 
