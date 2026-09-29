@@ -18,7 +18,7 @@ There are two ways to fill them in:
 |---|---|---|
 | Server | `AgentMediaAttachmentsModule` from `@dudousxd/nestjs-agent/media` | your `AttachmentStagingStore` on `AGENT_ATTACHMENT_STAGING` |
 | Upload | resumable tus, straight to nestjs-media's own endpoint | `POST /agent/attachments` (buffered multipart) or your own route |
-| Client | `withMediaUploads(backend)` from `@dudousxd/nestjs-agent-react/media` | `useAttachments({ backend })` or `useAttachments({ upload })` |
+| Client | `useAgentChat({ attachments: mediaAttachments() })` | `useAgentChat({ attachments: yourStrategy })` or `useAttachments({ upload })` |
 | Extra packages | `@dudousxd/nestjs-media` (+ `-client` in the browser) | none |
 
 Both media packages are **optional peers** used only by the `/media` subpaths. Nothing on the root
@@ -26,68 +26,68 @@ entries imports them.
 
 ## With Aviary media
 
-### Server
+### Minimal
+
+Add one module on the server, next to a `MediaModule` that has `store`, `uploadSessions` and `tus`:
 
 ```ts title="app.module.ts"
-import { AgentModule } from '@dudousxd/nestjs-agent';
-import { AgentMediaAttachmentsModule } from '@dudousxd/nestjs-agent/media';
-import { MediaModule } from '@dudousxd/nestjs-media';
-import { DrizzleMediaStore } from '@dudousxd/nestjs-media-database-drizzle';
-import { S3Driver } from '@dudousxd/nestjs-media-disk-s3';
-import { RedisUploadSessionStore } from '@dudousxd/nestjs-media-upload-redis';
-
 @Module({
   imports: [
-    MediaModule.forRoot({
-      default: 's3',
-      disks: { s3: new S3Driver({ bucket: 'uploads' /* … */ }) },
-      store: new DrizzleMediaStore(db), // chat attachments are media records
-      uploadSessions: new RedisUploadSessionStore(redis), // resumable uploads
-      tus: { disk: 's3' }, // mounts HEAD/PATCH/DELETE /media/uploads/:id
-      guards: [SessionGuard], // the tus routes are OPEN unless you guard them
-    }),
+    MediaModule.forRoot({ /* disks, store, uploadSessions, tus — your media setup */ }),
     AgentModule.forRoot({ /* … */ }),
-    AgentMediaAttachmentsModule.forRoot({
-      maxBytes: 20 * 1024 * 1024,
-      allowedContentTypes: ['image/png', 'image/jpeg', 'application/pdf'],
-    }),
+    AgentMediaAttachmentsModule.forRoot(), // ← the whole integration
   ],
 })
 export class AppModule {}
-```
-
-```ts title="main.ts"
-// nestjs-media's own requirement: tus PATCH bodies arrive as Buffers.
+// main.ts — nestjs-media's own requirement for tus PATCH bodies:
 app.useBodyParser('raw', { type: 'application/offset+octet-stream' });
 ```
 
-`MediaModule` needs all three of `store`, `uploadSessions` and `tus`. Each attachment becomes a media
-record: `ownerType: 'agent-actor'`, `ownerId` the actor's id, collection `agent-attachments` (all
-three configurable).
+On the client it takes one option:
 
-### Client
+```tsx
+import { mediaAttachments } from '@dudousxd/nestjs-agent-react/media';
 
-```tsx title="backend.ts"
-import { AgentClient } from '@dudousxd/nestjs-agent-react';
-import { withMediaUploads } from '@dudousxd/nestjs-agent-react/media';
-
-const connection = {
-  getHeaders: () => ({ 'X-XSRF-TOKEN': readCookie('XSRF-TOKEN') }),
-};
-export const backend = withMediaUploads(new AgentClient(connection), connection);
+const chat = useAgentChat({ attachments: mediaAttachments() });
+const files = useAttachments({ backend: chat.backend }); // + the UI from Bring your own UI
 ```
 
-```tsx title="composer.tsx"
-const chat = useAgentChat({ backend });
-const files = useAttachments({ backend, accept: 'image/*,.pdf', maxBytes: 20 * 1024 * 1024 });
-// … the same useAttachments UI as in Bring your own UI; send with { attachments: files.refs }
+With these defaults:
+- files go to the media default disk, in collection `agent-attachments`, owned by the actor;
+- the limit is 20 MiB, and the accepted types are png/jpeg/gif/webp images, pdf, text and csv;
+- the model gets a presigned URL;
+- uploads reuse the chat client's own base URL, headers and credentials.
+
+<Callout type="warn" title="Guard the tus routes">
+  nestjs-media mounts its tus routes without auth. Pass `guards` to `MediaModule` (or use a global
+  guard) before you expose it. See the [media docs](/docs/media).
+</Callout>
+
+### Extended
+
+Override any of the defaults when you need to:
+
+```ts
+AgentMediaAttachmentsModule.forRoot({
+  maxBytes: 50 * 1024 * 1024,
+  allowedContentTypes: ['image/png', 'image/jpeg', 'application/pdf'],
+  collection: 'chat-files',
+  canAccess: ({ allowed, actor }) => allowed || actor.roles?.includes('support') === true,
+  resolveUrl: (record) => signMyProxyUrl(record.id),
+  indexForRag: true,
+  guards: [SessionGuard],
+});
 ```
 
-`withMediaUploads` swaps only `uploadAttachment`, so it is wired once and every composer that takes
-the backend uploads resumably. `createMediaUpload(options)` is the same function on its own, for
-`useAttachments({ upload })`. Options are `AgentClient`'s connection fields (`baseUrl`, `headers`,
-`getHeaders`, `credentials`, `fetch`) plus `path` (the agent prefix, default `/agent`), `chunkSize`
-(default 5 MiB) and `retries` (per chunk, default 3). No markup, no styles.
+```tsx
+useAgentChat({ attachments: mediaAttachments({ path: '/api/agent', chunkSize: 2 * 1024 * 1024 }) });
+new AgentClient({ ...connection, attachments: mediaAttachments() }); // your own client
+withMediaUploads(customBackend, connection); // any other AgentBackend
+useAttachments({ upload: createMediaUpload(connection) }); // a bare upload function
+```
+
+`MediaUploadError` carries the HTTP `status` (`413`, `415`, …). The client packages are headless:
+no markup, no styles.
 
 ### How an upload flows
 
@@ -157,6 +157,7 @@ who sent it. Turn it on only when retrieval is filtered by owner (`FilteredRetri
 | `allowedContentTypes` | png, jpeg, gif, webp, pdf, text, csv | |
 | `visibility` | `'private'` | see the table above |
 | `urlExpiresInSeconds` | 7 days | presigned url lifetime |
+| `canAccess` | owner, or own thread carries it | `({ record, actor, allowed }) => boolean` |
 | `resolveUrl` | — | mint the url yourself |
 | `tusBasePath` | `'/media/uploads'` | media's `tus.basePath` including the global prefix, used to build `location` |
 | `indexForRag` | `false` | publish attach/delete for rag-media |
@@ -208,17 +209,19 @@ class StagingModule {}
 // which calls your stage(). Or skip it and upload through a route of your own.
 ```
 
-On the client, `useAttachments({ backend })` uses `AgentClient.uploadAttachment` (the multipart
-route). To upload some other way, pass your own function:
+On the client, `useAttachments({ backend: chat.backend })` uses the multipart route by default. To
+upload some other way, plug your own strategy in once. It receives the chat client's connection:
 
 ```ts
-const files = useAttachments({
-  upload: async (file, { signal, onProgress }) => {
-    const { mediaId } = await myUpload(file, { signal, onProgress });
+const chat = useAgentChat({
+  attachments: async (file, { signal, onProgress }, connection) => {
+    const { mediaId } = await myUpload(file, { signal, onProgress, headers: await connection.headers() });
     return { mediaId, url: '', contentType: file.type, name: file.name };
   },
 });
 ```
+
+`useAttachments({ upload })` does the same for a single composer.
 
 The only contract is that `resolve` recognises the `mediaId` you return. `list` is optional. You
 need it only for `GET /agent/attachments` and for sweeping (see

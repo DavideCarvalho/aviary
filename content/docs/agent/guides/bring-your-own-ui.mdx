@@ -543,8 +543,9 @@ the `{ mediaId }`s `POST /agent/chat` takes — the server reads only the id and
 from its own storage, so a url you built by hand never reaches the model. `onPaste` stages pasted
 screenshots and leaves a text paste alone; `dropZoneProps` only reacts to drags that carry files.
 
-For resumable uploads through Aviary media, wrap the backend once with `withMediaUploads` from
-`@dudousxd/nestjs-agent-react/media`. For your own storage, pass `upload`. Both are covered in
+For resumable uploads through Aviary media, use `useAgentChat({ attachments: mediaAttachments() })`
+(`@dudousxd/nestjs-agent-react/media`) and pass `chat.backend` to `useAttachments`. For your own
+storage, pass your own strategy or `upload`. Both are covered in
 [File uploads](/docs/agent/guides/file-uploads).
 
 `AgentClient.uploadAttachment(file, { signal, onProgress })` is the single round-trip underneath —
