@@ -261,6 +261,27 @@ A run that goes over quota ends its stream with a structured `run.failed` error
 (`code: 'quota_exceeded'`) rather than a plain diagnostics event alone — see
 [Frontend](/docs/agent/guides/frontend) for how that surfaces client-side.
 
+## Budgets across windows
+
+The daily token quota above is one window. `GET /agent/quota` reports them all — each `{ period,
+usedTokens, limitTokens?, usedUsd, limitUsd?, resetsAt? }` — and `blocked` when one is used up. It
+comes from a `QuotaProvider`; the default `LedgerQuotaProvider` reads this ledger (a `day` window,
+plus `month` when the store has `usageBetween`) and, unconfigured, only reports.
+
+```ts
+AgentModule.forRoot({
+  // ceilings on the default provider — tokens and/or USD, per window
+  quotaLimits: { day: { tokens: 200_000 }, month: { usd: 20 } },
+  // …or the host's own budget, e.g. what an AI gateway says is left
+  // quotaProvider: { report: async ({ actor }) => gatewayBudget(actor.id) },
+});
+```
+
+Either one turns on the send gate: while the report is `blocked`, `POST /agent/chat` answers `429`
+with `{ code: 'quota_exceeded', period, message }` before any work — no model call, no usage row.
+On the client, `useQuota` renders the windows and `useAgentChat({ blocked: quota.blocked })` stops
+sending in the meantime (see [Frontend](/docs/agent/guides/frontend#quota)).
+
 ---
 
 ## Follow-up suggestions cost an extra call
