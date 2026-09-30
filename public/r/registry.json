@@ -7,7 +7,7 @@
       "name": "agent-chat",
       "type": "registry:block",
       "title": "Agent Chat",
-      "description": "A full chat surface over useChatTranscript — welcome state with mode pills, a composer card with a context strip, message bubbles, grouped tool cards, a reasoning disclosure, provenance from retrieval, follow-ups and stick-to-bottom.",
+      "description": "A full chat surface over useChatTranscript — welcome state with mode pills, a composer card with a context strip, message bubbles, grouped tool cards with inline approve/reject, the agent's own questions as an inline form, a reasoning disclosure, provenance from retrieval, follow-ups and stick-to-bottom.",
       "author": "Davide Carvalho <https://github.com/DavideCarvalho>",
       "categories": [
         "ai",
