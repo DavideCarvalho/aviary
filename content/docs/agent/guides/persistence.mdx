@@ -175,6 +175,35 @@ Both adapters' `ensureAgentSchema` add them on boot; on your own migrations, see
 
 ---
 
+## The message queue (optional)
+
+`ChatQueueStore` is what lets a message sent mid-turn wait on the thread
+([Typing ahead](/docs/agent/guides/message-queue)): per-thread FIFO storage of queued messages
+(`enqueueMessage`, `listQueue`, `getQueuedMessage`, `updateQueuedMessage`, `moveQueuedMessage`,
+`removeQueuedMessage`, `clearQueue`), a per-thread pause (`queuePause`, `setQueuePause`), and the
+admission primitives — `claimActiveStream(threadId, runId, { replacing? })` and
+`releaseActiveStream(threadId, runId)`, both compare-and-set on the thread's active run, plus
+`activeRunForThread`. It is probed structurally (`isChatQueueStore`): a store without every member
+keeps the old behaviour, where a send on a busy thread starts a second turn.
+
+The in-memory, Drizzle and MikroORM stores implement it; the SQL ones add an
+`agent_queued_message` table (cascading off `agent_thread`, indexed on `(thread_id, position)`) and
+an `agent_thread.queue_pause` column when they heal the schema on boot. A store of your own can run
+`CHAT_QUEUE_STORE_CONTRACT` from `@dudousxd/nestjs-agent-testing` — framework-agnostic cases, each
+throwing on the first mismatch:
+
+```ts
+import { CHAT_QUEUE_STORE_CONTRACT } from '@dudousxd/nestjs-agent-testing';
+
+for (const contractCase of CHAT_QUEUE_STORE_CONTRACT) {
+  it(contractCase.name, async () => {
+    const store = await freshStore();
+    const thread = await store.createThread({ actor: { id: 'contract-actor' } });
+    await contractCase.run({ store, threadId: thread.id });
+  });
+}
+```
+
 ## Which media a message still references (optional)
 
 `stage()` on an `AttachmentStagingStore` writes bytes at upload time, **before any message exists**.

@@ -17,6 +17,7 @@
     "evals",
     "persistence",
     "frontend",
+    "message-queue",
     "bring-your-own-ui",
     "file-uploads",
     "chat-components",

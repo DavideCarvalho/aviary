@@ -34,7 +34,7 @@ function Assistant() {
 
   return (
     <div>
-      <MessageList messages={chat.messages} status={chat.status} />
+      <MessageList messages={chat.messages} status={chat.status} queue={chat.queue} />
       <ChatInput onSubmit={(text) => chat.sendMessage({ text })} />
     </div>
   );
@@ -46,7 +46,7 @@ function Assistant() {
 | Export | What it is |
 |---|---|
 | `AgentProvider` / `useAgentBackend()` | The connection (`baseUrl`, `path`, headers, credentials, upload strategy, `onHttpError`, `genui`) once, for every hook below it / the backend in scope. |
-| `useAgentChat(options?)` | The hook — the AI SDK `useChat` result plus `transcript`, `composer`, `models`, `quota`, cancel/approve/reject/answer/skip/fork. |
+| `useAgentChat(options?)` | The hook — the AI SDK `useChat` result plus `transcript`, `composer`, `models`, `quota`, `queue`, cancel/approve/reject/answer/skip/fork. Sends made mid-turn queue on the thread (`whileRunning: 'queue' \| 'interrupt' \| 'block'`) — [Typing ahead](/docs/agent/guides/message-queue). |
 | `useAgentConfig(options?)` | `GET /agent/config` — attachment limits and upload mode, and which features are on; shared per backend. |
 | `AgentBackend` | The interface every hook talks to — implement it over your own client ([Your own backend](/docs/agent/guides/frontend#your-own-backend)). |
 | `AgentClient` | The default `AgentBackend`: a framework-agnostic REST client over this library's routes; usable standalone. |
@@ -62,7 +62,7 @@ function Assistant() {
 | `useTranscriptItem(options)` | The same model for a single message, for a host that lays out the list itself. |
 | `useStickToBottom(options)` | Follow-the-stream-while-at-the-bottom, standalone. Also on `transcript.scroll`. |
 | `ChatInput` | The composer — Enter submits, Shift+Enter newlines, optional dictation, optional stop. |
-| `MessageList` | Windows the thread; typing indicator, error+retry banner, follow-up chips, tool and reasoning rendering. |
+| `MessageList` | Windows the thread; typing indicator, error+retry banner, follow-up chips, tool and reasoning rendering; with `queue={chat.queue}`, the messages waiting in the thread's queue and a resume control. |
 | `MessageItem` | A single message, if you want to lay out the list yourself. |
 | `MessageItemView` | The default markup for one item you modelled yourself. |
 | `useSpeechRecognition` | Browser dictation hook backing `ChatInput`'s optional mic button. |

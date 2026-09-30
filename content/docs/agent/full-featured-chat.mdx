@@ -101,9 +101,10 @@ export function Chat({ threadId, onNavigate }: { threadId?: string; onNavigate: 
   const chat = useAgentChat({
     ...(threadId !== undefined ? { threadId } : {}), // history loads, a streaming turn re-attaches
     onThreadCreated: onNavigate,                    // first send, or a fork
+    whileRunning: 'queue',                          // the default: mid-turn sends wait their turn
   });
   const { threads, rename, remove } = useThreads();
-  const { transcript, composer, models } = chat;
+  const { transcript, composer, models, queue } = chat;
 
   return (
     <div className="chat">
@@ -157,6 +158,18 @@ export function Chat({ threadId, onNavigate }: { threadId?: string; onNavigate: 
             {item.regenerate.available ? <button onClick={item.regenerate.run}>Retry</button> : null}
           </article>
         ))}
+        {transcript.queued.map((item) => (
+          <article key={item.id} data-role="user" data-state={item.state}>
+            {item.text}
+            <button onClick={() => queue.move(item.id, 0)} disabled={item.isNext}>Run next</button>
+            {item.remove.available ? <button onClick={item.remove.run}>Remove</button> : null}
+          </article>
+        ))}
+        {queue.paused ? (
+          <p role="status">
+            Queue paused ({queue.paused.reason}) <button onClick={() => queue.resume()}>Resume</button>
+          </p>
+        ) : null}
       </main>
 
       <footer {...composer.files.dropZoneProps}>
@@ -174,11 +187,9 @@ export function Chat({ threadId, onNavigate }: { threadId?: string; onNavigate: 
           onChange={(e) => composer.setText(e.target.value)}
           onPaste={composer.files.onPaste}
         />
-        {transcript.stop.available ? (
-          <button onClick={transcript.stop.stop}>Stop</button>
-        ) : (
-          <button disabled={!composer.canSend} onClick={() => void composer.submit()}>Send</button>
-        )}
+        {transcript.stop.available ? <button onClick={transcript.stop.stop}>Stop</button> : null}
+        {/* Mid-turn this queues the draft (files included) instead of being refused. */}
+        <button disabled={!composer.canSend} onClick={() => void composer.submit()}>Send</button>
         {composer.blockedBy === 'quota' ? <p role="alert">{chat.blocked?.reason ?? 'Budget used up'}</p> : null}
       </footer>
     </div>
@@ -192,7 +203,8 @@ export function Chat({ threadId, onNavigate }: { threadId?: string; onNavigate: 
 |---|---|
 | `useAgentChat({ threadId })` | read the thread, seeded the history, re-attached to a turn still streaming (`history: false` / `resume: false` opt out) |
 | `transcript.items[…].blocks` | grouped the parts, bound approve / reject / answer / skip / stop / fork / regenerate to this chat, read the tool catalog for `call.description`, and read `metadata.createdAt` / `metadata.usage` for `timestamp` / `usage` |
-| `composer.submit()` | sent the draft with the ready uploads as `{ mediaId }` refs, cleared both; `canSend` is false while empty, busy, uploading or over quota (`blockedBy` says which) |
+| `composer.submit()` | sent the draft with the ready uploads as `{ mediaId }` refs, cleared both; `canSend` is false while empty, uploading or over quota (`blockedBy` says which). Mid-turn it queued the draft on the thread instead (`'busy'` only with `whileRunning: 'block'`) |
+| `transcript.queued` / `queue` | messages sent mid-turn, waiting server-side for the running turn; the chat attached to each as it started. `queue.move` / `edit` / `remove` / `resume` change what waits — see [Typing ahead](/docs/agent/guides/message-queue) |
 | `composer.files` | validated against the server's own limits (`GET /agent/config`), uploaded each file resumably, with progress and cancel |
 | `models.list` / `select` | fetched `GET /agent/models` on first read (the `aiSdkModels` catalog), sends the pick as each turn's `model` — that turn only, never stored, dropped when the chat switches threads; `models.pinToThread(id)` persists it on the thread (`models.pinned`), and `models.locked` says when the agent always runs on one model |
 | `chat.blocked` | read `GET /agent/quota`; sends are refused client-side with `QuotaBlockedError` while blocked (the server would answer `429`); `chat.quota.warning` names a window past its soft limit |
@@ -204,7 +216,7 @@ for a layout that splits them across components. Override any of the chat's wiri
 `useAgentChat({ transcript: { … }, composer: { … }, blocked, model })`.
 
 <Callout type="info" title="Prefer the shipped components?">
-Replace the transcript and composer markup with `<MessageList messages={chat.messages} status={chat.status} />`
+Replace the transcript and composer markup with `<MessageList messages={chat.messages} status={chat.status} queue={chat.queue} />`
 and `<ChatInput onSubmit={(text) => chat.sendMessage({ text })} />` — approvals and questions are
 actionable there too, and `genui` on the provider draws pushed components. See
 [Chat components](/docs/agent/guides/chat-components).
