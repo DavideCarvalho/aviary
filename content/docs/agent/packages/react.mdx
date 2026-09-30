@@ -57,6 +57,7 @@ function Assistant() {
 | `useQuota(options?)` | Budget windows (`day`/`month`), usage vs ceilings, `blocked`, and `warning` (the fullest window past its `warnAt` soft limit) — `useAgentChat` gates on it by itself. |
 | `useMessageFeedback(options?)` | Thumbs-up/down (+ comment) state and calls for messages, optimistic. |
 | `AgentChatTransport` | The `useChat` transport implementing the `/agent/chat` SSE protocol. |
+| `useToolCatalog(options?)` / `ALL_AGENTS` | Tool presentations for one agent, or with `agent: ALL_AGENTS` every tool the actor reaches through any agent. |
 | `useChatTranscript(options)` | The transcript model — messages normalized into items with their parts grouped into text/reasoning/tool blocks, per-message derived values, each action a state machine, plus list windowing and stick-to-bottom. Renders nothing. |
 | `useTranscriptItem(options)` | The same model for a single message, for a host that lays out the list itself. |
 | `useStickToBottom(options)` | Follow-the-stream-while-at-the-bottom, standalone. Also on `transcript.scroll`. |

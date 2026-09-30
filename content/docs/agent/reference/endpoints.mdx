@@ -101,7 +101,7 @@ tus endpoint (`PATCH /media/uploads/:uploadId`), never through these routes. See
 | Method | Path | Body | Returns |
 |---|---|---|---|
 | `GET` | `/agent/agents` | — | `AgentCatalogEntry[]` (`{ name; description; isDefault?; lockedModel? }`) — the discovered `@Agent` classes, for a client picker instead of a hardcoded list |
-| `GET` | `/agent/tools?agent=<name>` | — | `ToolCatalogEntry[]` (`{ name; kind; presentation? }`) — the tools the resolved actor can reach through that agent (default agent when omitted), with each tool's [`presentation`](/docs/agent/guides/tools#how-a-chat-talks-about-a-tool). Built by the same gates the model is offered tools through. `404` for an unknown agent. |
+| `GET` | `/agent/tools?agent=<name>` | — | `ToolCatalogEntry[]` (`{ name; kind; presentation? }`) — the tools the resolved actor can reach through that agent (default agent when omitted), with each tool's [`presentation`](/docs/agent/guides/tools#how-a-chat-talks-about-a-tool). Built by the same gates the model is offered tools through. `404` for an unknown agent. `?agent=*` answers the union across every agent, each tool once (`useToolCatalog({ agent: ALL_AGENTS })`), for a surface showing several agents' conversations. |
 
 ## Models
 

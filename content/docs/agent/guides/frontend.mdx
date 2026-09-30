@@ -192,7 +192,13 @@ const { transcript } = useAgentChat();
 
 Approvals and question sets are actionable with nothing passed — and not only here:
 `useChatTranscript` on its own (and so `MessageList`) settles them through the in-scope backend when
-no handler is given; pass `onApprove: null` (etc.) to opt a decision out. Every handler takes one
+no handler is given — a handler left undefined is NOT off. Pass `onApprove: null` (etc.) to opt one
+decision out, or `readOnly: true` (also `<MessageList readOnly>`) for a surface nobody acts on — an
+audit or shared view: approvals and question sets still render, with no approve / reject / answer /
+skip, edit, fork, regenerate or stop, whatever handlers or backend are in scope.
+
+`isLoadingHistory` is `true` from the first render with a `threadId` until the history read settles,
+so render a skeleton on it rather than on `messages.length === 0`. Every handler takes one
 object — `onApprove({ toolCallId, remember })`, `onAnswer({ toolCallId, answers })`,
 `onEditSubmit({ messageId, text })`, `onFork({ messageId })` — the same shape as `chat.approve` and
 friends, so they pass straight through. The full model is in
