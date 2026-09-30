@@ -20,7 +20,6 @@ import { Agent, AgentModule, AgentService, AiTool, HeaderActorResolver } from '@
 import {
   FakeModelProvider,
   InMemoryAgentStore,
-  InMemoryQuotaStore,
   InMemoryTokenStreamSink,
   type FakeScript,
 } from '@dudousxd/nestjs-agent-testing';
@@ -76,7 +75,7 @@ it('auto-executes a read tool then answers', async () => {
         model: new FakeModelProvider(script),
         store,
         sink: new InMemoryTokenStreamSink(),
-        quota: new InMemoryQuotaStore(200_000),
+        quota: { limits: { day: { tokens: 200_000 } } },
         actorResolver: new HeaderActorResolver(),
       }),
     ],
@@ -126,8 +125,8 @@ it('suspends an action tool until approved, then executes', async () => {
 `InMemoryGovernanceQueries` wraps an `InMemoryAgentStore` and takes an optional pricing map (default
 empty → zero cost, tokens still counted) — bind it to `AGENT_GOVERNANCE_QUERIES` to test a
 [billing export](/docs/agent/recipes/billing-export) or the dashboard/telescope wiring without a
-database. `InMemoryQuotaStore` and `InMemoryTokenStreamSink` are the same doubles used above; none
-of the five require Redis, Postgres, or an API key.
+database. `InMemoryTokenStreamSink` is the same double used above (and `InMemoryQuotaStore` the
+loop-level quota double, for core-level tests); none of them require Redis, Postgres, or an API key.
 </Callout>
 
 ---

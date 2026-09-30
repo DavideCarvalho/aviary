@@ -1,15 +1,15 @@
 ---
 title: Identity & Authorization
 icon: KeyRound
-description: How the agent learns who is calling (ActorResolver, with no insecure default) and decides — per tool, server-side — whether they may run it (roles vs abilities).
+description: How the agent learns who is calling (anonymous by default, one line to require login) and decides — per tool, server-side — whether they may run it (roles vs abilities).
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
 Two questions gate every turn: **who is calling**, and **may they run this tool**. The agent answers
-the first with an `ActorResolver` you configure — it never fabricates a caller — and the second with a
-per-tool policy that is always decided server-side. Identity is a seam you own; authorization is a
+the first with an `ActorResolver` — by default an anonymous identity per browser, or your login — and
+the second with a per-tool policy that is always decided server-side. Identity is a seam you own; authorization is a
 set-intersection (or a delegated ability check) the loop runs before any handler executes.
 
 ---
@@ -26,8 +26,7 @@ interface Actor {
 }
 ```
 
-The agent obtains it through the `ActorResolver` SPI. This is the identity seam: the agent **never**
-invents a caller.
+The agent obtains it through the `ActorResolver` SPI:
 
 ```ts
 interface ActorResolver {
@@ -36,14 +35,58 @@ interface ActorResolver {
 ```
 
 `req` is the raw transport request (an Express `Request` in a NestJS app), typed `unknown` so the core
-stays framework-agnostic. You configure exactly one resolver on `AgentModule.forRoot({ actorResolver })` —
-`actorResolver` is a required field, not something you can leave out.
+stays framework-agnostic. Configure one on `AgentModule.forRoot({ actorResolver })`, or omit it.
 
-<Callout type="warn" title="There is no insecure default identity">
-`actorResolver` is required at compile time — there's no throwing placeholder class installed when
-it's missing, because it can't be missing; an identity is never derived from a default. This is
-deliberate: an agent that can act without a known caller is an agent that can act as anyone.
+---
+
+## The default: anonymous, one identity per browser
+
+With no `actorResolver`, the endpoints are **public** — the "free, login-less chat" setup — and the
+module installs `AnonymousActorResolver`, logging at boot that it did:
+
+- On a browser's first request the server mints 32 random bytes and sets them in a cookie:
+  `agent_anon=…; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax` (plus `Secure` over HTTPS).
+- The actor is `{ id: 'anon:<sha256 of the token>', roles: ['anonymous'] }`. The id is a digest, so an
+  id that surfaces anywhere (a thread row, a log, an approval's `decidedBy`) cannot be replayed as the
+  cookie.
+- Threads, quota and attachments are owned by that id, so **visitors never see each other's
+  conversations**. Clearing cookies starts over; there is nothing to recover an identity with.
+
+Why a server-minted cookie rather than an id the client generates and sends in a header: an
+`HttpOnly` cookie is out of reach of page scripts (an XSS cannot lift it), the server — not the
+client — chooses the value, it needs no client code, and there is no signing secret to configure (the
+token is unguessable on its own, and the digest is the same on every pod and after a restart).
+
+```ts
+// a cross-site SPA (another site than the API) needs SameSite=None, which forces Secure:
+AgentModule.forRoot({ model, actorResolver: new AnonymousActorResolver({ sameSite: 'none' }) });
+```
+
+Options: `cookieName` (default `agent_anon`), `maxAgeDays` (365), `sameSite` (`'lax'`), `secure`
+(`'auto'` — set behind HTTPS or `x-forwarded-proto: https`), `path`, `roles` (`['anonymous']`).
+
+<Callout type="warn" title="What anonymous mode means for tools and spend">
+Every tool that does not name `roles` is callable by an anonymous visitor. An `action` tool still
+parks on approval — but by default the approver is the requester, so for an anonymous visitor
+approval is a **confirmation step, not an authorization**. Gate consequential tools with `roles`
+(which anonymous actors do not hold), or require login. And without `quota` limits, a public
+deployment's model spend is unbounded: set `quota: { limits: … }` — the limits apply per anonymous id.
 </Callout>
+
+## Requiring login: one line
+
+If your auth already puts the principal on `req.user` — Passport strategies, `express-session` /
+cookie-session middleware, a guard that assigns it:
+
+```ts
+import { AgentModule, requestUserActorResolver } from '@dudousxd/nestjs-agent';
+
+AgentModule.forRoot({ model, actorResolver: requestUserActorResolver() });
+```
+
+A request without `req.user` is refused with `401`. The default mapping reads `id` / `sub` / `_id` /
+`userId`, `roles` (array) or `role` (string), and `tenantRef` / `tenantId` / `orgId`; pass a mapper for
+another shape: `requestUserActorResolver((user: SessionUser) => ({ id: user.uuid, roles: user.perms }))`.
 
 ---
 
@@ -62,8 +105,6 @@ import { AgentModule, HeaderActorResolver } from '@dudousxd/nestjs-agent';
 
 AgentModule.forRoot({
   model: myModelProvider,
-  store: myAgentStore,
-  defaultRoles: ['ADMIN'],
   actorResolver: new HeaderActorResolver(),
 });
 ```
@@ -123,8 +164,6 @@ import { SessionActorResolver } from './agent/session-actor.resolver.js';
       inject: [SessionActorResolver],
       useFactory: (actorResolver: SessionActorResolver) => ({
         model: myModelProvider,
-        store: myAgentStore,
-        defaultRoles: ['ADMIN'],
         actorResolver,
       }),
     }),
@@ -149,7 +188,7 @@ declares **one** of two gates:
 
 | Gate | Declared as | Decided by | Falls back to |
 |---|---|---|---|
-| **roles** | `@AiTool({ roles: ['ADMIN'] })` | Built-in set-intersection | Module `defaultRoles` when `roles` omitted |
+| **roles** | `@AiTool({ roles: ['ADMIN'] })` | Built-in set-intersection | Module `defaultRoles` when `roles` omitted (default `[]` — anyone) |
 | **ability** | `@AiTool({ ability: 'cache.purge' })` | `@dudousxd/nestjs-agent-authz` Gate | The role policy when no `ability` present |
 
 Both live on the same `ToolSpec`, so neither is required and apps that don't use authz simply rely on
@@ -158,21 +197,26 @@ Both live on the same `ToolSpec`, so neither is required and apps that don't use
 ### The built-in role policy
 
 The default `RolesPolicy` is a plain set-intersection: the actor passes if **any** of its roles is in
-the tool's allowed set. Omit `roles` on the tool and it falls back to the module's `defaultRoles`.
+the tool's allowed set. Omit `roles` on the tool and it falls back to the module's `defaultRoles` —
+which default to `[]`, meaning **no restriction**: every resolved actor may call the tool.
 
 ```ts
 // effectively, inside DefaultRolesPolicy:
 can(actor, tool) {
-  const allowed = tool.roles ?? defaultRoles; // defaultRoles defaults to ['ADMIN']
+  const allowed = tool.roles ?? defaultRoles; // defaultRoles defaults to [] — restricts nobody
+  if (allowed.length === 0) return true;
   return (actor.roles ?? []).some((role) => allowed.includes(role));
 }
 ```
+
+To make tools admin-only unless they say otherwise (the behaviour before the DX release):
+`AgentModule.forRoot({ defaultRoles: ['ADMIN'] })`.
 
 <Callout type="info" title="Tools reach the policy with roles: undefined, not a baked-in default">
 Discovery doesn't bake `defaultRoles` into a tool's `spec.roles` — a tool that declares no `roles`
 reaches whichever `RolesPolicy` is active with `roles: undefined`, and `DefaultRolesPolicy` is what
 applies `defaultRoles` at that point. This matters if you write a custom `RolesPolicy` (or use
-`AuthzRolesPolicy`'s fallthrough): you'll see `undefined`, not a pre-filled `['ADMIN']`.
+`AuthzRolesPolicy`'s fallthrough): you'll see `undefined`, not a pre-filled `defaultRoles`.
 </Callout>
 
 ```ts
@@ -238,7 +282,7 @@ Under the hood `AgentAuthzModule` binds an `AuthzRolesPolicy` as the agent's `Ro
 
 - Tool **declares an `ability`** → decision goes to the Gate: `gate.forUser({ id, roles }).allows(ability)`.
 - Tool **has no `ability`** → falls through to the built-in role policy (its `fallbackRoles` default to
-  ADMIN-only, overridable via `AgentAuthzModule.forRoot({ fallbackRoles })`).
+  `[]` — no restriction — overridable via `AgentAuthzModule.forRoot({ fallbackRoles })`).
 
 <Callout type="info" title="The actor is all authz needs">
 The Gate is handed `{ id, roles }` derived from the actor — exactly what authz's default role resolver
@@ -265,15 +309,17 @@ read, fork, delete, or cancel another actor's state by guessing an id.
 
 ## Why this is safe by construction
 
-- **Identity is never invented.** `actorResolver` is required — there's no default to omit it in
-  favor of. The header resolver throws on a missing `x-actor-id`. A custom resolver should throw when
-  it can't verify a principal. There is no code path where the agent runs as an unknown or default
-  caller.
+- **Identity is never shared.** Without a resolver, each browser is its own anonymous actor — no two
+  visitors resolve to the same id, and none resolves to a privileged one. With a resolver, a request it
+  cannot verify is refused (`requestUserActorResolver` answers `401`; the header resolver throws on a
+  missing `x-actor-id`).
 - **Authorization is server-side and per-tool.** The model can *ask* to call any tool it can see, but the
   loop runs the policy check against the resolved actor before the handler executes. A prompt can't talk
   its way past a role intersection or a Gate denial.
-- **Fail-closed defaults.** Empty roles intersect with nothing; an unset tool `roles` falls back to
-  `defaultRoles` (ADMIN-only out of the box), and an ability with no matching policy is denied.
+- **Explicit restrictions fail closed.** A tool that names `roles` is refused to an actor holding none
+  of them (anonymous actors hold only `anonymous`), and an ability with no matching policy is denied.
+  A tool that names nothing is open — by design, so the default chat works; restrict with `roles` or
+  `defaultRoles`.
 
 ---
 

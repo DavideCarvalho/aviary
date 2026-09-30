@@ -76,7 +76,7 @@ const MODES = [
 ];
 
 export function Chat() {
-  const chat = useAgentChat({ baseUrl: '/agent' });
+  const chat = useAgentChat();
   const [mode, setMode] = useState('digest');
 
   return (
@@ -86,7 +86,7 @@ export function Chat() {
       onSubmit={(text) => chat.sendMessage({ text }, { body: { mode } })}
       onStop={() => chat.cancel()}
       editable
-      onEditSubmit={(_id, text) => chat.sendMessage({ text })}
+      onEditSubmit={({ text }) => chat.sendMessage({ text })}
       regeneratable
       onRegenerate={() => chat.regenerate()}
       welcomeTitle="What should I look through?"
@@ -96,10 +96,8 @@ export function Chat() {
       contextSources={[{ id: 'drive', label: 'Drive' }, { id: 'slack', label: 'Slack' }]}
       contextTotal={9}
       onAddContext={openSourcePicker}
-      onAnswer={(toolCallId, answers) => chat.answer({ toolCallId, answers })}
-      onSkip={(toolCallId) => chat.skip({ toolCallId })}
-      onApprove={(toolCallId) => chat.approve({ toolCallId })}
-      onReject={(toolCallId) => chat.reject({ toolCallId })}
+      // approve / reject / answer / skip settle through the provider's backend by default;
+      // pass chat.approve (etc.) — same object shape — or null to opt out.
     />
   );
 }
@@ -140,18 +138,13 @@ somewhere else on the page.
 
 **A question set** — an agent's [intake or the model's own `ask`](/docs/agent/guides/asking-the-user)
 — arrives as an `elicitation` block and `ChatElicitation` draws it inline: the agent's picks already
-checked, a letter hotkey per option, "Question 2 of 3", Confirm and Skip. Pass `onAnswer` and the
-model lifts the question set out of the tool run; without it there is nowhere to send an answer, so
-it stays the tool card it was.
+checked, a letter hotkey per option, "Question 2 of 3", Confirm and Skip. It works with nothing
+passed — the answer goes to the in-scope backend's `POST /agent/tool-call/answer`. Pass
+`onAnswer={chat.answer}` to route it yourself (it takes `{ toolCallId, answers }`), or
+`onAnswer={null}` to leave question sets as plain tool cards.
 
 ```tsx
-<AgentChat
-  messages={chat.messages}
-  status={chat.status}
-  onSubmit={(text) => chat.sendMessage({ text })}
-  onAnswer={(toolCallId, answers) => chat.answer({ toolCallId, answers })}
-  onSkip={(toolCallId) => chat.skip({ toolCallId })}
-/>
+<AgentChat messages={chat.messages} status={chat.status} onSubmit={(text) => chat.sendMessage({ text })} />
 ```
 
 Only the questions the user **touched** are submitted. The rest are omitted deliberately, so the
@@ -161,8 +154,8 @@ was chosen.
 
 **A tool call awaiting approval** is the other half. An `action` tool's input lands and its output
 never follows on its own — the loop is waiting between the two — so `ChatToolCard` reads that as the
-pending approval, says "Needs approval" rather than "Running", and offers Approve / Reject when
-`onApprove` / `onReject` are wired.
+pending approval, says "Needs approval" rather than "Running", and offers Approve / Reject — through
+the backend by default, or your `onApprove` / `onReject` (`({ toolCallId })`; `null` hides them).
 
 To draw either yourself, `renderToolPart` hands you the whole call — the part plus its decision
 state — and you render what you like:
@@ -249,7 +242,7 @@ for a mention is another entry in the array rather than a second component:
 />
 ```
 
-`createSkillsSource({ client: chat.client, getThreadId })` is the concrete one behind `/`: it reads
+`createSkillsSource({ backend: chat.backend, getThreadId })` is the concrete one behind `/`: it reads
 `GET /agent/skills`, the scope-resolved list of what this actor can invoke, built by the same call
 that offers the catalog to the model — so what a user can type and what the agent can reach cannot
 drift apart. Each row shows where its skill came from — `tenant:berlin`, or

@@ -6,7 +6,7 @@ description: The full AgentModule.forRoot() options reference, forRootAsync, and
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Every option below is passed to `AgentModule.forRoot({ … })`. `model` and `actorResolver` are required — everything else has a default. See [Architecture](/docs/agent/concepts/architecture) for how these pieces fit together, and [`packages/nestjs`](/docs/agent/packages/nestjs) for the package itself.
+Every option below is passed to `AgentModule.forRoot({ … })`. `model` is the only required option — everything else has a default. See [Architecture](/docs/agent/concepts/architecture) for how these pieces fit together, and [`packages/nestjs`](/docs/agent/packages/nestjs) for the package itself.
 
 ## `AgentModule.forRoot(options)`
 
@@ -14,33 +14,31 @@ Every option below is passed to `AgentModule.forRoot({ … })`. `model` and `act
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `model` | `ModelProvider` | — (required) | The LLM provider (e.g. a Vercel AI SDK wrapper). |
-| `models` | `ModelCatalog` | _none_ (empty catalog) | Which models a caller may pick: answers `GET /agent/models?agent=` and gates a send's `model` and a thread's pinned `model` (400 unless listed as `available` for that actor and agent). The pick reaches `model` as `ModelTurnArgs.model` for every call of the turn. `staticModelCatalog(view)` wraps a fixed list. See [Picking a model](/docs/agent/guides/frontend#picking-a-model-and-an-agent). |
-| `store` | `AgentStore` | _none_ | Persistence adapter. Omit it and import a store module (e.g. `MikroOrmAgentStoreModule.forFeature()`) to bind `AGENT_STORE` globally instead — passing it here takes precedence within this module's scope. |
+| `model` | `ModelProvider` | — (required) | The LLM provider — `aiSdkModel(…)`, or `aiSdkModels({ … })` for a picker (its `.catalog` is used when `models` is omitted). The only required option. |
+| `systemPrompt` | `string \| (ctx) => string` | `'You are a helpful assistant.'` | Base prompt of the default agent and of any `@Agent` that declares none; the function form gets `{ actor, agentName, pageContext }`. |
+| `models` | `ModelCatalog` | the model provider's `.catalog`, else none (empty catalog) | Which models a caller may pick: answers `GET /agent/models?agent=` and gates a send's `model` and a thread's pinned `model` (400 unless listed as `available` for that actor and agent). The pick reaches `model` as `ModelTurnArgs.model` for every call of the turn. `staticModelCatalog(view)` wraps a fixed list. See [Picking a model](/docs/agent/guides/frontend#picking-a-model). |
+| `store` | `AgentStore` | a store module's `AGENT_STORE`, else `InMemoryAgentStore` | Persistence adapter. Omit it and import a store module (e.g. `MikroOrmAgentStoreModule.forFeature()`) — its `AGENT_STORE` is found automatically, whatever the import order. With neither, the in-memory store is used and a boot warning says it is not for production. |
 | `sink` | `TokenStreamSink` | in-memory sink | Live token transport. The default is single-process only — for multi-replica, use `@dudousxd/nestjs-agent-transport-redis`'s `RedisTokenStreamSink` instead. |
 | `tools` | `FunctionalTool[]` | `[]` | Static functional tools (`{ spec, handler }`) registered at boot. DI-dependent tools use `provideAgentTool(factory, inject)` in a module's `providers` instead. |
 | `toolTimeoutMs` | `number` | _none_ (no timeout) | Abort a single tool call that runs longer than this and record it as failed — the model gets the timeout as the tool's result and can adapt, instead of the turn hanging. See [Tools](/docs/agent/guides/tools#per-tool-timeout). |
 | `retrieval` | `{ mode: 'inject'; retriever: Retriever; topK?: number }` | _none_ (off) | Always-on RAG: before each turn, retrieve passages for the user message and augment the system prompt with them. For agentic retrieval (the model decides when to search) don't set this — expose a tool instead: `provideAgentTool(createRetrievalTool(retriever))`. |
-| `attachments` | `{ maxBytes?: number; allowedContentTypes?: string[]; upload?: boolean }` | `upload: false` | Bounds/allowlist for the optional `POST /agent/attachments` upload controller. `maxBytes` defaults to 20 MiB and narrows — never raises — the hard 32 MiB ceiling (`HARD_MAX_ATTACHMENT_BYTES`) multer enforces while the body streams, since a per-instance option cannot be known when the interceptor is declared; `allowedContentTypes` defaults to common multimodal types (`image/png`, `image/jpeg`, `image/gif`, `image/webp`, `application/pdf`, `text/plain`, `text/csv`). `upload: true` is static, build-time wiring (controllers are wired at module build) — set it explicitly; it fails boot loudly if nothing is bound to `AGENT_ATTACHMENT_STAGING`. |
-| `guards` | `Type<CanActivate>[]` | `[]` | Guard(s) stamped uniformly on every controller this module mounts (chat, threads, tool-call, quota, agents, and — when `attachments.upload` is set — attachments) via `@nestjs/common`'s `@UseGuards`, with REPLACE semantics — a repeated registration never accumulates guards. Without this, every route is open beyond whatever `actorResolver` itself enforces. Guard classes are added to the module's `providers` for DI. |
+| `attachments` | `{ maxBytes?: number; allowedContentTypes?: string[] }` | 20 MiB, common multimodal types | Limits for `POST /agent/attachments` when the bound staging store declares none (a store's `describe()` — `AgentMediaAttachmentsModule`'s — wins). `maxBytes` narrows — never raises — the hard 32 MiB ceiling (`HARD_MAX_ATTACHMENT_BYTES`) multer enforces while the body streams; `allowedContentTypes` defaults to `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `application/pdf`, `text/plain`, `text/csv`. The route is live whenever something is bound to `AGENT_ATTACHMENT_STAGING` (`501` otherwise). Served to clients by `GET /agent/config`. |
+| `guards` | `Type<CanActivate>[]` | `[]` | Guard(s) stamped uniformly on every controller this module mounts (chat, threads, tool-call, quota, agents, attachments, config, …) via `@nestjs/common`'s `@UseGuards`, with REPLACE semantics — a repeated registration never accumulates guards. Without this, every route is open beyond whatever `actorResolver` itself enforces. Guard classes are added to the module's `providers` for DI. |
 
 ### Identity & authz
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `actorResolver` | `ActorResolver` | — (required) | Resolves the acting `Actor` per request — the identity seam. Compile-time required: no default fabricates a caller. Supply an `ActorResolver` (or the opt-in `HeaderActorResolver`). |
+| `actorResolver` | `ActorResolver` | `AnonymousActorResolver` | Resolves the acting `Actor` per request — the identity seam. Omitted → the endpoints are public and every browser is its own anonymous actor (`HttpOnly` cookie; boot notice). `requestUserActorResolver()` requires login via `req.user`; `HeaderActorResolver` trusts gateway headers. See [Identity & Authorization](/docs/agent/guides/identity-and-authorization). |
 | `rolesPolicy` | `RolesPolicy` | `DefaultRolesPolicy` | Tool authorization gate. A tool that declares no `roles` reaches the policy with `roles: undefined`; `DefaultRolesPolicy` applies `defaultRoles` at that point (not baked into the tool spec earlier). |
 | `approvalPolicy` | `ApprovalPolicy` | the requester, no expiry | Who approves an `action` call (`requirementFor → { required, approver, ttlMs? }`) and who may decide (`canDecide`). See [Human-in-the-loop](/docs/agent/guides/human-in-the-loop-and-durability#who-approves-and-for-how-long). |
-| `defaultRoles` | `string[]` | `['ADMIN']` | Roles `DefaultRolesPolicy` requires when a tool's own `roles` is omitted. |
+| `defaultRoles` | `string[]` | `[]` (no restriction) | Roles `DefaultRolesPolicy` requires when a tool's own `roles` is omitted; empty restricts nobody. `['ADMIN']` for admin-only-by-default. |
 
 ### Quota
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `quota` | `QuotaStore` | _none_ | Daily token budget, explicit store. Omit both `quota` and `quotaLimitTokens` to disable quotas entirely. Wins over `quotaLimitTokens` if both are set. |
-| `quotaLimitTokens` | `number` | _none_ | Daily token budget, no extra wiring: turns on quotas backed by the built-in `LedgerQuotaStore`, which reads the persisted usage ledger. |
-| `quotaProvider` | `QuotaProvider` | `LedgerQuotaProvider` | The budget behind `GET /agent/quota` — windows (`day`/`month`) of tokens and USD against their ceilings. Setting it turns on the send gate: a `blocked` report refuses `POST /agent/chat` with `429`. For a budget the host owns (an AI-gateway spend cap). |
-| `quotaLimits` | `{ day?: { tokens?, usd? }; month?: { tokens?, usd? } }` | _none_ | Ceilings for the default `LedgerQuotaProvider`'s windows; setting it turns on the send gate. Ignored when `quotaProvider` is given. |
+| `quota` | `{ limits: { day?: { tokens?, usd? }; month?: { tokens?, usd? } } } \| QuotaProvider` | _none_ (reported, not enforced) | The budget behind `GET /agent/quota`. `{ limits }` puts ceilings on the built-in `LedgerQuotaProvider`; a `QuotaProvider` replaces it (an AI-gateway spend cap). Either turns on the send gate: a `blocked` report refuses `POST /agent/chat` with `429`. Limits apply per actor (per browser in anonymous mode). |
 
 ### Routing
 
@@ -119,14 +117,13 @@ interface AgentModuleAsyncOptions {
   useFactory: (...args: never[]) => AgentModuleOptions | Promise<AgentModuleOptions>;
   path?: string;
   durable?: boolean;
-  externalStore?: boolean;
   guards?: Type<CanActivate>[];
-  attachmentsUpload?: boolean;
+  surface?: 'http' | 'engine' | 'both';
 }
 ```
 
 <Callout type="info" title="Why these fields live outside the factory">
-  `path`, `durable`, `guards`, and `attachmentsUpload` are all static wiring metadata — which controllers exist, which routes they expose, and which runner `AGENT_RUNNER` binds to are all decided at module build time, before the async factory resolves. Passing them on `AgentModuleAsyncOptions` (not inside the resolved `AgentModuleOptions`) is what makes that possible.
+  `path`, `durable`, `guards` and `surface` are all static wiring metadata — which controllers exist, which routes they expose, and which runner `AGENT_RUNNER` binds to are all decided at module build time, before the async factory resolves. Passing them on `AgentModuleAsyncOptions` (not inside the resolved `AgentModuleOptions`) is what makes that possible.
 </Callout>
 
-`forRootAsync` always binds `AGENT_STORE` locally from the factory result (its factory reads the resolved options) unless `externalStore: true` — set that to defer to a globally-imported store module (e.g. `MikroOrmAgentStoreModule.forFeature()`) instead of returning `store` from `useFactory`.
+`AGENT_STORE` resolves the same way for `forRoot` and `forRootAsync`: the factory's `store`, else the one a store module binds (found automatically), else the in-memory store.

@@ -1,23 +1,20 @@
 ---
 title: Frontend
 icon: MonitorSmartphone
-description: Wire a React chat UI to the agent with useAgentChat — the AI SDK v7 transport, threads, quota, cancel, HITL approve/reject, and styling-agnostic components.
+description: Wire a React chat UI to the agent — AgentProvider for the connection, useAgentChat for everything else (history, resume, quota, models, composer, a bound transcript), and styling-agnostic components.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 
-`@dudousxd/nestjs-agent-react` connects a React app to the `/agent` endpoints. Its `useAgentChat`
-hook wraps the Vercel AI SDK v7 `useChat` with an `AgentChatTransport` that speaks the backend's
-`/agent/chat` SSE protocol, then layers on everything the REST surface exposes: thread history,
-quota, cancel, regenerate, and the human-in-the-loop approve/reject. The components ship
-**no styles** — every action is a callback and every class is yours via `classNames`.
+`@dudousxd/nestjs-agent-react` connects a React app to the `/agent` endpoints. `<AgentProvider>`
+holds the connection once; `useAgentChat` wraps the Vercel AI SDK v7 `useChat` with a transport for
+the agent's SSE protocol and does the wiring around it — loading a thread's history, re-attaching to
+a turn still streaming, gating sends on quota — and returns a transcript, a composer and a model
+picker that are already bound to the chat. The components ship **no styles**.
 
 ---
 
 ## Install
-
-The base package carries the hook, the transport, the REST client, and the components. The rich
-markdown renderer lives behind a separate subpath so its heavy peers stay opt-in.
 
 ```bash
 pnpm add @dudousxd/nestjs-agent-react ai @ai-sdk/react
@@ -26,118 +23,241 @@ pnpm add streamdown @streamdown/code @streamdown/math @streamdown/mermaid \
   react-markdown remark-gfm remark-math rehype-katex rehype-sanitize katex
 ```
 
-`ai` and `@ai-sdk/react` are peers — the hook returns the AI SDK's own `useChat` result, spread with
-the agent extras, so you interoperate with the SDK directly.
+`ai` and `@ai-sdk/react` are peers — `useAgentChat` returns the AI SDK's own `useChat` result, spread
+with the agent extras, so you interoperate with the SDK directly.
 
 ---
 
-## The minimal hook
-
-`useAgentChat` needs only where the backend lives and who is calling. `baseUrl` is the **origin (plus
-any base path)** the endpoints hang off — the transport appends `/agent/chat` itself. Omit it for a
-same-origin app.
+## The minimal chat
 
 ```tsx
-import { useAgentChat } from '@dudousxd/nestjs-agent-react';
+import { ChatInput, MessageList, useAgentChat } from '@dudousxd/nestjs-agent-react';
 
-function Assistant({ me }: { me: { id: string; roles: string[] } }) {
-  const chat = useAgentChat({
-    baseUrl: 'https://api.example.com', // omit → same origin
-    getHeaders: () => ({
-      'x-actor-id': me.id,
-      'x-actor-role': me.roles.join(','),
-    }),
-  });
-
+export function Chat() {
+  const chat = useAgentChat();
   return (
     <>
-      {chat.messages.map((m) => (
-        <p key={m.id} data-role={m.role}>
-          {m.parts.map((p, i) => (p.type === 'text' ? <span key={i}>{p.text}</span> : null))}
-        </p>
-      ))}
-      <button onClick={() => chat.sendMessage({ text: 'What is the weather in Lisbon?' })}>
-        Send
-      </button>
+      <MessageList messages={chat.messages} status={chat.status} />
+      <ChatInput onSubmit={(text) => chat.sendMessage({ text })} />
     </>
   );
 }
 ```
 
-The return value is the AI SDK `useChat` result (`messages`, `sendMessage`, `status`, `stop`,
-`regenerate`, `error`, …) **plus** the agent extras below. `AgentChatTransport` wires the SDK's own
-`regenerate()` to a real backend regenerate — see [Regenerating a turn](#regenerating-a-turn) below.
-
-| Option | Type | Purpose |
-|---|---|---|
-| `baseUrl` | `string` | Origin + base path; endpoints append `/agent/*`. Default `''` (same origin). |
-| `headers` | `Record<string,string>` | Static headers merged into every request. |
-| `getHeaders` | `() => headers \| Promise<headers>` | Resolved per request — for short-lived bearer tokens. Merged over `headers`. |
-| `credentials` | `RequestCredentials` | Forwarded to `fetch` so cookie auth / impersonation works. |
-| `agent` | `string` | Named agent to run each turn (multi-agent). |
-| `threadId` | `string` | Bind the chat to a thread; omitted → backend creates one on first send. |
-| `initialMessages` | `UIMessage[]` | Persisted history to seed `useChat` (consumed on mount). |
-| `resumeRunId` | `string` | Reconnect to a buffered in-flight stream — wire it to the thread's `activeStreamId`. Its presence gates the resume and names the run; omit it and no resume request fires. |
-| `getPageContext` | `() => Record \| null` | Read at each send to attach a page snapshot (page-assistant). |
-| `onFinish` | `() => void` | Fired after each streamed turn (e.g. refetch the sidebar). |
-| `onRunSettled` | `(outcome: { runId, status: 'completed' \| 'failed' }) => void` | Fired exactly once per run when the stream settles (send **and** resume paths) — by then the server has persisted the thread's title and the run's outcome, so this is the right place to refetch thread/list queries (fixes a sidebar stuck on "Untitled"). |
-| `onTitle` | `(title: string) => void` | The server set or changed the thread's title while the turn streamed (a `title` stream frame) — update a header/sidebar immediately instead of waiting for `onRunSettled`. |
-| `onData` | `(part: DataUIPart) => void` | Every data part as it arrives, transient ones included: pushed components (`data-ui`), `data-approval-requested`, `data-title`, `data-cancelled`, and `data-<kind>` for any frame this client version does not map. See [Stream events](/docs/agent/reference/stream-events). |
-| `client` / `fetch` | `AgentClient` / `typeof fetch` | Inject an existing client or a custom fetch (tests / non-browser). |
-
-<Callout type="info" title="Only the latest message goes over the wire">
-The backend hydrates prior history from its store, so the transport sends only the newest user
-message text each turn. Payloads stay tiny and the client can't corrupt replayed history.
-</Callout>
+With no provider, every hook shares one client for the same origin under `/agent`. That is the whole
+setup for an app served next to its API.
 
 ---
 
-## Wiring headers to identity
+## `<AgentProvider>`: the connection, once
 
-The backend never invents a caller — it resolves the actor from request headers (or a session/JWT)
-via its `ActorResolver`. On the client, `getHeaders` is where you supply that identity. It runs on
-**every** request, so it's the right place for a token that rotates:
+Every hook — `useAgentChat`, `useThreads`, `useModels`, `useAgents`, `useQuota`, `useToolCatalog`,
+`useMessageFeedback`, `useAttachments`, `useAgentConfig` — talks to the enclosing provider's backend
+unless it is handed a `backend` of its own.
 
 ```tsx
-const chat = useAgentChat({
-  getHeaders: async () => ({
-    authorization: `Bearer ${await auth.getFreshToken()}`,
-  }),
-  credentials: 'include', // or lean on cookies instead of a header
-});
+import { AgentProvider } from '@dudousxd/nestjs-agent-react';
+import { mediaAttachments } from '@dudousxd/nestjs-agent-react/media';
+
+<AgentProvider
+  baseUrl="https://api.example.com"   // the origin; default '' (same origin)
+  path="api/agent"                    // AgentModule's `path`, global prefix included; default 'agent'
+  credentials="include"               // cookies on a cross-origin API
+  getHeaders={() => ({ 'X-XSRF-TOKEN': readCookie('XSRF-TOKEN') })} // read per request
+  attachments={{ upload: mediaAttachments() }} // optional — resumable uploads via nestjs-media
+  genui={{ registry, catalog }}       // optional — how pushed components render
+>
+  <App />
+</AgentProvider>;
 ```
 
-Use `headers` for values fixed for the session (a tenant ref), `getHeaders` for anything short-lived.
-When the backend authenticates from a cookie, drop the bearer header and set
-`credentials: 'include'` (or leave the fetch default, `same-origin`, when the API shares the page's
-origin). A cookie session usually wants a CSRF header on mutating requests — read it from its cookie
-in `getHeaders`, so a rotated token is picked up:
+| Prop | Purpose |
+|---|---|
+| `baseUrl` | The server's origin. Default `''`. It is **only** the origin — the agent's route prefix is `path`. |
+| `path` | The agent's route prefix (`AgentModule`'s `path` + any global prefix). Default `'agent'`. |
+| `headers` / `getHeaders` | Static headers / headers resolved on every request (a rotating bearer token, a CSRF header read from its cookie). |
+| `credentials` | Forwarded to `fetch`: `'include'` for cookie auth on another origin. |
+| `fetch` | Injectable `fetch` for tests / non-browser runtimes. |
+| `attachments.upload` | How the built-in client uploads (`mediaAttachments()`, or your own `AttachmentUploadStrategy`). |
+| `genui` | Everything `<GenuiProvider>` takes — see [Generative UI](/docs/agent/guides/generative-ui). |
+| `backend` | Any `AgentBackend` instead of the built-in client (the connection props are then ignored). |
+
+`useAgentBackend()` returns the backend in scope, for calls of your own.
+
+### Cookie sessions and CSRF
+
+Nothing assumes bearer tokens. For a cookie session, set `credentials` and hand the CSRF header to
+`getHeaders` — it runs per request, so a rotated token is picked up:
 
 ```tsx
 const readCookie = (name: string) =>
   decodeURIComponent(document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`))?.[1] ?? '');
 
-const chat = useAgentChat({
-  credentials: 'include',
-  getHeaders: () => ({ 'X-XSRF-TOKEN': readCookie('XSRF-TOKEN') }),
-});
-``` See [Identity & Authorization](/docs/agent/guides/identity-and-authorization)
-for how the server turns these into an actor.
+<AgentProvider credentials="include" getHeaders={() => ({ 'X-XSRF-TOKEN': readCookie('XSRF-TOKEN') })}>
+  <App />
+</AgentProvider>;
+```
 
-<Callout type="warn" title="Headers are only as trusted as your gateway">
-The shipped `HeaderActorResolver` reads `x-actor-id` / `x-actor-role` verbatim — safe only behind a
-gateway that strips and re-sets them. Production apps typically resolve the actor from a verified
-session server-side, in which case the client sends a token, not an actor.
+See [Identity & Authorization](/docs/agent/guides/identity-and-authorization) for how the server
+turns the request into an actor — including the default anonymous mode, which needs no client code.
+
+---
+
+## `useAgentChat`
+
+```tsx
+const chat = useAgentChat({
+  threadId,                              // omit → the first send creates one
+  onThreadCreated: (id) => router.replace(`/chat/${id}`),
+  agent: 'support',                      // a named agent per turn
+});
+```
+
+Give it a `threadId` and it reads the thread: the history is loaded into the chat and a turn that
+was still streaming is re-attached — a reload mid-answer keeps streaming it. Change `threadId` and it
+switches cleanly to the other thread; pass back the id it just created (to sync the URL) and the live
+conversation is kept as it is.
+
+| Option | Purpose |
+|---|---|
+| `backend` | Default: the provider's (or the shared same-origin client). |
+| `threadId` | The thread to bind to. Omitted → the backend creates one on the first send. |
+| `history` | Load the thread's history. Default `true`; skipped when `initialMessages` is given. |
+| `initialMessages` | History you already have (SSR, a cache) — seeds the chat instead of loading it. |
+| `resume` | Re-attach to the thread's streaming turn (`activeRunId`). Default `true`. |
+| `resumeRunId` | A run id you already know is streaming — attached to on mount without reading the thread. |
+| `agent` | Named agent to run each turn. |
+| `model` | Control the model yourself; omitted → `chat.models.selected`. |
+| `quota` | Read `GET /quota` and gate sends on it. Default `true` when the backend supports it. |
+| `blocked` | Override the gate: `null` never blocks, a `QuotaBlock` always does. |
+| `composer` | `{ accept, maxBytes, maxFiles, upload, describeRejection }` for `chat.composer.files`. |
+| `transcript` | Overrides for `chat.transcript` — anything `useChatTranscript` takes. |
+| `reconnect` | `{ maxAttempts, baseDelayMs, maxDelayMs }`, or `false`. |
+| `getPageContext` | Read at each send to attach a page snapshot (page-assistant). |
+| `onThreadCreated` | This chat moved to a thread it created: its first send, or a `fork`. |
+| `onFinish` / `onRunSettled` | A turn rendered / the server finished writing the run (title and terminal state persisted). |
+| `onTitle` / `onData` | The server named the thread mid-stream / every data part as it arrives. |
+| `background` / `backgroundPollMs` | Track detached sub-agents (see below). |
+
+What it returns, on top of the AI SDK chat (`messages`, `status`, `sendMessage`, `stop`, `error`,
+`setMessages`, …):
+
+| Field | What it is |
+|---|---|
+| `transcript` | `useChatTranscript` bound to this chat — approve/reject/answer/skip, stop, fork, regenerate, the tool catalog, timestamps and usage. |
+| `composer` | `{ text, setText, files, canSend, blockedBy, submit() }`. |
+| `models` | `{ list, providers, selected, select(id), pinToThread(id), isLoading, error }` — fetched on first read. |
+| `quota` / `blocked` | The `useQuota` state; the window blocking sends right now. |
+| `approve` / `reject` / `answer` / `skip` | `({ toolCallId, … })` — routed by tool-call id. |
+| `fork` / `truncateFrom` / `promote` | `({ messageId, threadId? })` / `({ threadId? })` — default to this chat's thread. |
+| `cancel()` | Close the stream and hard-abort the run server-side. |
+| `regenerate()` | Re-run the last exchange (the server truncates and re-answers). |
+| `getThreadId()` | The thread the chat is on now. |
+| `runId` / `activeRunId` | The current run / the loaded thread's running turn. |
+| `isLoadingHistory` / `historyError` | The history read. |
+| `connection` | `live`, or `reconnecting` with the attempt. |
+| `background` | `{ runs, isWorking, refresh() }`. |
+| `backend` | The backend the chat talks to. |
+
+<Callout type="info" title="Only the latest message goes over the wire">
+The backend hydrates prior history from its store, so the transport sends only the newest user
+message each turn. Payloads stay tiny and the client cannot corrupt replayed history.
 </Callout>
+
+---
+
+## The transcript, already wired
+
+`chat.transcript` is the headless transcript model with every action bound to the chat:
+
+```tsx
+const { transcript } = useAgentChat();
+
+{transcript.items.map((item) => (
+  <article key={item.id} data-role={item.role}>
+    {item.blocks.map((block) =>
+      block.kind === 'text' ? <p key={block.key}>{block.text}</p>
+      : block.kind === 'tools' ? block.calls.map((call) => (
+          <div key={call.toolCallId}>
+            {call.description.phrase}
+            {call.isAwaitingApproval ? <button onClick={() => call.approve.run()}>Approve</button> : null}
+          </div>
+        ))
+      : null,
+    )}
+    {item.timestamp ? <time>{item.timestamp.relative}</time> : null}
+  </article>
+))}
+```
+
+Approvals and question sets are actionable with nothing passed — and not only here:
+`useChatTranscript` on its own (and so `MessageList`) settles them through the in-scope backend when
+no handler is given; pass `onApprove: null` (etc.) to opt a decision out. Every handler takes one
+object — `onApprove({ toolCallId, remember })`, `onAnswer({ toolCallId, answers })`,
+`onEditSubmit({ messageId, text })`, `onFork({ messageId })` — the same shape as `chat.approve` and
+friends, so they pass straight through. The full model is in
+[Bring your own UI](/docs/agent/guides/bring-your-own-ui#the-transcript-model).
+
+## The composer
+
+```tsx
+const { composer } = useAgentChat();
+
+<div {...composer.files.dropZoneProps}>
+  <textarea value={composer.text} onChange={(e) => composer.setText(e.target.value)} onPaste={composer.files.onPaste} />
+  <input {...composer.files.inputProps} />
+  <button disabled={!composer.canSend} onClick={() => void composer.submit()}>Send</button>
+</div>
+```
+
+`submit()` sends the draft with the ready uploads attached (as `{ mediaId }` refs) and clears both.
+`blockedBy` says why it cannot send: `'empty'`, `'busy'`, `'uploading'` or `'quota'`. The file tray
+takes its `accept` / `maxBytes` / `maxFiles` defaults from the server (`GET /agent/config`) — see
+[File uploads](/docs/agent/guides/file-uploads).
+
+## Picking a model
+
+```tsx
+const { models } = useAgentChat();
+
+<select value={models.selected ?? ''} onChange={(e) => models.select(e.target.value)}>
+  {models.list.map((m) => (
+    <option key={m.id} value={m.id} disabled={!m.available}>{m.label}</option>
+  ))}
+</select>
+```
+
+`models.list` is fetched the first time it is read (`GET /agent/models`, the server's catalog —
+`aiSdkModels` carries one). `select(id)` runs the following turns on it; `selected` is the pick, else
+the thread's pinned model, else the server default. `pinToThread(id)` persists the pick on the thread
+(`null` unpins) — before the first send, it lands on the thread that send creates. A single send can
+still override with `sendMessage(msg, { body: { model } })`. `useModels()` / `useAgents()` are the
+standalone hooks.
+
+## Quota
+
+`useAgentChat` reads `GET /agent/quota` and refuses to send while a window is exhausted —
+`sendMessage` / `regenerate` reject with `QuotaBlockedError` and `composer.blockedBy` is `'quota'`,
+instead of a turn the server would refuse with `429`:
+
+```tsx
+const chat = useAgentChat();
+
+<meter value={chat.quota.month?.usedUsd ?? 0} max={chat.quota.month?.limitUsd ?? 1} />
+{chat.blocked ? <p role="alert">{chat.blocked.reason}</p> : null}
+```
+
+The report re-reads after every run a chat on the same backend settles. `blocked` overrides the gate;
+`quota: false` skips the read. `useQuota()` is the standalone hook.
 
 ---
 
 ## Your own backend
 
-Every call the hooks make goes through one interface, `AgentBackend`. `AgentClient` — `fetch` over
-this library's routes — is the default. An app with its own client (a generated one, its own auth,
-or a server that is not this library but speaks the [stream protocol](/docs/agent/reference/stream-events))
-implements it and passes it in:
+Every call goes through one interface, `AgentBackend`. `AgentClient` — `fetch` over this library's
+routes — is the default. An app with its own client (a generated one, its own auth, or a server that
+is not this library but speaks the [stream protocol](/docs/agent/reference/stream-events)) implements
+it and hands it to the provider:
 
 ```tsx
 import type { AgentBackend } from '@dudousxd/nestjs-agent-react';
@@ -166,138 +286,52 @@ const backend: AgentBackend = {
   getThread: (id) => api.threads.get(id),
   updateThread: (id, patch) => api.threads.update(id, patch),
   deleteThread: (id) => api.threads.remove(id),
-  // optional: forkFromMessage, promoteThread, truncateFromMessage, approveToolCall,
-  // rejectToolCall, answerToolCall, skipToolCall, uploadAttachment, listTools, listSkills,
-  // getQuotaToday, setMessageFeedback
-  setMessageFeedback: (id, input) => api.messages.feedback(id, input),
+  // optional: forkFromMessage, promoteThread, truncateFromMessage, approveToolCall, rejectToolCall,
+  // answerToolCall, skipToolCall, uploadAttachment, listTools, listSkills, getQuota, listModels,
+  // listAgents, getConfig, setMessageFeedback
 };
 
-const chat = useAgentChat({ backend }); // chat.backend is typed as yours
+<AgentProvider backend={backend}>
+  <App />
+</AgentProvider>;
 ```
 
-The streaming, thread and cancel members are required; the rest are optional, and calling a hook
-method whose member is missing throws `AgentBackendUnsupportedError`. The body `openChatStream`
-receives is `{ message, threadId?, agent?, attachments?, pageContext?, regenerate? }`. The
-[endpoints reference](/docs/agent/reference/endpoints) lists the REST shapes each member mirrors.
+The streaming, thread and cancel members are required; the rest are optional, and a hook that needs
+a missing one either skips it (quota, models, config, the tool catalog are read only when present)
+or throws `AgentBackendUnsupportedError` when you call it. The body `openChatStream` receives is
+`{ message, threadId?, agent?, model?, attachments?: { mediaId }[], pageContext?, regenerate? }`.
 
-## Picking a model and an agent
+---
 
-`useModels` reads `GET /agent/models?agent=` — models grouped by provider, with badges and
-availability — and `useAgents` reads `GET /agent/agents`. Both are headless; the pick goes back
-through `useAgentChat`:
+## Rendering with the components
 
-```tsx
-import { useAgents, useModels } from '@dudousxd/nestjs-agent-react';
-
-const [model, setModel] = useState<string>();
-const chat = useAgentChat({ model }); // sent as the body's `model` on every turn
-const { providers, defaultModel, find } = useModels({ backend: chat.backend });
-const { agents, defaultAgent } = useAgents({ backend: chat.backend });
-
-<select value={model ?? defaultModel ?? ''} onChange={(e) => setModel(e.target.value)}>
-  {providers.map((p) => (
-    <optgroup key={p.id} label={p.label}>
-      {p.models.map((m) => (
-        <option key={m.id} value={m.id} disabled={!m.available}>
-          {m.label}{m.available ? '' : ` — ${m.unavailableReason ?? 'unavailable'}`}
-        </option>
-      ))}
-    </optgroup>
-  ))}
-</select>
-```
-
-A single send can override with `sendMessage(msg, { body: { model } })`. `chat.setThreadModel(id)`
-pins a model on the thread (`null` unpins), so later turns without their own `model` run on it; the
-thread reads back with `model`. The server refuses any model its catalog does not offer as
-available — see [Endpoints → Models](/docs/agent/reference/endpoints#models).
-
-## When the connection drops
-
-Against a server that numbers its frames (this library's does), a stream that drops mid-run is
-re-attached from its last frame — `GET <base>/chat/:runId/stream?after=<n>` — with exponential
-backoff. `chat.status` is `'reconnecting'` meanwhile (the transcript treats it like `streaming`) and
-`chat.connection` carries the attempt. If the run finished while the client was away, the hook
-reloads the thread so the full answer replaces the partial one. Tune or turn it off with
-`reconnect: { maxAttempts, baseDelayMs, maxDelayMs }` / `reconnect: false`.
+`ChatInput` is a composer (Enter submits, Shift+Enter newlines, optional dictation); `MessageList`
+windows the thread, shows a typing indicator, an inline error + retry banner and follow-up chips.
+Everything is driven through `classNames` and callbacks.
 
 ```tsx
-{chat.status === 'reconnecting' ? <p role="status">Reconnecting…</p> : null}
-```
-
-## Rendering the conversation
-
-The components are the proven chat UX with the styling removed. `ChatInput` is the composer (Enter
-submits, Shift+Enter newlines, optional dictation); `MessageList` windows the thread, shows a typing
-indicator, an inline error+retry banner, and follow-up chips. Everything is driven through
-`classNames` and callbacks.
-
-```tsx
-import { ChatInput, MessageList } from '@dudousxd/nestjs-agent-react';
-
-function ChatPanel({ chat }: { chat: ReturnType<typeof useAgentChat> }) {
-  return (
-    <div className="chat">
-      <MessageList
-        messages={chat.messages}
-        status={chat.status}
-        error={chat.error ?? null}
-        onRetry={() => chat.regenerate()}
-        classNames={{
-          root: 'messages',
-          message: { byRole: { user: 'bubble-user', assistant: 'bubble-assistant' } },
-        }}
-        emptyState={<p>Ask me anything about your fleet.</p>}
-        typingIndicator={<Spinner />}
-      />
-      <ChatInput
-        onSubmit={(text) => chat.sendMessage({ text })}
-        disabled={chat.status === 'streaming' || chat.status === 'submitted'}
-        className="composer"
-        textareaClassName="composer-input"
-        sendButtonClassName="composer-send"
-      />
-    </div>
-  );
-}
-```
-
-`MessageList` also accepts `renderText`, `renderToolPart` / `renderToolGroup` (to render tool calls),
-`renderReasoning` + `reasoningLabel` (the model's thinking, folded behind a toggle), `onFork` /
-`editable` + `onEditSubmit` / `regeneratable` + `onRegenerate`, and per-message `getUsage` /
-`getCreatedAt` resolvers for the cost + timestamp line. Pass `<MessageItem>` directly if you want to
-lay the list out yourself.
-
-Both components are thin renderers over `useChatTranscript` — the same model is exported, so a
-different layout is a rewrite of the markup only, not of the part grouping, the edit machine, or the
-windowing. See [Bring your own UI](/docs/agent/guides/bring-your-own-ui#the-transcript-model).
-
-### Stopping a turn from the composer
-
-`ChatInput` renders a cancel affordance next to send while a turn is in flight — it calls the same
-`POST /agent/chat/:runId/cancel` that `chat.cancel()` does:
-
-```tsx
+<MessageList
+  messages={chat.messages}
+  status={chat.status}
+  error={chat.error ?? null}
+  onRetry={() => chat.regenerate()}
+  regeneratable
+  onRegenerate={() => chat.regenerate()}
+  onFork={({ messageId }) => chat.fork({ messageId })}
+  classNames={{ root: 'messages', message: { byRole: { user: 'me', assistant: 'bot' } } }}
+/>
 <ChatInput
   onSubmit={(text) => chat.sendMessage({ text })}
   isStreaming={chat.status === 'streaming' || chat.status === 'submitted'}
   onStop={() => chat.cancel()}
-  stopLabel="Stop generating"
 />
 ```
 
-Without `onStop` nothing is rendered, so the affordance exists exactly when there is something to
-cancel. (`ChatInput`'s dictation mic has its own "Stop" — the two never collide, the cancel button
-defaults to "Stop generating".)
+`MessageList` also accepts `renderText`, `renderToolPart` / `renderToolGroup`, `renderReasoning`,
+`editable` + `onEditSubmit({ messageId, text })`, and `getUsage` / `getCreatedAt` (defaults read the
+message's metadata). Both components are thin renderers over `useChatTranscript`.
 
----
-
-## Rich markdown (the `/markdown` subpath)
-
-By default `renderText` receives plain text. To render assistant output as full markdown — GFM,
-KaTeX math, syntax-highlighted code, and Mermaid — drop `AgentMarkdown` from the
-`@dudousxd/nestjs-agent-react/markdown` subpath into the `renderText` slot. It ships the exact
-streamdown stack and honours the `isStreaming` hint to defer expensive renders until a block settles.
+### Rich markdown (the `/markdown` subpath)
 
 ```tsx
 import { AgentMarkdown } from '@dudousxd/nestjs-agent-react/markdown';
@@ -305,80 +339,25 @@ import { AgentMarkdown } from '@dudousxd/nestjs-agent-react/markdown';
 <MessageList
   messages={chat.messages}
   status={chat.status}
-  renderText={(text, { isStreaming }) => (
-    <AgentMarkdown isStreaming={isStreaming}>{text}</AgentMarkdown>
-  )}
+  renderText={(text, { isStreaming }) => <AgentMarkdown isStreaming={isStreaming}>{text}</AgentMarkdown>}
 />;
 ```
 
-`AgentMarkdown` also takes `remarkPlugins`, `components`, `allowedTags`, and `literalTagContent` —
-the seam for app-specific markdown (e.g. mention chips) that keeps domain logic in your app rather
-than the library. Because the renderer's peers are optional, apps that don't import the subpath never
-pull streamdown, KaTeX, or Mermaid into their bundle.
+`AgentMarkdown` ships the streamdown stack (GFM, KaTeX, highlighted code, Mermaid), defers expensive
+renders until a block settles, and takes `remarkPlugins`, `components`, `allowedTags`,
+`literalTagContent`. Its peers are optional: apps that don't import the subpath never bundle them.
 
 ---
 
-## Human-in-the-loop: approve / reject
+## Human-in-the-loop
 
-A `kind: 'action'` tool never auto-executes — the backend suspends the run and waits for a decision
-(see [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability)). On the
-client that pending call arrives as a **tool part** on the assistant message: it has input but no
-output yet. Render an Approve/Reject affordance and wire the buttons to the hook's `approve` / `reject`
-— both target the current run automatically and identify the call by its `toolCallId`.
-
-```tsx
-<MessageList
-  messages={chat.messages}
-  status={chat.status}
-  renderToolPart={(part, key) => {
-    // `approval-requested` when the backend said who has to decide (see the stream reference).
-    const awaitingDecision =
-      part.state === 'input-available' || part.state === 'approval-requested';
-    return (
-      <div key={key} className="tool-call">
-        <code>{part.type}</code>
-        <pre>{JSON.stringify(part.input, null, 2)}</pre>
-        {awaitingDecision ? (
-          <div className="tool-actions">
-            <button onClick={() => chat.approve({ toolCallId: part.toolCallId })}>Approve</button>
-            <button
-              onClick={() => chat.reject({ toolCallId: part.toolCallId, reason: 'Not now' })}
-            >
-              Reject
-            </button>
-          </div>
-        ) : null}
-      </div>
-    );
-  }}
-/>;
-```
-
-`approve` resolves the durable suspend and the run resumes streaming; `reject` (with an optional
-`reason`) tells the model the human declined. Both throw if there is no active run. The wire protocol
-is identical whether the backend runs the turn durably or in-process, so the UI code never changes.
-
-### Who decides, until when, and "always allow"
-
-Through the transcript model (`useChatTranscript`), every call in a `tools` block carries
-`call.approval` once the backend said who has to decide:
-
-```ts
-call.approval = {
-  approver,       // 'requester' | a role — show "waiting on finance" instead of buttons
-  expiresAt,      // ISO-8601 | null
-  reason,         // why it needs a person, when the backend said
-  status,         // 'pending' | 'approved' | 'rejected' | 'expired'
-  remember,       // this approval also covers later calls of the tool in this thread
-  decidedBy,      // who decided, once settled
-  decidedVia,     // 'web' | 'slack' | 'remembered' | …
-  decisionReason, // what the person said when declining
-};
-```
-
-`call.approve.run({ remember: true })` approves this tool for the rest of the thread (with
-`useAgentChat` directly: `chat.approve({ toolCallId, remember: true })`). For a countdown, the
-headless `useApprovalCountdown(expiresAt)` ticks `{ remainingMs, isExpired }`:
+A `kind: 'action'` tool never auto-executes — the run parks until a person decides (see
+[Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability)). In the
+transcript, the parked call has `isAwaitingApproval`, `approve.run({ remember? })`, `reject.run()`,
+and `approval` (`{ approver, expiresAt, reason, status, remember, decidedBy, decidedVia,
+decisionReason }`) once the backend said who has to decide. `chat.approve({ toolCallId, remember })`
+and `chat.reject({ toolCallId, reason })` are the same calls, routed by tool-call id alone — the
+server derives the run awaiting it.
 
 ```tsx
 import { formatElapsed, useApprovalCountdown } from '@dudousxd/nestjs-agent-react';
@@ -393,205 +372,59 @@ function Deadline({ expiresAt }: { expiresAt: string | null }) {
 A decision the server refuses — `403` (not your approval), `410` (lapsed) — lands on `call.error`
 with the affordance still live.
 
-<Callout type="info" title="Where the decision goes">
-`approve` / `reject` POST to `/agent/tool-call/approve` · `/reject` for the hook's current `runId`.
-The same run id backs `cancel`, which stops the SSE client-side and then hard-aborts the run server-side.
-</Callout>
+---
+
+## When the connection drops
+
+Against a server that numbers its frames (this library's does), a stream that drops mid-run is
+re-attached from its last frame — `GET <base>/chat/:runId/stream?after=<n>` — with exponential
+backoff. `chat.status` is `'reconnecting'` meanwhile and `chat.connection` carries the attempt. If
+the run finished while the client was away, the hook reloads the thread so the full answer replaces
+the partial one.
+
+```tsx
+{chat.status === 'reconnecting' ? <p role="status">Reconnecting…</p> : null}
+```
+
+## Run failures
+
+A run that fails mid-stream ends with a structured `event: error` frame (`{ code, message }`), which
+surfaces as the AI SDK's `chat.error` — the same `error` prop `MessageList` renders. REST calls throw
+`AgentHttpError` carrying `.status`, so a `403` (someone else's thread) is easy to tell from a `404`.
 
 ---
 
-## Regenerating a turn
-
-Calling `chat.regenerate()` (the AI SDK's own method, unchanged on the surface) now sends
-`regenerate: true` on the `/agent/chat` request instead of just replaying client-side state. The
-backend truncates everything after the thread's last user message and re-answers it — no duplicate
-user message appears, and the assistant's prior reply is what gets replaced.
-
-```tsx
-<MessageList
-  messages={chat.messages}
-  status={chat.status}
-  onRetry={() => chat.regenerate()}
-/>
-```
-
-Regenerate requires an existing `threadId` (there's no prior exchange to redo on a fresh thread) and,
-same as `cancel`, is ownership-scoped over HTTP — it operates on the caller's own thread.
-
----
-
-## Quota
-
-`useQuota` reads `GET /agent/quota` — every budget window with its usage and ceilings, and
-`blocked` when one is exhausted — and re-reads after each run a chat on the same backend settles
-(`pollMs` to poll as well). Pass `blocked` to the chat and it refuses to send while it holds:
-
-```tsx
-import { QuotaBlockedError, useQuota } from '@dudousxd/nestjs-agent-react';
-
-const quota = useQuota({ backend });
-const chat = useAgentChat({ backend, blocked: quota.blocked });
-
-<meter value={quota.month?.usedUsd ?? 0} max={quota.month?.limitUsd ?? 1} />
-{quota.blocked ? <p role="alert">{quota.blocked.reason}</p> : null}
-```
-
-`sendMessage` and `regenerate` then reject with `QuotaBlockedError` (carrying the `block`) instead
-of starting a turn the server would refuse with `429`.
-
-## Run failures and quota errors
-
-A run that fails mid-stream (quota exceeded, an unhandled error) doesn't append error text to the
-assistant message — it ends the stream with a structured `event: error` SSE frame carrying
-`{ code, message }` (`code` is `quota_exceeded` or `run_failed`). `useAgentChat`'s transport surfaces
-that as an AI SDK `error` chunk, so it shows up on the standard `chat.error` the SDK already gives
-you — the same `error` prop `MessageList` renders in its inline error+retry banner:
-
-```tsx
-<MessageList messages={chat.messages} status={chat.status} error={chat.error ?? null} />
-```
-
-Non-streaming REST calls (`loadThreads`, `approve`, `forkThread`, …) throw `AgentHttpError` on a
-non-2xx response — it carries `.status`, so a `403` from an ownership-scoped endpoint (someone else's
-thread or tool call) is easy to distinguish from a `404` or a `5xx`.
-
----
-
-## Sub-agents the chat did not wait for
-
-A [detached delegation](/docs/agent/guides/multi-agent#delegate-without-waiting) finishes after the
-turn that started it, so its answer is not something the current stream will ever carry. Set
-`background: true` and the hook tracks them:
-
-```tsx
-const chat = useAgentChat({ threadId, background: true });
-
-{chat.background.isWorking && (
-  <p>{chat.background.runs.filter((r) => r.status === 'running').length} agent(s) working…</p>
-)}
-```
-
-| Field | What it is |
-|---|---|
-| `background.runs` | One `BackgroundRun` per delegation this thread started: `{ runId, agent, toolCallId, toolName, status, message? }` |
-| `background.isWorking` | Whether any of them is still `running` |
-| `background.refresh()` | Re-read now instead of waiting for the next poll |
-
-When one lands, its message is appended to `chat.messages` — no reload, and no re-seeding of the
-list, so a tool card mid-flight or a question set awaiting an answer is left alone.
-
-Everything comes from **one thread read**, because both halves are the same fact persisted: the
-receipt is a tool result on the delegating turn, and the answer is a message stamped with the run
-that wrote it. So a reload, or a second tab, sees exactly what the tab that started it sees. The
-interval (`backgroundPollMs`, default `5000`; `0` disables it) runs only while something is
-outstanding — a conversation with nothing in flight costs no requests, and neither does one that
-never opted in, which is why `background` is off by default.
-
-<Callout type="info" title="Why a poll and not a second stream">
-What a background run produces is a persisted **message**, not tokens this chat should render as they
-arrive: it can land while the user is mid-turn or has the tab shut, and it has to be there on the next
-read either way. Its own token stream is still subscribable on its own run id
-(`GET /agent/chat/:runId/stream`) if you want to show it working.
-</Callout>
-
----
-
-## Threads, quota, and cancel
-
-Beyond the streaming surface, the hook returns loaders and state for the rest of the REST API. Each
-loader calls the backend and caches the result in the paired state field.
-
-| Field | Type | What it does |
-|---|---|---|
-| `runId` | `string \| undefined` | Current run — the target of `approve` / `reject` / `cancel`. |
-| `backend` / `client` | your `AgentBackend` (default `AgentClient`) | The backend the chat talks to, usable standalone. |
-| `getThreadId()` | `string \| undefined` | The thread the chat is on now — the `threadId` option, or the one the first send created. |
-| `connection` | `StreamConnectionState` | `live`, or `reconnecting` with the attempt number. |
-| `threads` / `loadThreads()` | `ThreadSummary[]` | List thread history into state. |
-| `loadThread(id)` | `Promise<ThreadDetail>` | Fetch one thread's messages (to seed `initialMessages`). |
-| `deleteThread(id)` | `Promise<void>` | Delete a thread; drops it from `threads`. |
-| `forkThread(threadId, messageId)` | `Promise<ThreadSummary>` | Fork a new thread from a message. |
-| `quota` / `loadQuota()` | `QuotaToday \| null` | Today's token usage. |
-| `cancel()` | `Promise<void>` | Stop the current stream and abort the run server-side. |
-| `addToolResult({ tool, toolCallId, output })` | `Promise<void>` | Supply a client-side tool result to the SDK loop. |
-
-```tsx
-function Sidebar({ chat }: { chat: ReturnType<typeof useAgentChat> }) {
-  useEffect(() => {
-    void chat.loadThreads();
-    void chat.loadQuota();
-  }, []);
-
-  return (
-    <aside>
-      <p>{chat.quota?.usedTokens ?? 0} tokens today</p>
-      {chat.threads.map((t) => (
-        <button key={t.id} onClick={() => void chat.deleteThread(t.id)}>{t.title}</button>
-      ))}
-      {chat.status === 'streaming' ? <button onClick={() => chat.cancel()}>Stop</button> : null}
-    </aside>
-  );
-}
-```
-
-### A sidebar and thumbs, headless
-
-`useThreads` keeps the list current on its own: a chat on the same backend that creates a thread or
-settles a run makes it refetch, and a streamed title is patched in place. `rename` and `remove` are
-optimistic and roll back if the server refuses. `useMessageFeedback` rates messages through
-`POST /agent/messages/:id/feedback` — a replayed message carries its rating in
-`metadata.feedback`, and a message streamed in this session is mapped to the row its run persisted.
+## Threads and feedback
 
 ```tsx
 import { useMessageFeedback, useThreads } from '@dudousxd/nestjs-agent-react';
 
-const { threads, rename, remove } = useThreads({ backend: chat.backend });
-const feedback = useMessageFeedback({ backend: chat.backend, threadId: chat.getThreadId });
+const { threads, rename, remove } = useThreads();
+const feedback = useMessageFeedback({ threadId: chat.getThreadId });
 
-<button
-  aria-pressed={feedback.feedbackOf(message)?.value === 'down'}
-  disabled={feedback.isPending(message)}
-  onClick={() => feedback.toggle(message, 'down')}
->
+<button aria-pressed={feedback.feedbackOf(message)?.value === 'down'} onClick={() => feedback.toggle(message, 'down')}>
   Not helpful
 </button>
 ```
 
-To reopen an existing thread, load its detail, convert its stored history to `UIMessage[]`, seed the
-hook, and — if it reports a buffered stream — let the transport reconnect:
+`useThreads` refreshes itself when a chat on the same backend creates a thread, settles a run or
+streams a title; `rename` / `remove` are optimistic and roll back on failure. `useMessageFeedback`
+maps a message streamed in this session to the row its run persisted.
 
-```tsx
-import { storedThreadToUiMessages } from '@dudousxd/nestjs-agent-react';
+## Sub-agents the chat did not wait for
 
-const detail = await chat.loadThread(threadId);
-const reopened = useAgentChat({
-  threadId,
-  initialMessages: storedThreadToUiMessages(detail.messages),
-  resumeRunId: detail.activeStreamId ?? undefined,
-});
-```
-
-`storedThreadToUiMessages` merges consecutive assistant rows into one `UIMessage` per turn — the
-loop persists one row per model iteration, so a turn with tool calls appends a "thinking" row and a
-separate final-answer row; mapped 1:1 that's 2-3 fragmented bubbles, each with its own cost/token
-footer, for what the live stream renders as one continuous response. The merged turn carries
-`metadata.usage` with summed tokens and cost (`costUsd` stays `null` only when every merged row's
-cost is unknown — unknown is never treated as `$0`). For a single row that needs no merging, or for
-any other 1:1 conversion, `storedMessageToUiMessage` is still available and unchanged.
-
-<Callout type="info" title="No doomed resume GET">
-`resumeRunId` gates the reconnect: when a thread has no buffered stream (`activeStreamId` is
-`null`), `resumeRunId` is `undefined` and the transport resolves `null` without a network
-round-trip, so a normal mount never fires a resume request that 404s.
-</Callout>
+A [detached delegation](/docs/agent/guides/multi-agent#delegate-without-waiting) finishes after the
+turn that started it. With `background: true` the hook tracks it — `chat.background.runs`
+(`{ runId, agent, toolCallId, toolName, status, message? }`), `isWorking`, `refresh()` — polling the
+thread only while something is outstanding (`backgroundPollMs`, default `5000`), and appends the
+answer to `chat.messages` when it lands.
 
 ---
 
 ## Related
 
-- [Bring your own UI](/docs/agent/guides/bring-your-own-ui) — skip `MessageList`/`ChatInput` and render off `useAgentChat` + `useChatTranscript`, with a fully custom design system
-- [Getting Started](/docs/agent/getting-started) — install the module and stream your first turn
-- [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability) — the durable suspend behind approve/reject
-- [Identity & Authorization](/docs/agent/guides/identity-and-authorization) — how the backend resolves the actor your headers carry
-- [Multi-agent](/docs/agent/guides/multi-agent) — target a named `agent` per turn
-- [Cost & Governance](/docs/agent/guides/cost-and-governance) — the usage the `quota` and per-message cost line report
+- [Hello chat](/docs/agent/hello-chat) · [Full-featured chat](/docs/agent/full-featured-chat)
+- [Bring your own UI](/docs/agent/guides/bring-your-own-ui) — the transcript model in full
+- [File uploads](/docs/agent/guides/file-uploads) · [Generative UI](/docs/agent/guides/generative-ui)
+- [Identity & Authorization](/docs/agent/guides/identity-and-authorization)
+- [Migrating](/docs/agent/migrating) — what changed in the DX release

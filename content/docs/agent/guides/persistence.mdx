@@ -320,7 +320,6 @@ import { AgentModule } from '@dudousxd/nestjs-agent';
     AgentModule.forRoot({
       model: myModelProvider,
       // no `store` — the agent reads it from AGENT_STORE
-      defaultRoles: ['ADMIN'],
       actorResolver: new HeaderActorResolver(),
     }),
   ],
@@ -374,7 +373,6 @@ await ensureAgentSchema(db); // idempotent CREATE TABLE IF NOT EXISTS — or run
     DrizzleAgentStoreModule.forRoot({ db }), // binds AGENT_STORE + AGENT_GOVERNANCE_QUERIES + AGENT_PRICING_STORE
     AgentModule.forRoot({
       model: myModelProvider,
-      defaultRoles: ['ADMIN'],
       actorResolver: new HeaderActorResolver(),
     }),
   ],
@@ -432,7 +430,6 @@ import { InMemoryAgentStore } from '@dudousxd/nestjs-agent-testing';
 AgentModule.forRoot({
   model: fakeModel,
   store: new InMemoryAgentStore(), // pass it directly instead of importing a store module
-  defaultRoles: ['ADMIN'],
   actorResolver: new HeaderActorResolver(),
 });
 ```

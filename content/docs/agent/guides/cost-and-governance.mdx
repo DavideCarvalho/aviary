@@ -246,41 +246,31 @@ which doesn't need pagination.
 
 ---
 
-## Daily quota
+## Quota
 
-Governance isn't only cost. A per-actor daily token quota blocks a turn before it runs when the
-actor is over budget; the loop emits an `aviary:agent:quota.exceeded` diagnostics event and the
-`GET /agent/quota/today` endpoint reports the actor's usage. Quota counts total tokens
-(`inputTokens + outputTokens`), unaffected by the cache split.
+`GET /agent/quota` reports the actor's budget across windows — each `{ period, usedTokens,
+limitTokens?, usedUsd, limitUsd?, resetsAt? }` — and `blocked` when one is used up. It comes from a
+`QuotaProvider`; the default `LedgerQuotaProvider` reads this ledger (a `day` window, plus `month`
+when the store has `usageBetween`) and, unconfigured, only reports. Tokens count
+`inputTokens + outputTokens`, unaffected by the cache split.
 
-Turn it on with `quotaLimitTokens` on `AgentModule.forRoot({ quotaLimitTokens: 200_000 })` — that's
-the whole setup. It's backed by the built-in `LedgerQuotaStore`, which reads the same usage ledger
-this page describes, so it needs no extra store or shared state, even across replicas. Pass an
-explicit `quota: QuotaStore` instead if you need a different backing store; it wins if both are set.
-A run that goes over quota ends its stream with a structured `run.failed` error
-(`code: 'quota_exceeded'`) rather than a plain diagnostics event alone — see
-[Frontend](/docs/agent/guides/frontend) for how that surfaces client-side.
-
-## Budgets across windows
-
-The daily token quota above is one window. `GET /agent/quota` reports them all — each `{ period,
-usedTokens, limitTokens?, usedUsd, limitUsd?, resetsAt? }` — and `blocked` when one is used up. It
-comes from a `QuotaProvider`; the default `LedgerQuotaProvider` reads this ledger (a `day` window,
-plus `month` when the store has `usageBetween`) and, unconfigured, only reports.
+One option configures it:
 
 ```ts
 AgentModule.forRoot({
   // ceilings on the default provider — tokens and/or USD, per window
-  quotaLimits: { day: { tokens: 200_000 }, month: { usd: 20 } },
+  quota: { limits: { day: { tokens: 200_000 }, month: { usd: 20 } } },
   // …or the host's own budget, e.g. what an AI gateway says is left
-  // quotaProvider: { report: async ({ actor }) => gatewayBudget(actor.id) },
+  // quota: { report: async ({ actor }) => gatewayBudget(actor.id) },
 });
 ```
 
-Either one turns on the send gate: while the report is `blocked`, `POST /agent/chat` answers `429`
+Either form turns on the send gate: while the report is `blocked`, `POST /agent/chat` answers `429`
 with `{ code: 'quota_exceeded', period, message }` before any work — no model call, no usage row.
-On the client, `useQuota` renders the windows and `useAgentChat({ blocked: quota.blocked })` stops
-sending in the meantime (see [Frontend](/docs/agent/guides/frontend#quota)).
+The limits apply per actor — per browser in [anonymous mode](/docs/agent/guides/identity-and-authorization#the-default-anonymous-one-identity-per-browser),
+where a public deployment without them has unbounded spend. On the client, `useAgentChat` reads the
+report and refuses to send while it is blocked (`chat.blocked`, `composer.blockedBy === 'quota'`) —
+see [Frontend](/docs/agent/guides/frontend#quota).
 
 ---
 

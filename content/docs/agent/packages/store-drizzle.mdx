@@ -50,7 +50,6 @@ await ensureAgentSchema(db); // idempotent CREATE TABLE IF NOT EXISTS — or run
     DrizzleAgentStoreModule.forRoot({ db }), // binds AGENT_STORE + AGENT_GOVERNANCE_QUERIES
     AgentModule.forRoot({
       model: myModelProvider,
-      defaultRoles: ['ADMIN'],
       actorResolver: new HeaderActorResolver(),
     }),
   ],

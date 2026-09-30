@@ -3,13 +3,16 @@
   "pages": [
     "index",
     "getting-started",
+    "hello-chat",
+    "full-featured-chat",
     "concepts",
     "guides",
     "packages",
     "recipes",
-    "reference"
+    "reference",
+    "migrating"
   ],
   "root": true,
-  "description": "A governed AI agent for NestJS — chat + tools + RBAC + quota + HITL, each turn an optionally-durable workflow.",
+  "description": "A governed AI agent for NestJS \u2014 chat + tools + RBAC + quota + HITL, each turn an optionally-durable workflow.",
   "icon": "Bot"
 }
