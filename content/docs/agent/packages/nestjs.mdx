@@ -29,18 +29,12 @@ chat attachments on Aviary media under `/media` (`AgentMediaAttachmentsModule`, 
 
 ```ts
 import { Module } from '@nestjs/common';
-import { AgentModule, HeaderActorResolver } from '@dudousxd/nestjs-agent';
+import { AgentModule } from '@dudousxd/nestjs-agent';
 import { aiSdkModel } from '@dudousxd/nestjs-agent-ai-sdk';
 import { anthropic } from '@ai-sdk/anthropic';
 
 @Module({
-  imports: [
-    AgentModule.forRoot({
-      model: aiSdkModel(anthropic('claude-sonnet-4-6')),
-      actorResolver: new HeaderActorResolver(),
-      defaultRoles: ['ADMIN'],
-    }),
-  ],
+  imports: [AgentModule.forRoot({ model: aiSdkModel(anthropic('claude-sonnet-4-5')) })],
 })
 export class AppModule {}
 ```
@@ -49,16 +43,16 @@ export class AppModule {}
 
 | Static method | Purpose |
 |---|---|
-| `forRoot(options: AgentModuleOptions)` | Register the module synchronously — model, store, sink, quota, rolesPolicy, actorResolver, path, durable, tools, defaultAgent. |
+| `forRoot(options: AgentModuleOptions)` | Register the module synchronously — `model` (required), then optionally systemPrompt, store, actorResolver, quota, models, sink, rolesPolicy, path, durable, tools, defaultAgent, … |
 | `forRootAsync(options: AgentModuleAsyncOptions)` | Register via a factory (`imports` / `inject` / `useFactory`); `path` stays static since routes mount before the factory resolves. |
 
 There is no `forFeature` — named agents beyond the default are declared as `@Agent`-decorated
 providers and discovered at boot (see [multi-agent](/docs/agent/guides/multi-agent)), not passed as a
 definition array.
 
-`model` and `actorResolver` are the two required fields — no safe default exists for either, so
-compile-time errors catch a forgotten one instead of a throwing placeholder at runtime. Everything
-else has a default. The full option-by-option reference lives in
+`model` is the only required field. Everything else has a default — the in-memory store (or a store
+module's, found automatically), an anonymous identity per browser, every tool open to any resolved
+actor, `'You are a helpful assistant.'` — each logged at boot where it matters for production. The full option-by-option reference lives in
 [Reference → Configuration](/docs/agent/reference/configuration); this page covers the surface, not
 every field.
 

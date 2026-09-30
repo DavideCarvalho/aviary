@@ -23,7 +23,16 @@ The whole setup is four pieces of consumer code:
 1. **A catalog file**, shared by server and browser.
 2. **`AgentGenuiModule.forRoot({ catalog })`** on the server.
 3. Optionally, **your own tools** calling `ctx.emitUi`.
-4. **`<GenuiProvider>`** at the client's root. Nothing per message.
+4. **`genui={{ registry, catalog }}`** on the client's `<AgentProvider>`. Nothing per message.
+
+<Callout type="info" title="The default push path">
+Two ways a component reaches the answer, and they are the defaults: the model calls a
+**per-component tool** (`ui__show_<component>`, one per catalog entry, input = the props — what
+`AgentGenuiModule.forRoot({ catalog })` gives you), and **your own tools** call
+`ctx.emitUi(component, props)` when they already hold the data. Start there. The tree tool, the
+generic `ui__show` tool and per-request resolvers below are for composed layouts and per-tenant
+components.
+</Callout>
 
 <Callout type="info">
 Headless by design. The library ships component *definitions*, never visuals, so two apps with very
@@ -180,8 +189,8 @@ resolveCatalog, showTool })` from `@dudousxd/nestjs-agent-core/genui` returns th
 Any lib tool can push a component. The generated genui tools call this for you.
 
 ```ts
-@AiTool({ name: 'forecast', kind: 'read', description: '…', input: z.object({ city: z.string() }) })
-export class ForecastTool {
+@AiTool({ description: 'Weekly forecast for a city.', input: z.object({ city: z.string() }) })
+export class ForecastTool { // name: forecast, kind: read
   async execute({ city }: { city: string }, ctx: AiToolCtx) {
     const days = await this.weather.week(city);
     const { id } = await ctx.emitUi('Chart', {
@@ -222,25 +231,30 @@ announcement and its outcome, with an id derived from the call so a retry replac
 persists the list on the assistant message's `ui` field. See the
 [stream protocol](https://github.com/DavideCarvalho/nestjs-agent/blob/master/docs/stream-protocol.md#generative-ui).
 
-## 4. The client: `<GenuiProvider>`
+## 4. The client: `genui` on `<AgentProvider>`
 
 ```tsx title="main.tsx"
-import { GenuiProvider, type GenuiRegistry } from '@dudousxd/nestjs-agent-react/genui';
+import { AgentProvider } from '@dudousxd/nestjs-agent-react';
+import type { GenuiRegistry } from '@dudousxd/nestjs-agent-react/genui';
 import { catalog } from './catalog';
 
 const registry: GenuiRegistry = { DataTable: MyTable, Chart: MyChart, Card: MyCard, Text: MyText };
 
-<GenuiProvider
-  registry={registry}
-  catalog={catalog}
-  fallback={({ reason, item }) => <Unknown name={item.component} reason={reason} />}
+<AgentProvider
+  genui={{
+    registry,
+    catalog,
+    fallback: ({ reason, item }) => <Unknown name={item.component} reason={reason} />,
+  }}
 >
   <App />
-</GenuiProvider>;
+</AgentProvider>;
 ```
 
-That's all: `MessageItem` and `MessageList` draw every pushed component inside a provider, with no
-`renderUi` per message.
+That's all: `MessageItem` and `MessageList` draw every pushed component inside the provider, with no
+`renderUi` per message. `genui` takes exactly what `<GenuiProvider>` takes — `GenuiProvider` from
+`@dudousxd/nestjs-agent-react/genui` is the same thing as a standalone building block, for an app
+without `AgentProvider` or a subtree with its own registry.
 
 - Renderers receive the props spread, and `children` when they are a layout node in a tree.
 - `catalog` validates before drawing, synchronously when the schema allows, so nothing flashes.

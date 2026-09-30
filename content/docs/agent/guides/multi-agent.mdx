@@ -60,7 +60,6 @@ class OpsOrchestratorAgent {}
     AgentModule.forRoot({
       model: myModelProvider,
       store: myAgentStore,
-      defaultRoles: ['ADMIN'],
       actorResolver: new HeaderActorResolver(),
       defaultAgent: 'ops-orchestrator', // which agent an unqualified turn runs
       // durable: true,   // makes each handoff a durable child run — see below

@@ -1,193 +1,207 @@
 ---
 title: Getting Started
 icon: Rocket
-description: Stand up a governed AI agent in a NestJS app — install, declare a tool, register the module, and stream your first turn.
+description: Stand up an AI chat in a NestJS app — install, register the module with a model, declare a tool, and stream your first turn.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
-import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 
-The fastest path to a working agent is four steps: install the packages, declare a tool as an
-ordinary injectable, register the module, and hit the SSE chat endpoint. The agent is the
-**mechanism**; the domain it governs — which model, which store, which roles — is policy you supply.
+The fastest path to a working agent is three steps: install, register `AgentModule` with a model,
+and send a message. Everything else — the store, who the caller is, which tools they may use, the
+system prompt — has a default you can override one option at a time.
 
 ---
 
 ## Prerequisites
 
-- **Node.js 20+**
-- **NestJS 10+** (both v10 and v11 are supported)
+- **Node.js 20+**, **NestJS 10+** (v10 and v11 are supported) on the Express platform
 - **TypeScript 5+** with `experimentalDecorators` and `emitDecoratorMetadata` enabled
-- A **model provider** — anything implementing the `ModelProvider` SPI. The zero-boilerplate path is
-  `aiSdkModel(...)` from `@dudousxd/nestjs-agent-ai-sdk`, which adapts any Vercel AI SDK v7
-  `LanguageModel` so you write no provider code; e.g. `aiSdkModel(anthropic('claude-sonnet-4-6'))`. Any
-  other `ModelProvider` works too, and for offline tests there's a deterministic fake in
-  `@dudousxd/nestjs-agent-testing`.
+- A model — any Vercel AI SDK v7 `LanguageModel` (`openai('gpt-5-mini')`, `anthropic('claude-sonnet-4-5')`,
+  an AI Gateway id like `'openai/gpt-5-mini'`), or anything implementing the `ModelProvider` SPI
 
 ---
 
 ## Step 1 — Install
 
 ```bash
-pnpm add @dudousxd/nestjs-agent @dudousxd/nestjs-agent-core
-# persistence + (optional) durable runner:
-pnpm add @dudousxd/nestjs-agent-store-mikro-orm @dudousxd/nestjs-durable
+pnpm add @dudousxd/nestjs-agent @dudousxd/nestjs-agent-ai-sdk @ai-sdk/openai zod
 ```
 
-The `-core` package holds the framework-agnostic SPIs and the agent loop; `@dudousxd/nestjs-agent`
-is the NestJS module. Add a store adapter (MikroORM or Drizzle) for persistence, and
-`@dudousxd/nestjs-durable` if you want each turn to run as a durable workflow.
+`@dudousxd/nestjs-agent` is the NestJS module (it re-exports the whole `-core` surface);
+`@dudousxd/nestjs-agent-ai-sdk` adapts an AI SDK model so you write no provider code.
 
 ---
 
-## Step 2 — Declare a tool
-
-A tool is a regular NestJS injectable decorated with `@AiTool`. Its `input` is a Zod schema, and its
-`kind` decides execution: a `read` tool auto-executes; an `action` tool never does — the run pauses
-for a human decision (see [Human-in-the-loop](/docs/agent/guides/human-in-the-loop-and-durability)).
-
-```ts
-// src/tools/get-weather.tool.ts
-import { AiTool, type ToolHandler, type AiToolCtx } from '@dudousxd/nestjs-agent';
-import { z } from 'zod';
-
-@AiTool({
-  name: 'getWeather',
-  kind: 'read', // 'read' auto-executes; 'action' requires approval
-  description: 'Current weather for a city.',
-  input: z.object({ city: z.string() }),
-})
-export class GetWeatherTool implements ToolHandler<{ city: string }> {
-  async execute(input: { city: string }, ctx: AiToolCtx) {
-    return { tempC: 21, summary: 'partly cloudy' };
-  }
-}
-```
-
-<Callout type="info" title="Tools are injectables">
-Because a tool is an ordinary provider, it can inject anything else in your app — a repository, an
-HTTP client, a queue. The agent discovers `@AiTool` providers automatically; you just list them in
-your module.
-</Callout>
-
----
-
-## Step 3 — Register the module
+## Step 2 — Register the module
 
 ```ts
 // src/app.module.ts
 import { Module } from '@nestjs/common';
-import { AgentModule, HeaderActorResolver } from '@dudousxd/nestjs-agent';
+import { AgentModule } from '@dudousxd/nestjs-agent';
 import { aiSdkModel } from '@dudousxd/nestjs-agent-ai-sdk';
-import { anthropic } from '@ai-sdk/anthropic';
-import { GetWeatherTool } from './tools/get-weather.tool.js';
+import { openai } from '@ai-sdk/openai';
 
 @Module({
   imports: [
     AgentModule.forRoot({
-      model: aiSdkModel(anthropic('claude-sonnet-4-6')), // any ModelProvider; this is the zero-boilerplate path
-      // store: myAgentStore,          // optional — omit it and the store resolves from an imported store module
-      defaultRoles: ['ADMIN'],         // roles a tool requires when its own `roles` is omitted
-      actorResolver: new HeaderActorResolver(), // who's calling — see below
-      // path: 'agent',                // route prefix (default 'agent')
-      // durable: true,                // run each turn as the durable `agent.run` workflow
-      defaultAgent: {
-        systemPrompt: 'You are a helpful ops assistant.',
-      },
+      model: aiSdkModel(openai('gpt-5-mini')),
+      systemPrompt: 'You are a helpful assistant for Acme.', // optional
     }),
   ],
-  providers: [GetWeatherTool],
 })
 export class AppModule {}
 ```
 
-<Callout type="warn" title="durable: true dispatches the turn across your worker fleet">
-With `durable: true`, the turn's model call and each tool execution are routed durable steps
-(`AgentRunSteps.llm` / `AgentRunSteps.tool`) — `ctx.step`, the one step primitive — so the run is
-never pinned to the pod that started it. There is no option to place them elsewhere. Two things
-follow. Your `@AiTool` handlers run in a worker with no caller context to inherit, so a handler that
-touches infrastructure needs `@CreateRequestContext()`/`@EnsureRequestContext()` on it, exactly as a
-`@Step` handler does. And a multi-pod deployment needs a cross-process `TokenStreamSink` (e.g.
-`RedisTokenStreamSink` from `@dudousxd/nestjs-agent-transport-redis`) so the worker executing the
-step can reach whichever pod holds the client's SSE connection — a boot warning fires if it's
-missing. See [Architecture](/docs/agent/concepts/architecture) and
-[Runners](/docs/agent/concepts/runners).
-</Callout>
+That boots. At startup you will see two notices, both about defaults you will want to change
+before production:
 
-<Callout type="warn" title="There is no insecure default identity">
-The agent never invents a caller. Every request's actor — `{ id, roles?, tenantRef? }` — comes from
-an `ActorResolver` you configure. `actorResolver` is a required field on `AgentModule.forRoot` —
-there's no default to omit it in favor of.
-The shipped `HeaderActorResolver` reads `x-actor-id` / `x-actor-role` / `x-tenant-ref` and is only
-safe behind a trusted gateway that strips and re-sets those headers. See
+```text
+WARN [AgentModule] No `store` configured and no store module imported — using the in-memory store. …
+WARN [AgentModule] No `actorResolver` configured — the agent endpoints are PUBLIC: every browser gets its own anonymous identity (an HttpOnly cookie). …
+```
+
+<Callout type="info" title="Anonymous by default — and what that means">
+With no `actorResolver`, anyone who can reach the API can chat, and each browser is its own actor:
+the server sets an `HttpOnly`, `SameSite=Lax` cookie holding a random token and uses a SHA-256 digest
+of it as the actor id. Threads, quota and attachments are scoped by that id, so visitors never see
+each other's conversations. To require login, add one line —
+`actorResolver: requestUserActorResolver()` reads `req.user` (Passport, cookie sessions); see
 [Identity & Authorization](/docs/agent/guides/identity-and-authorization).
 </Callout>
 
 ---
 
-## Step 4 — Start a turn
+## Step 3 — Declare a tool (optional)
+
+A tool is a regular injectable decorated with `@AiTool`. Only `description` and `input` are
+required: the name defaults to the class name without `Tool` (`GetWeatherTool` → `getWeather`) and
+the kind to `read`, which auto-executes. A `kind: 'action'` tool never auto-executes — the run pauses
+for approval (see [Human-in-the-loop](/docs/agent/guides/human-in-the-loop-and-durability)).
+
+```ts
+// src/tools/get-weather.tool.ts
+import { AiTool } from '@dudousxd/nestjs-agent';
+import { z } from 'zod';
+
+@AiTool({ description: 'Current weather for a city.', input: z.object({ city: z.string() }) })
+export class GetWeatherTool {
+  async execute({ city }: { city: string }) {
+    return { city, tempC: 21, summary: 'partly cloudy' };
+  }
+}
+```
+
+List it in a module's `providers` (`providers: [GetWeatherTool]`) and the agent discovers it. Because
+a tool is an ordinary provider, it can inject anything else in your app. By default every tool is
+callable by every resolved actor; restrict one with `@AiTool({ roles: ['ADMIN'] })`.
+
+---
+
+## Step 4 — Send a message
 
 The module mounts SSE + REST endpoints under `/agent` (configurable via `path`). Start a turn by
-POSTing to `/agent/chat`; tokens stream back as Server-Sent Events.
+POSTing to `/agent/chat`; the answer streams back as Server-Sent Events:
 
 ```bash
-curl -N http://localhost:3000/agent/chat \
+curl -N -c cookies.txt -b cookies.txt http://localhost:3000/agent/chat \
   -H 'content-type: application/json' \
-  -H 'x-actor-id: u1' -H 'x-actor-role: ADMIN' \
   -d '{ "message": "What is the weather in Lisbon?" }'
 ```
 
 ```text
 event: meta
-data: {"runId":"...","threadId":"..."}
+data: {"runId":"…","threadId":"…"}
 
-data: {"delta":"It's "}
-data: {"delta":"partly cloudy "}
-data: {"delta":"and 21°C in Lisbon."}
+id: 1
+data: {"kind":"step-start"}
+
+id: 2
+data: {"kind":"tool-input-available","id":"call-1","name":"getWeather","input":{"city":"Lisbon"},"toolKind":"read"}
+
+id: 3
+data: {"kind":"tool-output","id":"call-1","output":{"city":"Lisbon","tempC":21,"summary":"partly cloudy"}}
+
+id: 4
+data: {"kind":"step-finish"}
+
+id: 5
+data: {"kind":"step-start"}
+
+id: 6
+data: {"kind":"text","text":"It's partly cloudy and 21°C in Lisbon."}
+
+id: 7
+data: {"kind":"step-finish"}
 
 event: done
-data: {"finishReason":"stop"}
+data: {}
 ```
 
-The model calls `getWeather` (a `read` tool, so it auto-executes), then streams its answer. In a
-browser, the [`-react` frontend](/docs/agent/guides/frontend) wraps all of this — threads, the agent
-catalog, quota, cancel, and approvals — in a single `useAgentChat` hook.
+The cookie jar keeps your anonymous identity between requests — `GET /agent/threads` with the same
+jar lists the thread you just started. The full frame vocabulary is in
+[Stream events](/docs/agent/reference/stream-events).
 
 ---
 
-## The endpoints
-
-| Method & path | Purpose |
-|---|---|
-| `POST /agent/chat` | Start a turn; streams tokens as SSE |
-| `GET /agent/chat/:runId/stream` | Resume an in-flight run's stream (ownership-scoped: `403` on someone else's run, `404` once it has finished) |
-| `POST /agent/chat/:runId/cancel` | Cancel a run (ownership-scoped, same as above) |
-| `POST /agent/tool-call/approve` · `/reject` | Human-in-the-loop decision for an `action` tool (ownership-scoped: `403` on someone else's tool call) |
-| `GET /agent/threads` · `/:id` · `DELETE /:id` · `POST /:id/fork-from/:messageId` | Thread history (`:id` routes are ownership-scoped: `403`/`404` outside your own threads) |
-| `GET /agent/agents` · `GET /agent/quota/today` | Agent picker catalog & quota |
-
----
-
-## Try it offline first
-
-`@dudousxd/nestjs-agent-testing` ships an in-memory store and a deterministic fake model, so you can
-exercise the whole loop — auto-executing reads, a suspending action tool, multi-agent delegation —
-with no API key or Redis. The repo's `examples/agent-demo` is a runnable proof:
+## Step 5 — A React client
 
 ```bash
-pnpm --filter agent-demo demo   # the offline scripted proof
-pnpm --filter agent-demo start  # the full NestJS app + console at /ai-gateway
+pnpm add @dudousxd/nestjs-agent-react ai @ai-sdk/react
 ```
+
+```tsx
+import { ChatInput, MessageList, useAgentChat } from '@dudousxd/nestjs-agent-react';
+
+export function Chat() {
+  const chat = useAgentChat(); // same origin, `/agent`
+  return (
+    <>
+      <MessageList messages={chat.messages} status={chat.status} />
+      <ChatInput onSubmit={(text) => chat.sendMessage({ text })} />
+    </>
+  );
+}
+```
+
+Continue with [Hello chat](/docs/agent/hello-chat) (the smallest end-to-end app) and
+[Full-featured chat](/docs/agent/full-featured-chat) (threads, models, attachments, approvals, quota).
+
+---
+
+## The defaults, and how to change each
+
+| Default | Override |
+|---|---|
+| In-memory store — lost on restart, not shared across processes | `store`, or import a store module (`MikroOrmAgentStoreModule.forFeature()`, `DrizzleAgentStoreModule.forRoot({ db })`) — found automatically |
+| Public endpoints, one anonymous actor per browser | `actorResolver: requestUserActorResolver()`, or your own `ActorResolver` |
+| Every tool callable by any resolved actor | `@AiTool({ roles })`, `defaultRoles`, or a `rolesPolicy` |
+| `'You are a helpful assistant.'` | `systemPrompt` (string or `({ actor, agentName, pageContext }) => string`), or `@Agent` classes |
+| One model, no picker | `model: aiSdkModels({ fast: …, smart: … }, { default: 'fast' })` |
+| Usage reported, never enforced | `quota: { limits: { day: { tokens: 200_000 }, month: { usd: 20 } } }` |
+| Turns run in-process | `durable: true` + `AgentDurableModule` ([Runners](/docs/agent/concepts/runners)) |
+| Routes under `/agent` | `path: 'api/agent'` (and `<AgentProvider path="api/agent">` on the client) |
+
+<Callout type="warn" title="Before you go public">
+An anonymous deployment without `quota` limits lets anyone spend your model budget. Set limits —
+they apply per actor, which in anonymous mode is per browser — or require login.
+</Callout>
+
+---
+
+## Try it offline
+
+`@dudousxd/nestjs-agent-testing` ships a deterministic fake model (`FakeModelProvider`), so the
+whole loop — auto-executing reads, a suspending action tool, multi-agent delegation — runs with no
+API key. See [Offline testing](/docs/agent/recipes/offline-testing); the repo's `examples/agent-demo`
+is a runnable app.
 
 ---
 
 ## Next steps
 
-- [Tools](/docs/agent/guides/tools) — the `@AiTool` surface, `read` vs `action`, and the handler context
-- [Identity & Authorization](/docs/agent/guides/identity-and-authorization) — `ActorResolver`, roles vs abilities
-- [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability) — approval as a durable signal
-- [Multi-agent](/docs/agent/guides/multi-agent) — orchestrators and sub-agents
-- [Cost & Governance](/docs/agent/guides/cost-and-governance) — the ledger, reported cost, and the console
+- [Hello chat](/docs/agent/hello-chat) — server in ~6 lines, React in ~5
+- [Full-featured chat](/docs/agent/full-featured-chat) — `AgentProvider` + `useAgentChat` with everything on
+- [Tools](/docs/agent/guides/tools) — the `@AiTool` surface, `read` vs `action`, the handler context
+- [Identity & Authorization](/docs/agent/guides/identity-and-authorization) — anonymous mode, login, roles
 - [Persistence](/docs/agent/guides/persistence) — the `AgentStore` on MikroORM or Drizzle
-- [Frontend](/docs/agent/guides/frontend) — `useAgentChat` and the chat components
-- [Governed SQL](/docs/agent/guides/governed-sql) — read-only SQL as a safe tool
+- [Migrating](/docs/agent/migrating) — every API the DX release removed, and its replacement

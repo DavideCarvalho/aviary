@@ -71,7 +71,7 @@ once at the root; otherwise the `Gate` provider is missing and DI fails at boot.
 |---|---|---|
 | `AgentAuthzModule` | `@Global` `DynamicModule` factory | `.forRoot(options?)` binds an `AuthzRolesPolicy` (built from the injected `Gate`) under the `AGENT_ROLES_POLICY` token the agent loop's tool gate consults |
 | `AuthzRolesPolicy` | class (`RolesPolicy`) | `can(actor, tool)` — delegates to `gate.forUser(...).allows(ability)` when the tool declares `ability`, else falls through to `DefaultRolesPolicy` |
-| `AuthzRolesPolicyOptions` | type | `{ fallbackRoles?: string[] }` — roles used by the fallback `DefaultRolesPolicy` when a tool has neither `ability` nor `roles` (defaults to ADMIN-only) |
+| `AuthzRolesPolicyOptions` | type | `{ fallbackRoles?: string[] }` — roles used by the fallback `DefaultRolesPolicy` when a tool has neither `ability` nor `roles` (defaults to `[]`, no restriction — `['ADMIN']` for the old ADMIN-only fallback) |
 | `userFromActor(actor)` | function | Maps the agent's `Actor` (`{ id, roles? }`) onto the minimal `{ id, roles? }` shape authz's default role resolver reads — no host user entity required |
 | `AuthzUser` | type | The shape `userFromActor` returns / `gate.forUser(...)` expects |
 
@@ -79,7 +79,7 @@ once at the root; otherwise the `Gate` provider is missing and DI fails at boot.
 
 - Tool **declares an `ability`** → decision goes to the Gate: `gate.forUser(userFromActor(actor)).allows(ability)`.
 - Tool **has no `ability`** → falls through to `DefaultRolesPolicy`, matching the actor's roles
-  against the tool's `roles` (or `fallbackRoles`, ADMIN-only by default).
+  against the tool's `roles` (or `fallbackRoles`, unrestricted by default).
 
 ## Peer dependencies
 

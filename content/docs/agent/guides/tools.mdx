@@ -26,10 +26,10 @@ import { AiTool, type ToolHandler, type AiToolCtx } from '@dudousxd/nestjs-agent
 import { z } from 'zod';
 
 @AiTool({
-  name: 'getWeather',
-  kind: 'read', // auto-executes; see read vs action below
   description: 'Current weather for a city.',
   input: z.object({ city: z.string() }),
+  // name: 'getWeather' — the default, from the class name minus `Tool`
+  // kind: 'read'       — the default: auto-executes; see read vs action below
 })
 export class GetWeatherTool implements ToolHandler<{ city: string }> {
   async execute(input: { city: string }, ctx: AiToolCtx) {
@@ -89,11 +89,11 @@ Every option lives on the `@AiTool({ … })` object.
 
 | Option | Type | Required | Description |
 |---|---|---|---|
-| `name` | `string` | yes | The tool name the model calls. Unique across the registry. |
-| `kind` | `'read' \| 'action'` | yes | `read` auto-executes; `action` pauses for approval. See below. |
+| `name` | `string` | no | The tool name the model calls. Unique across the registry. Default: the class name camelCased with a trailing `Tool` dropped (`GetWeatherTool` → `getWeather`, `SQLQueryTool` → `sqlQuery`). |
+| `kind` | `'read' \| 'action'` | no | `read` (the default) auto-executes; `action` pauses for approval. See below. |
 | `description` | `string` | yes | What the model reads to decide when to call it. Write it for the model. |
 | `input` | Standard Schema | yes | Zod, Valibot, or ArkType. Validated before `execute` runs. |
-| `roles` | `string[]` | no | Roles allowed to invoke. Omit to inherit the module's `defaultRoles`. |
+| `roles` | `string[]` | no | Roles allowed to invoke. Omit to inherit the module's `defaultRoles` — `[]` by default, i.e. any resolved actor (an anonymous visitor included). |
 | `ability` | `string` | no | An authz ability checked by an ability-aware policy instead of `roles`. |
 | `presentation` | `ToolPresentation` | no | How a chat talks about the tool without naming it. Never shown to the model. See [How a chat talks about a tool](#how-a-chat-talks-about-a-tool). |
 
@@ -341,7 +341,7 @@ export class PurgeCacheTool implements ToolHandler { /* … */ }
 </Tab>
 </Tabs>
 
-The full model — the `ActorResolver`, why there's no insecure default, and roles vs abilities — is
+The full model — the `ActorResolver` (anonymous by default), login, and roles vs abilities — is
 in [Identity & Authorization](/docs/agent/guides/identity-and-authorization).
 
 ---

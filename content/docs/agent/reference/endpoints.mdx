@@ -45,10 +45,16 @@ A turn's `attachments` may carry **only a `mediaId`** — see [Attachments](#att
 | `POST` | `/agent/attachments` | multipart, single file field `file` | `MessageAttachment` (`{ mediaId; url; contentType; name }`) |
 | `GET` | `/agent/attachments` | — | `StagedAttachment[]` (`{ mediaId; name; contentType; sizeBytes; createdAt }`) — the caller's own staged files, newest first |
 
-Mounted only when `attachments: { upload: true }` is set (build-time wiring) and something is bound
-to `AGENT_ATTACHMENT_STAGING`. The body is aborted mid-stream past a hard 32 MiB ceiling
-(`HARD_MAX_ATTACHMENT_BYTES`) — `attachments.maxBytes` narrows that at request time and
-cannot raise it. Both size gates answer `413`; a type outside `allowedContentTypes` answers `415`.
+Always mounted; live whenever something is bound to `AGENT_ATTACHMENT_STAGING` (`501` otherwise).
+The body is aborted mid-stream past a hard 32 MiB ceiling (`HARD_MAX_ATTACHMENT_BYTES`) — the
+configured `maxBytes` narrows that at request time and cannot raise it. Both size gates answer
+`413`; a type outside `allowedContentTypes` answers `415`. The limits come from the staging store's
+`describe()` when it declares them (`AgentMediaAttachmentsModule`), else `AgentModule`'s
+`attachments` option — and `GET /agent/config` serves them. With `AgentMediaAttachmentsModule`, the
+resumable `/agent/attachments/uploads` routes are the documented upload path.
+
+`POST /agent/chat` names uploads as `attachments: [{ mediaId }]` — refs only; an entry with any other
+key is refused with `400`. `GET /agent/threads/:id` re-mints each attachment's `url` by `mediaId`.
 
 `GET` answers the question `GET /agent/threads/:id` cannot: an upload that was never sent belongs to
 no thread. It is scoped to the resolved actor and nothing else, bounded to `ATTACHMENT_PAGE_SIZE`
@@ -147,15 +153,24 @@ The run is derived server-side from the `toolCallId` — the call's own `runId` 
 | Method | Path | Body | Returns |
 |---|---|---|---|
 | `GET` | `/agent/quota` | — | `QuotaReport` — `{ windows: { period: 'day' \| 'month'; usedTokens; limitTokens?; usedUsd; limitUsd?; resetsAt? }[]; blocked?: { period; reason? } }` |
-| `GET` | `/agent/quota/today` | — | `{ usedTokens: number; limitTokens: number \| null; withinLimit: boolean; costUsd: number }` |
 
 `GET /agent/quota` is the bound `QuotaProvider`'s report. The default, `LedgerQuotaProvider`, reads
-the usage ledger: a `day` window (its token ceiling from the configured daily quota) and a `month`
-window when the store implements `usageBetween`. `blocked` names the first exhausted window.
+the usage ledger: a `day` window and a `month` window when the store implements `usageBetween`, with
+the ceilings `quota: { limits }` sets. `blocked` names the first exhausted window.
 
-When the host configured a budget — `quotaProvider` or `quotaLimits` — a `blocked` report also gates
+When the host configured `quota` (limits or a provider), a `blocked` report also gates
 `POST /agent/chat`: the send is refused with `429` and `{ code: 'quota_exceeded', period, message }`
-before the turn starts. See [Cost & governance](/docs/agent/guides/cost-and-governance#budgets-across-windows).
+before the turn starts. See [Cost & governance](/docs/agent/guides/cost-and-governance#quota).
+
+## Client config
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `GET` | `/agent/config` | — | `AgentClientConfig` — `{ attachments: { enabled; upload: 'multipart' \| 'resumable' \| null; maxBytes; allowedContentTypes; maxPerMessage }; models: { enabled }; quota: { enforced }; identity: { anonymous } }` |
+
+Server facts a client would otherwise repeat in its own config. `useAgentConfig()` reads it once per
+backend; `useAttachments` (and `chat.composer.files`) take their `accept` / `maxBytes` / `maxFiles`
+defaults from it.
 
 ## Dashboard JSON API
 

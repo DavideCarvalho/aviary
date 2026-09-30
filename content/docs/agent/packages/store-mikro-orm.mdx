@@ -42,7 +42,6 @@ import { AgentModule } from '@dudousxd/nestjs-agent';
     AgentModule.forRoot({
       model: myModelProvider,
       // no `store` — the agent reads it from AGENT_STORE
-      defaultRoles: ['ADMIN'],
       actorResolver: new HeaderActorResolver(),
     }),
   ],

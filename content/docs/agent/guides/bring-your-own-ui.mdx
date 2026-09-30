@@ -55,15 +55,11 @@ import { isTextUIPart, isToolUIPart } from 'ai';
 
 function CustomChat({ threadId }: { threadId?: string }) {
   const chat = useAgentChat({
-    baseUrl: '/agent',
     // Omit the key entirely when absent — `UseAgentChatOptions` is built with
     // `exactOptionalPropertyTypes`, so an explicit `threadId: undefined` doesn't type-check.
     ...(threadId !== undefined ? { threadId } : {}),
     agent: 'support',
-    initialMessages: [], // seed from storedThreadToUiMessages() when reopening a thread — see below
-    // Reattach to a turn still streaming when the page loaded — survives a refresh.
-    resume: true,
-    getHeaders: () => ({ 'x-actor-id': currentUser.id }),
+    // A threadId loads its history and re-attaches a turn still streaming — nothing to wire.
     onThreadCreated: (newThreadId) => router.replace(`/chat/${newThreadId}`),
     // Fires once per run when the SERVER is done writing (title + terminal state persisted) —
     // the right signal to refetch a thread list/sidebar; `onFinish` only means "a turn rendered".
@@ -96,18 +92,18 @@ function CustomChat({ threadId }: { threadId?: string }) {
 ```
 
 `chat` is the AI SDK v7 `useChat` return value (`messages`, `status`, `sendMessage`, `stop`, `error`,
-…) spread together with the agent extras: `runId` / `activeRunId` (the `resume`-fetched thread's
-active run, or `null` once resolved with none), `client` (the raw `AgentClient`, usable standalone),
-thread CRUD (`threads`, `loadThreads`, `loadThread`, `deleteThread`, `forkThread`, `renameThread`,
-`promoteThread`, `truncateFromMessage`), `quota` / `loadQuota`, `cancel`, HITL `approve` / `reject`,
-and `regenerate`.
+…) spread together with the agent extras: `transcript`, `composer`, `models`, `quota` / `blocked`,
+`runId` / `activeRunId`, `backend`, `fork` / `truncateFrom` / `promote`, `cancel`, HITL `approve` /
+`reject` / `answer` / `skip`, and `regenerate` — see [Frontend](/docs/agent/guides/frontend#useagentchat).
+The connection (`baseUrl`, `path`, headers, credentials) lives on `<AgentProvider>`.
 
-The options worth knowing beyond the basics (`baseUrl`, `getHeaders`, `threadId`):
+The options worth knowing beyond the basics (`threadId`, `agent`):
 
 | Option | Type | Why it matters |
 |---|---|---|
-| `initialMessages` | `UIMessage[]` | Seeds `useChat` on mount only — pair with `storedThreadToUiMessages` for a reopened thread. |
-| `resume` | `boolean` | On mount, if the bound `threadId`'s thread has an in-flight run (`activeRunId` non-null), auto-attaches to its stream — the reload-survival case. A no-op without `threadId`. |
+| `history` | `boolean` | Load the `threadId`'s history (default `true`); skipped when `initialMessages` is given. |
+| `initialMessages` | `UIMessage[]` | History you already have — seeds the chat instead of the hook's own read (pair with `storedThreadToUiMessages`). |
+| `resume` | `boolean` | Default `true`: if the thread has a running turn (`activeRunId`), attach to its stream — the reload-survival case. `false` opts out. |
 | `resumeRunId` | `string` | The lower-level primitive `resume` builds on: wire a known run id directly (e.g. from a thread you already fetched) to reconnect without the hook doing its own fetch. |
 | `onThreadCreated` | `(threadId: string) => void` | Fires once when a threadless chat's first send makes the backend mint a thread — the hook also remembers the id internally, so subsequent sends reuse it even before you act on the callback. |
 | `onRunSettled` | `({ runId, status }) => void` | Fires once per run when its stream **settles** server-side (title + terminal state persisted) — including a resumed stream's own completion. This is the signal to refetch a sidebar/thread list; `onFinish` only means a turn rendered client-side. Skipped if the initial POST failed before any run id was learned. |
@@ -136,19 +132,14 @@ scrolled up. That is the work `MessageList` used to keep to itself.
 import { useAgentChat, useChatTranscript } from '@dudousxd/nestjs-agent-react';
 
 function CustomChat({ threadId }: { threadId: string }) {
-  const chat = useAgentChat({ threadId, baseUrl: '/agent', resume: true });
-  const transcript = useChatTranscript({
-    messages: chat.messages,
-    status: chat.status,
-    editable: true,
-    onEditSubmit: (_messageId, text) => chat.sendMessage({ text }),
-    onFork: (messageId) => chat.forkThread(threadId, messageId),
-    regeneratable: true,
-    onRegenerate: () => chat.regenerate(),
-    onStop: () => chat.cancel(),
-    getUsage: (message) => readUsage(message),
-    getCreatedAt: (message) => readCreatedAt(message),
+  // `chat.transcript` is this model with every action already bound to the chat; add to it with
+  // `useAgentChat({ transcript: { editable: true, onEditSubmit } })`. Call `useChatTranscript`
+  // yourself only for a chat that is not `useAgentChat`'s:
+  const chat = useAgentChat({
+    threadId,
+    transcript: { editable: true, onEditSubmit: ({ text }) => chat.sendMessage({ text }) },
   });
+  const { transcript } = chat;
 
   return (
     <div {...transcript.scroll.getContainerProps()} className="my-scroller">
@@ -214,8 +205,8 @@ function CustomChat({ threadId }: { threadId: string }) {
 | `item.copy` | `{ available, copied, copy() }` | `copied` resets after `copyResetMs` (default 1500ms). `available` is false when there is no prose. |
 | `item.edit` | `{ available, isEditing, draft, canSave, start(), cancel(), setDraft(), save(), getTextareaProps() }` | `available` only for user messages, and only when `editable` + `onEditSubmit` are both wired. Blank drafts are refused; the saved text is trimmed. |
 | `item.fork` / `item.regenerate` | `{ available, run() }` | Regenerate is offered on the **last** assistant message only. |
-| `item.usage` | `{ inputTokens, outputTokens, totalTokens, costUsd, costLabel, tokensLabel } \| null` | Resolved through `getUsage`. The labels are derivations (`$0.012`, `2.0k tokens`), not markup. |
-| `item.timestamp` | `{ date, iso, relative, absolute } \| null` | `null` for an unparseable stamp, so a bad `created_at` renders nothing rather than "Invalid Date". |
+| `item.usage` | `{ inputTokens, outputTokens, totalTokens, costUsd, costLabel, tokensLabel } \| null` | Resolved through `getUsage` (default: the message's `metadata.usage`). The labels are derivations (`$0.012`, `2.0k tokens`), not markup. |
+| `item.timestamp` | `{ date, iso, relative, absolute } \| null` | Resolved through `getCreatedAt` (default: `metadata.createdAt`, stamped on replayed and live messages). `null` for an unparseable stamp, so a bad `created_at` renders nothing rather than "Invalid Date". |
 | `item.isStreaming` / `isLastAssistant` / `isUser` | `boolean` | Only the last assistant message streams. |
 | `window` | `{ visibleCount, hiddenCount, canLoadEarlier, loadEarlier(), showAll() }` | Default 50 mounted, +50 per `loadEarlier`. Mounting every markdown-rendered message of a long thread locks the main thread during streaming. |
 | `scroll` | `{ isAtBottom, showJumpToLatest, scrollToBottom(), getContainerProps() }` | See [Stick-to-bottom](#stick-to-bottom). |
@@ -334,7 +325,7 @@ import { useChat } from '@ai-sdk/react';
 import { AgentChatTransport } from '@dudousxd/nestjs-agent-react';
 
 const transport = new AgentChatTransport({
-  baseUrl: '/agent',
+  path: 'agent', // the default; `baseUrl` is the origin
   getHeaders: () => ({ 'x-actor-id': currentUser.id }),
   onMeta: ({ runId, threadId }) => console.log('turn started', runId, threadId),
 });
@@ -358,20 +349,14 @@ Beyond text, reasoning and tool calls, the transport maps the rest of the
 
 Tools declare how they are spoken about on the server
 ([`@AiTool({ presentation })`](/docs/agent/guides/tools#how-a-chat-talks-about-a-tool)).
-`useToolCatalog` fetches `GET /agent/tools` once per client + agent and shares the answer; hand the
-catalog to the transcript and every tool call carries a `description`, and every tool block an
-`activity` grouping:
+`chat.transcript` already reads it — `useToolCatalog()` fetches `GET /agent/tools` once per backend +
+agent and shares the answer — so every tool call carries a `description`, and every tool block an
+`activity` grouping. For your own `useChatTranscript`, pass `toolCatalog: useToolCatalog().catalog`:
 
 ```tsx
-import { useAgentChat, useChatTranscript, useToolCatalog } from '@dudousxd/nestjs-agent-react';
+import { useAgentChat } from '@dudousxd/nestjs-agent-react';
 
-const chat = useAgentChat({ baseUrl: '/agent' });
-const { catalog } = useToolCatalog({ client: chat.client }); // client must be stable
-const transcript = useChatTranscript({
-  messages: chat.messages,
-  status: chat.status,
-  toolCatalog: catalog,
-});
+const { transcript } = useAgentChat();
 
 // inside a `tools` block:
 <ul>
@@ -458,8 +443,9 @@ durable one. The wire protocol, and everything above it, is identical either way
 
 ## Stored-history parity: `storedThreadToUiMessages`
 
-A reloaded thread's `StoredMessage[]` (from `client.getThread(threadId)`) needs converting to
-`UIMessage[]` before it can seed `initialMessages`. The naive per-row mapper
+`useAgentChat({ threadId })` loads and converts a thread's history for you. When you seed it yourself
+(`initialMessages`), a thread's `StoredMessage[]` (from `backend.getThread(threadId)`) needs converting
+to `UIMessage[]` first. The naive per-row mapper
 (`storedMessageToUiMessage`) is exact for a single already-atomic row, but the agent loop persists
 **one store row per model iteration** — a turn with tool calls appends a "thinking…" row plus tool
 calls, then a separate final-answer row. Mapped 1:1, that reloads as 2-3 assistant bubbles for what
@@ -474,16 +460,15 @@ rows) happened:
 ```ts
 import { storedThreadToUiMessages } from '@dudousxd/nestjs-agent-react';
 
-const detail = await chat.client.getThread(threadId);
+const detail = await backend.getThread(threadId);
 const initialMessages = storedThreadToUiMessages(detail.messages);
-// Feed into useAgentChat({ threadId, initialMessages, resume: true }) on the mount that owns
-// this thread — `initialMessages` is only read once, on mount.
+useAgentChat({ threadId, initialMessages }); // skips its own history read; still resumes
 ```
 
 The grouped message's `id` is the **last** row's id — the final-answer row, since it's the one
 carrying `followUps` and the natural key for turn-level actions like fork or regenerate. A lone
-assistant row with nothing to merge comes back byte-for-byte identical to
-`storedMessageToUiMessage` — no `metadata` added either, so single-iteration turns are unaffected.
+assistant row with nothing to merge comes back identical to `storedMessageToUiMessage` — which
+stamps `metadata.createdAt` and the row's own `metadata.usage`.
 
 ```ts
 // Read the aggregated cost/tokens off a merged turn, same shape as a single row's usage:

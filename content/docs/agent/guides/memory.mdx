@@ -71,10 +71,10 @@ import { MikroOrmMemoryProvider } from '@dudousxd/nestjs-agent-store-mikro-orm';
 // or DrizzleMemoryProvider from …-store-drizzle, or InMemoryMemoryProvider from …-testing
 
 AgentModule.forRootAsync({
-  externalStore: true, // AGENT_STORE comes from the store module, which is global
+  // no `store`: AgentModule finds the AGENT_STORE the store module binds
   inject: [MikroOrmMemoryProvider],
   useFactory: (memory: MikroOrmMemoryProvider) => ({
-    // ...model, actorResolver
+    // ...model
     memory: { provider: memory },
   }),
 });

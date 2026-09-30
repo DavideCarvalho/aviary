@@ -37,7 +37,6 @@ import { FakeModelProvider, InMemoryAgentStore, echoScript } from '@dudousxd/nes
 AgentModule.forRoot({
   model: new FakeModelProvider(echoScript('Hello from the fake model.')),
   store: new InMemoryAgentStore(), // pass directly instead of importing a store module
-  defaultRoles: ['ADMIN'],
   actorResolver: new HeaderActorResolver(),
 });
 ```
