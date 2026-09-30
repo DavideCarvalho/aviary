@@ -62,6 +62,7 @@ Every route is ownership-gated like the thread routes.
 | `POST` | `/agent/threads/:id/queue/resume` | — | `ChatQueueState & { runId? }` — lifts a pause; `runId` when the head started |
 | `PATCH` | `/agent/queue/:messageId` | `{ message?: string; attachments?: { mediaId: string }[] \| null; position?: number }` | `ChatQueueState` — `410` when it already started or was removed |
 | `DELETE` | `/agent/queue/:messageId` | — | `ChatQueueState` — `410` already gone, `404` unknown, `403` another actor's |
+| `POST` | `/agent/queue/:messageId/interrupt` | — | `ChatQueueState & { interrupting?; runId? }` — run a waiting message now: it moves to the head as an interrupt and the running turn is cancelled for it (`interrupting`); with nothing running it starts (`runId`). `410`/`404`/`403` as above |
 
 `mode`: `'auto'` (default) streams on an idle thread and queues on a busy one; `'queue'` always
 queues (and starts at once when idle — the `202` then carries `runId`); `'interrupt'` queues at the
