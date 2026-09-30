@@ -194,8 +194,8 @@ export function Chat({ threadId, onNavigate }: { threadId?: string; onNavigate: 
 | `transcript.items[…].blocks` | grouped the parts, bound approve / reject / answer / skip / stop / fork / regenerate to this chat, read the tool catalog for `call.description`, and read `metadata.createdAt` / `metadata.usage` for `timestamp` / `usage` |
 | `composer.submit()` | sent the draft with the ready uploads as `{ mediaId }` refs, cleared both; `canSend` is false while empty, busy, uploading or over quota (`blockedBy` says which) |
 | `composer.files` | validated against the server's own limits (`GET /agent/config`), uploaded each file resumably, with progress and cancel |
-| `models.list` / `select` | fetched `GET /agent/models` on first read (the `aiSdkModels` catalog), sends the pick as each turn's `model`; `models.pinToThread(id)` persists it on the thread |
-| `chat.blocked` | read `GET /agent/quota`; sends are refused client-side with `QuotaBlockedError` while blocked (the server would answer `429`) |
+| `models.list` / `select` | fetched `GET /agent/models` on first read (the `aiSdkModels` catalog), sends the pick as each turn's `model` — that turn only, never stored, dropped when the chat switches threads; `models.pinToThread(id)` persists it on the thread (`models.pinned`), and `models.locked` says when the agent always runs on one model |
+| `chat.blocked` | read `GET /agent/quota`; sends are refused client-side with `QuotaBlockedError` while blocked (the server would answer `429`); `chat.quota.warning` names a window past its soft limit |
 | `useThreads()` | the provider's backend; refreshes itself when this chat creates a thread, settles a run or streams a title |
 
 Every piece is also a hook of its own — `useChatTranscript`, `useAttachments`, `useModels`,

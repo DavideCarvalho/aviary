@@ -45,15 +45,16 @@ function Assistant() {
 
 | Export | What it is |
 |---|---|
-| `AgentProvider` / `useAgentBackend()` | The connection (`baseUrl`, `path`, headers, credentials, upload strategy, `genui`) once, for every hook below it / the backend in scope. |
+| `AgentProvider` / `useAgentBackend()` | The connection (`baseUrl`, `path`, headers, credentials, upload strategy, `onHttpError`, `genui`) once, for every hook below it / the backend in scope. |
 | `useAgentChat(options?)` | The hook — the AI SDK `useChat` result plus `transcript`, `composer`, `models`, `quota`, cancel/approve/reject/answer/skip/fork. |
 | `useAgentConfig(options?)` | `GET /agent/config` — attachment limits and upload mode, and which features are on; shared per backend. |
 | `AgentBackend` | The interface every hook talks to — implement it over your own client ([Your own backend](/docs/agent/guides/frontend#your-own-backend)). |
 | `AgentClient` | The default `AgentBackend`: a framework-agnostic REST client over this library's routes; usable standalone. |
+| `AgentHttpError` | What `AgentClient` throws on an error answer: `status`, `code`, the parsed `body`, and the server's `message` as its own `message` — so a hook showing `error.message` shows the server's words. `onHttpError` (on the provider or the client) sees each one first, for app-wide reactions like "401 → sign in again". |
 | `useThreads(options?)` | The thread list, kept current by chats on the same backend; optimistic rename/remove. |
-| `useModels(options?)` / `useAgents(options?)` | The model catalog (grouped, flattened, `find`, `defaultModel`) and the agent list, for pickers. |
+| `useModels(options?)` / `useAgents(options?)` | The model catalog (grouped, flattened, `find`, `defaultModel`, `locked` when the agent always runs on one model) and the agent list (`lockedModel`), for pickers. |
 | `useAttachments(options?)` | A composer's staged files, headless: validation, uploads with progress/cancel/retry, previews, and input/drop/paste handlers. `messageFiles(message)` reads files back off a message. |
-| `useQuota(options?)` | Budget windows (`day`/`month`), usage vs ceilings, and `blocked` — `useAgentChat` gates on it by itself. |
+| `useQuota(options?)` | Budget windows (`day`/`month`), usage vs ceilings, `blocked`, and `warning` (the fullest window past its `warnAt` soft limit) — `useAgentChat` gates on it by itself. |
 | `useMessageFeedback(options?)` | Thumbs-up/down (+ comment) state and calls for messages, optimistic. |
 | `AgentChatTransport` | The `useChat` transport implementing the `/agent/chat` SSE protocol. |
 | `useChatTranscript(options)` | The transcript model — messages normalized into items with their parts grouped into text/reasoning/tool blocks, per-message derived values, each action a state machine, plus list windowing and stick-to-bottom. Renders nothing. |
