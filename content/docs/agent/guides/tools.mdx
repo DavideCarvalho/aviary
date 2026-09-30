@@ -279,6 +279,8 @@ globals. It's the same context whether the turn runs inline or as a durable work
 | `agentName` | `string?` | The name of the agent running this turn — provenance a tool can scope on (e.g. capability sets). |
 | `pageContext` | `PageContext?` | Host-supplied context about where the turn was started. |
 | `host` | `unknown?` | An optional host handle (e.g. an ORM `EntityManager`) the app threads through. |
+| `toolCallId` | `string?` | The id of the tool call this invocation serves. Absent outside a turn (the MCP server, a direct `registry.invoke`). |
+| `idempotencyKey` | `string?` | `<runId>:<toolCallId>` — the same for every execution of this call, and for no other. See [Making a tool safe to run twice](#making-a-tool-safe-to-run-twice). |
 
 The actor is the load-bearing field, and the only source of identity: read `ctx.actor.id` and
 `ctx.actor.tenantRef` rather than any top-level shorthand. Never derive scope from tool input — derive
@@ -299,6 +301,26 @@ The model composes tool input from the conversation, so treating an input field 
 prompt widen its own scope. Read `id` / `roles` / `tenantRef` off `ctx.actor` — the actor is
 resolved server-side by your `ActorResolver`, not by the model.
 </Callout>
+
+### Making a tool safe to run twice
+
+A tool's side effect and the checkpoint that records it are two writes. Under the durable runner a
+worker that dies between them leaves a call the journal does not know ran, and the runtime's
+recovery runs the step again; an in-step transient retry (`toolTransientRetry`)
+re-invokes it too. No library can make your write atomic with its journal, so every tool is handed the key
+that makes the second attempt recognisable:
+
+```ts
+async execute(input: ChargeInput, ctx: AiToolCtx) {
+  // The same value on the first attempt and on every re-execution of this call.
+  return this.payments.charge(input, { idempotencyKey: ctx.idempotencyKey });
+}
+```
+
+Pass it as the provider's `Idempotency-Key`, store it in a unique column on the row you insert, or
+use it as the `id` of the workflow you start — whichever makes a repeat land on the first attempt's
+result. It is stable across replays and across pods: the run id is the run's own, and the call id
+comes out of the journaled model step.
 
 ---
 
