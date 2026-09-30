@@ -565,7 +565,7 @@ something a browser triggers — see
 | HITL | `approve` / `reject` wired to the current run | The Approve/Reject affordance itself |
 | History | `storedThreadToUiMessages` turn-grouping + aggregated usage | Skeletons, virtualization, date separators |
 | Transcript logic | `useChatTranscript`: part grouping, edit/copy machines, usage + relative-time derivations, windowing, stick-to-bottom | Which of those to render, and as what |
-| Errors | `chat.error` (SSE `event: error`), `AgentHttpError.status` on REST calls | Toasts, inline banners, retry buttons |
+| Errors | `chat.error` and `chat.runError` (the SSE `event: error` frame's `{ code, message }`), `AgentHttpError.status` / `.code` on REST calls, `call.errorCode` on a refused decision (`isRunNotActiveError`) | The words for each code, toasts, inline banners, retry buttons |
 | Everything visual | Nothing | Bubbles, composer, theming, design tokens |
 
 ---

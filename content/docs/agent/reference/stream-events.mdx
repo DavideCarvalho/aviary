@@ -30,9 +30,37 @@ Frames are separated by a blank line (`\n\n`). Four shapes:
 | `event: meta` + `data: {"runId": string, "threadId": string}` | Identity of the run. Send it first. A client binds approve/reject/cancel to `runId` and a threadless chat adopts `threadId`. |
 | `data: <AgentStreamEvent JSON>` (no `event:` line) | One stream event, one JSON object per frame. |
 | `event: done` + `data: {}` | The run ended normally (including a cancel — see `cancelled`). |
-| `event: error` + `data: {"code": string, "message": string}` | The run failed. `message` is shown to the user. Codes this library uses: `quota_exceeded`, `output_rejected`, `structured_output_invalid`, `run_failed`. |
+| `event: error` + `data: {"code": string, "message": string}` | The run failed. `code` is stable — a client branches on it and words the failure itself; `message` is a sentence safe to show as it is. See [Error codes](#error-codes). |
 
 Multi-line `data:` is joined with `\n`.
+
+### Error codes
+
+| `code` | Means | `message` |
+|---|---|---|
+| `quota_exceeded` | the actor's budget is spent | which budget — the library's own words |
+| `output_rejected` | an output processor refused the answer | the refusal — the library's own words |
+| `structured_output_invalid` | the answer never satisfied the agent's output schema | the library's own words |
+| `replay_diverged` | the durable runtime refused to resume the run: its journal and the deployed code disagree. The turn is over and will not come back; a new send starts a new one | generic in production |
+| `model_no_output` | a model call ended without producing anything | generic in production |
+| `run_failed` | anything else | generic in production |
+
+For the last three the error's own text names run ids, checkpoint positions, hosts and provider
+internals — nothing the person reading the chat can act on, and not theirs to see. In production
+(`NODE_ENV === 'production'`) the frame carries one fixed sentence (`RUN_FAILED_MESSAGE`: "The
+assistant could not finish this answer. Please try again.") and the error itself goes to the server
+log and the run row (`errorCode` / `errorMessage`). Outside production the raw message rides the
+frame; `exposeStreamErrorDetails(true | false)` from `@dudousxd/nestjs-agent-core` decides it
+outright.
+
+The React client keeps the frame on `chat.runError` (`{ code, message, runId? }`) until the next
+attempt starts — `chat.error` carries only the message — so an app renders its own text per code.
+
+A failed run leaves nothing waiting on it: the calls it had put to a person are settled `failed`,
+its run row is settled, and its thread is released, so the next send on the thread starts a turn.
+That turn is shown every tool call the dead one made with a result — the real output where the
+call's row says it ran, otherwise one saying it was never completed — because a provider refuses a
+prompt in which a tool call has no result after it.
 
 `GET <base>/chat/:runId/stream` replays the run's buffered frames from the beginning and then tails
 it. Answer `404` when nothing is streaming under that id — the client reads that as "nothing to
@@ -149,7 +177,12 @@ or without `approval-requested`. The frame adds who may decide and until when:
   `POST <base>/tool-call/reject` `{ toolCallId, reason?, via? }`. The approval id IS the tool call
   id. `remember: true` approves later calls of the same tool in the same thread without asking;
   `via` names the surface the decision came through (the lib records `'web'` when omitted). A
-  server answers `403` to a caller who is not the approver and `410` once the request lapsed.
+  server answers `403` to a caller who is not the approver, `410` once the request lapsed, and
+  `409 { code: 'run_not_active', message }` when the run that asked has ended (it failed, was
+  cancelled, or its worker is gone): nothing is waiting for the decision and nothing will run, so
+  it is refused instead of accepted and dropped. A client treats the card as stale — the React
+  layer's `isRunNotActiveError(error)` recognises it, and the transcript model carries it as
+  `call.errorCode` — and the person sends the message again.
 
 The stream stays open while the run waits (a client that dropped reconnects through
 `GET <base>/chat/:runId/stream`). After the decision, continue on that stream with
@@ -189,7 +222,8 @@ are the only way a decision reaches it.
 `elicitation` parks the run on a question set; it is answered with
 `POST /agent/tool-call/answer { toolCallId, answers?: Record<questionId, string[]>, via? }` (an
 omitted question takes its `defaults`) or declined with `POST /agent/tool-call/skip { toolCallId, via? }`
-(`via` as on approve/reject, `'web'` when omitted). The matching `tool-output` carries the settled
+(`via` as on approve/reject, `'web'` when omitted; both answer `409 { code: 'run_not_active' }` when
+the run that asked has ended). The matching `tool-output` carries the settled
 outcome — `{ answers, skipped, defaulted, summary?, answeredBy?, answeredVia? }`, where `answeredBy` /
 `answeredVia` say who answered and through which surface, the way an approval's `decidedBy` /
 `decidedVia` do. Persist the same object as the call's stored result so a reload shows it too; the

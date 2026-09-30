@@ -377,6 +377,29 @@ run is checkpointed, not how a failure is reported to the client.
 
 ---
 
+## A turn that dies mid-step
+
+A run that fails — the runtime refused a checkpoint position, a store write threw, the provider
+errored — settles what it left behind, under both runners:
+
+- the calls it had put to a person become `failed`, so no approval card waits on a run that will
+  not come back (`AgentStore.failUnsettledToolCalls`, optional on a custom store);
+- its run row is settled and its thread released — also on a replay refusal, where nothing can be
+  journaled and the three are written straight to the store;
+- the next turn on the thread is shown a result for every tool call the dead one made: the real
+  output where the call's row says it ran (`AgentStore.toolCallOutcomes`, optional), otherwise
+  "never completed — check before doing it again". A provider refuses a prompt in which a tool
+  call has no result after it, which is how one dead turn used to break every later one;
+- a decision on a dead run's card answers `409 { code: 'run_not_active' }`;
+- the error frame carries a stable `code` (`replay_diverged`, `model_no_output`, `run_failed`)
+  and, in production, a generic message — see
+  [Error codes](/docs/agent/reference/stream-events#error-codes).
+
+What it cannot settle is a tool that ran and whose checkpoint was never written — see
+[Making a tool safe to run twice](/docs/agent/guides/tools#making-a-tool-safe-to-run-twice).
+
+---
+
 ## Observability
 
 Every stage of a run is announced on Node's `diagnostics_channel` under `aviary:agent:*`
