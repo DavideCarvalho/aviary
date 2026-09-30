@@ -84,6 +84,7 @@ export function Chat() {
       messages={chat.messages}
       status={chat.status}
       onSubmit={(text) => chat.sendMessage({ text }, { body: { mode } })}
+      queue={chat.queue} // messages sent mid-turn, waiting their turn
       onStop={() => chat.cancel()}
       editable
       onEditSubmit={({ text }) => chat.sendMessage({ text })}
@@ -122,7 +123,8 @@ Every component below takes model values as props. None of them holds chat state
 | `ChatSources` / `ChatSourceChips` | A `sources` block: `sources[]`, `passageCount`, `query` |
 | `ChatToolGroup` / `ChatToolCard` | A `tools` block's `calls` — the run the model already grouped, each call with `isAwaitingApproval` and its `approve`/`reject` machines |
 | `ChatElicitation` | An `elicitation` block: `preamble`, `questions[].{position,prompt,options,selected,isPristine}`, `questionCount`, `outcome`, `error`, `answer`/`skip`. Renders option picks; for [typed questions](/docs/agent/guides/asking-the-user#typed-questions) (`questions[].input`, `setValue`, `error`) render your own controls from the block |
-| `ChatComposer` | `stop.{available,isStopping,stop}` — the submit control becomes the cancel control; `useComposerAutocomplete` when given `autocompleteSources` |
+| `ChatComposer` | `stop.{available,isStopping,stop}` — the submit control becomes the cancel control, and Enter still sends (`useAgentChat` queues it; `whileBusy="block"` refuses instead); `useComposerAutocomplete` when given `autocompleteSources` |
+| `ChatQueue` | `transcript.queued` (each item's `text`, `state`, `remove`) and `transcript.queuePaused` — waiting messages as dimmed bubbles above the composer, with *Resume* while paused ([Typing ahead](/docs/agent/guides/message-queue)) |
 | `ChatCommandPalette` | Either a hand-supplied `suggestions` list, or the autocomplete's `items`/`activeIndex` with its `getListboxProps`/`getOptionProps` — the same rows, wired as a combobox listbox |
 | `ChatFollowUps`, `ChatModePills`, `ChatContextStrip`, `ChatWelcome`, `ChatPanel` | Presentation only — they report events and hold no chat state |
 

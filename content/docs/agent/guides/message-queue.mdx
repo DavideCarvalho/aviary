@@ -1,0 +1,127 @@
+---
+title: Typing ahead (message queue)
+icon: ListOrdered
+description: Send while the agent is still answering — the message waits in the thread's server-side queue and runs when the turn settles. Interrupt, edit, reorder, pause and resume.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A person can keep typing while a turn is running, the way they do in Claude Code or a chat app. The
+next message **waits in the thread's queue on the server** — it survives a reload, a closed tab and
+a second device — and runs as soon as the turn ahead of it settles, exactly as if it had been sent
+then.
+
+## Nothing to wire
+
+```tsx
+const chat = useAgentChat({ threadId });
+
+<MessageList messages={chat.messages} status={chat.status} queue={chat.queue} />
+<ChatInput onSubmit={(text) => chat.sendMessage({ text })} />
+```
+
+`sendMessage` and `composer.submit()` queue on their own while a turn runs, and the chat attaches to
+the queued turn the moment it starts — its user message appears, its answer streams. `queue` on
+`<MessageList>` draws what is waiting (and a *Resume* button while the queue is paused).
+
+On the server nothing changes either: both runners and every bundled store (in-memory, Drizzle,
+MikroORM) support it. The SQL stores add an `agent_queued_message` table and an
+`agent_thread.queue_pause` column on boot.
+
+## Your own markup
+
+```tsx
+const { transcript, queue } = chat;
+
+{transcript.items.map((item) => <Message key={item.id} item={item} />)}
+
+{transcript.queued.map((item) => (
+  <div key={item.id} data-state={item.state /* 'sending' | 'queued' | 'paused' */}>
+    {item.text}
+    {item.isNext ? <small>next</small> : null}
+    {item.remove.available ? <button onClick={item.remove.run}>Remove</button> : null}
+  </div>
+))}
+
+{queue.paused ? (
+  <p>
+    Paused ({queue.paused.reason}{queue.paused.message ? `: ${queue.paused.message}` : ''})
+    <button onClick={() => queue.resume()}>Resume</button>
+  </p>
+) : null}
+```
+
+| `chat.queue` | |
+|---|---|
+| `items` | waiting messages in run order: `{ id, text, attachments, state: 'sending' \| 'queued', interrupt, createdAt }` |
+| `paused` | `{ reason: 'run_failed' \| 'cancelled' \| 'quota_exceeded' \| 'start_failed', message?, at }` or `null` |
+| `add(text, { attachments?, mode? })` | queue from your own code; `mode: 'interrupt'` cuts in |
+| `edit(id, text)` / `move(id, index)` / `remove(id)` / `clear()` | change what is waiting (optimistic, then the server's answer) |
+| `resume()` | lift a pause; the head starts when nothing is running |
+| `isSupported`, `error` | the backend can queue; the last failed queue call |
+
+## Queue, interrupt or block
+
+```tsx
+useAgentChat({ whileRunning: 'queue' });     // default — wait for the running turn
+useAgentChat({ whileRunning: 'interrupt' }); // cancel the running turn, run this next
+useAgentChat({ whileRunning: 'block' });     // refuse — composer.blockedBy === 'busy'
+```
+
+A backend without `enqueueMessage` behaves as `'block'`, so an older server keeps working.
+
+## When the queue pauses
+
+| The running turn… | The queue |
+|---|---|
+| completes | the next message starts |
+| fails | pauses (`run_failed`) — the next message would likely fail the same way, and the person should see the error first |
+| is stopped | pauses (`cancelled`) — Stop means stop, even when it lands after the last model call answered |
+| is cancelled by an interrupt | the interrupt's message starts |
+
+The next message's author is checked against the [quota](/docs/agent/guides/cost-and-governance)
+as it starts; a spent budget pauses the queue (`quota_exceeded`) instead. A paused queue keeps
+every message and starts nothing until it is resumed. A plain send on an idle thread still runs at
+once while the queue is paused — the pause holds the queue, not the thread. A queue left waiting
+with nothing running (the process that would have started it went away) is started when the thread
+loads.
+
+## One turn per thread, across pods
+
+The thread's active run is the admission lock, and every write to it is a compare-and-set: a
+claim succeeds only on a free thread (or for the run that is handing over), a release only for
+the run that still holds it. So of two sends racing on one thread exactly one starts and the other
+queues, and a turn that already handed the thread on can never clear its successor. A queued
+message runs under **its own id as the run id**, which makes the drain idempotent; under the
+[durable runner](/docs/agent/guides/human-in-the-loop-and-durability) the decision is one journaled
+checkpoint and the start is a replay-safe `ctx.startChild`, so a replay never starts a message
+twice. A thread held by a run that is no longer running (a crashed process) is taken over by the
+next send instead of queueing behind it for ever.
+
+<Callout type="info" title="In-process callers">
+`AgentService.send()` is the queueing call the HTTP route uses. `AgentService.chat()` stays
+start-or-refuse for code that needs a run id back: on a busy thread it throws `409 run_active`
+instead of queueing. `regenerate` on a busy thread is `409` too.
+</Callout>
+
+## A backend of your own
+
+The React side only speaks the wire, so a backend that is not this library (a sandboxed runner, a
+different framework) serves the queue by implementing:
+
+1. `POST <base>/chat` with `mode: 'auto' | 'queue' | 'interrupt'`, answering
+   `202 { queued: true, threadId, messageId, position, queue, runId?, interrupting? }` when it queues
+   (`'queue'` always answers `202`).
+2. Persistent per-thread FIFO storage of queued messages (text, resolved attachments, agent, model,
+   page context, the actor, an interrupt flag, an order) and a per-thread pause.
+3. The drain on every settle of a thread's own turn — before the terminal frame, with the table
+   above, using compare-and-set admission.
+4. A `queue` stream frame: `{ kind: 'queue', queue: { items, paused }, started?: { messageId, runId } }`
+   on every change while a turn holds the thread, and with `started` on a handoff.
+5. `GET`/`DELETE <base>/threads/:id/queue`, `POST <base>/threads/:id/queue/resume`,
+   `PATCH`/`DELETE <base>/queue/:messageId`, and `queue` on `GET <base>/threads/:id`.
+
+The full contract is *Message queue* in the repo's `docs/stream-protocol.md`; the store behaviours
+are `CHAT_QUEUE_STORE_CONTRACT` in `@dudousxd/nestjs-agent-testing`, runnable against a store of
+your own. See [Endpoints](/docs/agent/reference/endpoints#message-queue) and
+[Stream events](/docs/agent/reference/stream-events).

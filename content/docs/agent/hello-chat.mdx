@@ -43,12 +43,16 @@ export function Chat() {
   const chat = useAgentChat();
   return (
     <>
-      <MessageList messages={chat.messages} status={chat.status} />
+      <MessageList messages={chat.messages} status={chat.status} queue={chat.queue} />
       <ChatInput onSubmit={(text) => chat.sendMessage({ text })} />
     </>
   );
 }
 ```
+
+Keep typing while it answers: a message sent mid-turn waits in the thread's queue (server-side) and
+runs when the answer finishes — `queue={chat.queue}` shows what is waiting. See
+[Typing ahead](/docs/agent/guides/message-queue).
 
 The hook talks to the same origin under `/agent`. If the API lives elsewhere, wrap the app once:
 

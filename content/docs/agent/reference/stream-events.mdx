@@ -129,6 +129,7 @@ original stream.
 | `ui` | `id`, `component: string`, `props: object`, `version?: number` | `data-ui` part (id = component id); a repeat `id` replaces the component in place. Closes the open prose so later text renders after it |
 | `title` | `title: string` | transient `data-title` (not stored on the message); `useAgentChat({ onTitle })` |
 | `cancelled` | — | transient `data-cancelled`. Send it as the last frame before `done` when someone stopped the run, so a reader can tell a truncated answer from a complete one |
+| `queue` | `queue: { items, paused }`, `started?: { messageId, runId }` | transient `data-queue`. A snapshot of the thread's [message queue](/docs/agent/guides/message-queue) — on every change while this run holds the thread, and, with `started`, as the last frame before the terminal when the thread passes to the next queued message (attach with `GET /agent/chat/:runId/stream`). `useAgentChat` keeps `chat.queue` from it |
 | *anything else* | any | `data-<kind>` part carrying the frame minus `kind`, keyed by `id` when the frame has a string `id` |
 
 ### Tool kinds and approvals
