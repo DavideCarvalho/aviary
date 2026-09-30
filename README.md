@@ -75,6 +75,22 @@ rebuild Aviary on its own. Three triggers handle that:
               -d '{"event_type":"lib-docs-updated"}'
   ```
 
+### The shadcn registry (`public/r`)
+
+`public/r` is the agent chat components' shadcn registry (`npx shadcn add …/r/agent-chat.json`),
+built from `registry/` in the nestjs-agent repo and committed here. It is copy-in source written
+against a specific `@dudousxd/nestjs-agent-react`, so it is built from a **pinned release tag**, not
+from a checkout:
+
+```bash
+pnpm sync:registry                  # REGISTRY_REF in scripts/sync-registry.mjs → public/r
+pnpm sync:registry --ref <tag|sha>  # another ref
+pnpm sync:registry --local          # ../nestjs-agent as it is on disk — preview only, do not commit
+```
+
+To ship newer components, bump `REGISTRY_REF` to the new release tag, run it, and commit `public/r`
+with the bump.
+
 ### Keeping it as a monorepo subfolder instead
 
 If `aviary/` stays inside a bigger repo, move `deploy.yml` to the repo's top-level

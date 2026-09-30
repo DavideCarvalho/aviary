@@ -53,10 +53,11 @@ const { transcript, queue } = chat;
 
 | `chat.queue` | |
 |---|---|
-| `items` | waiting messages in run order: `{ id, text, attachments, state: 'sending' \| 'queued', interrupt, createdAt }` |
+| `items` | waiting messages in run order: `{ id, text, attachments, files, state: 'sending' \| 'queued', interrupt, createdAt }` |
 | `paused` | `{ reason: 'run_failed' \| 'cancelled' \| 'quota_exceeded' \| 'start_failed', message?, at }` or `null` |
 | `add(text, { attachments?, mode? })` | queue from your own code; `mode: 'interrupt'` cuts in |
 | `edit(id, text)` / `move(id, index)` / `remove(id)` / `clear()` | change what is waiting (optimistic, then the server's answer) |
+| `interrupt(id)` | run a waiting message **now** — it moves to the head and the running turn is cancelled for it |
 | `resume()` | lift a pause; the head starts when nothing is running |
 | `isSupported`, `error` | the backend can queue; the last failed queue call |
 
@@ -69,6 +70,63 @@ useAgentChat({ whileRunning: 'block' });     // refuse — composer.blockedBy ==
 ```
 
 A backend without `enqueueMessage` behaves as `'block'`, so an older server keeps working.
+
+`whileRunning` is the chat's default. One send can answer differently — which is what a composer
+with a plain **Send** (queue) and a **Send now** (interrupt) button needs:
+
+```tsx
+<button onClick={() => chat.composer.submit()}>Send</button>
+<button onClick={() => chat.composer.submit({ mode: 'interrupt' })}>Send now</button>
+
+// the same on sendMessage, for a composer of your own
+await chat.sendMessage({ text }, { mode: 'interrupt' });
+```
+
+`mode` is `'queue'` or `'interrupt'`, overrides `whileRunning` for that send (`'block'` included),
+and only matters while a turn is running — with nothing running the message is simply sent.
+`composer.submit({ mode })` clears the draft and its files like any other submit.
+
+## Send a waiting message now
+
+A message that is already in the queue can cut in too:
+
+```tsx
+{transcript.queued.map((item) => (
+  <div key={item.id}>
+    {item.text}
+    {item.state !== 'sending' && (
+      <button onClick={() => chat.queue.interrupt(item.id)}>Send now</button>
+    )}
+  </div>
+))}
+```
+
+`chat.queue.interrupt(id)` is one server call (`POST <base>/queue/:messageId/interrupt`): the
+message moves to the head marked as an interrupt, any pause is lifted, and the running turn is
+cancelled for it. With nothing running it starts at once. The message keeps its id and never leaves
+the queue.
+
+<Callout type="warn">
+Do not build this from `remove(id)` followed by `add(text, { mode: 'interrupt' })`. If the second
+call fails the message is gone, and if another tab's drain starts it in between it runs twice.
+</Callout>
+
+## Files on a waiting message
+
+A waiting message's files have the shape a sent message's do, so one renderer draws both:
+
+```tsx
+import { messageFiles } from '@dudousxd/nestjs-agent-react';
+
+const sent = messageFiles(message);          // MessageFile[]
+const waiting = chat.queue.items[0].files;   // MessageFile[] — same shape
+// { url, mediaType, filename, kind, extension, mediaId }
+```
+
+`transcript.queued[n].files` carries the same fields plus `isImage`, so it also fits a renderer
+written for the transcript's file blocks. `attachmentFile(attachment)` turns an uploaded
+`MessageAttachment` into a `MessageFile` yourself; `items[n].attachments` is still there for a
+re-send.
 
 ## When the queue pauses
 
@@ -120,6 +178,11 @@ different framework) serves the queue by implementing:
    on every change while a turn holds the thread, and with `started` on a handoff.
 5. `GET`/`DELETE <base>/threads/:id/queue`, `POST <base>/threads/:id/queue/resume`,
    `PATCH`/`DELETE <base>/queue/:messageId`, and `queue` on `GET <base>/threads/:id`.
+6. Optionally `POST <base>/queue/:messageId/interrupt` for `chat.queue.interrupt(id)`: mark the
+   message an interrupt, move it to the head, lift the pause, cancel the running turn — answering
+   the queue plus `interrupting` (the cancelled run), or `runId` when nothing was running and the
+   message started. Never cancel a turn for a message that is already gone, or that is itself the
+   running turn. Without the route, `interrupt(id)` rejects and everything else works.
 
 The full contract is *Message queue* in the repo's `docs/stream-protocol.md`; the store behaviours
 are `CHAT_QUEUE_STORE_CONTRACT` in `@dudousxd/nestjs-agent-testing`, runnable against a store of
