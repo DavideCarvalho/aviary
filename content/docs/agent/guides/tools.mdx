@@ -216,6 +216,65 @@ full approval and durability mechanics live in
 [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability).
 </Callout>
 
+### Confirmed writes — the gate inside the tool
+
+An `action` parks on a person's approval, and an MCP caller has no channel to give one — so the
+[MCP server](/docs/agent/packages/mcp-server) keeps `action` tools off its surface. A **confirmed
+tool** is the write that works there too: the human gate lives INSIDE a `read` tool. The first call
+validates and previews without writing and returns a signed `confirmToken`; the same arguments plus
+`confirm: true` and that token commit. The user sees the preview because the model has to relay it to
+get a token it can confirm with.
+
+```ts
+import {
+  AGENT_CONFIRM_TOKEN_STORE,
+  type ConfirmTokenStore,
+  defineConfirmedTool,
+  provideAgentTool,
+} from '@dudousxd/nestjs-agent';
+
+@Module({
+  providers: [
+    provideAgentTool(
+      (store: ConfirmTokenStore, config: ConfigService, orders: OrdersService) =>
+        defineConfirmedTool(
+          {
+            name: 'refund_order',
+            description: 'Refund an order.',
+            input: z.object({ orderId: z.string() }),
+            secret: () => config.getOrThrow('CONFIRM_SECRET'),
+            store,
+          },
+          {
+            // The SAME rules the commit relies on. Runs for the preview and again on confirmation.
+            prepare: ({ orderId }, ctx) => orders.loadRefundable(orderId, ctx.actor),
+            preview: (order) => ({ summary: `Refund ${order.total} to ${order.customer}?`, data: order }),
+            commit: async (order) => ({ summary: 'Refunded.', data: await orders.refund(order) }),
+          },
+        ),
+      [AGENT_CONFIRM_TOKEN_STORE, ConfigService, OrdersService],
+    ),
+  ],
+})
+export class OrdersModule {}
+```
+
+- **The token** is an HMAC-SHA256 (keyed by `secret`) over the tool, `ctx.actor.id`,
+  `ctx.actor.tenantRef`, the expiry (`ttlMs`, default 15 minutes) and the canonical arguments — key
+  order does not matter, a changed value does. Another actor, tenant or tool, or a changed argument,
+  gets `ConfirmTokenError('invalid')` before your `prepare` runs.
+- **Single use** comes from a `ConfirmTokenStore`: the token is claimed right before `commit` (a
+  refusal in `prepare` does not spend it) and released if `commit` throws, so the same preview can be
+  confirmed again. A second confirmation is `ConfirmTokenError('used')`. `DrizzleAgentStoreModule` and
+  `MikroOrmAgentStoreModule` bind one to `AGENT_CONFIRM_TOKEN_STORE` (table `agent_confirm_token`,
+  only the token's SHA-256, the actor and the tool are kept; `purgeExpired()` from a schedule drops
+  dead rows). `InMemoryConfirmTokenStore` is for one replica. **Without a store a token commits as
+  many times as it is sent until it expires.**
+- **The model sees** your schema plus `confirm` / `confirmToken` (`withConfirmFields`). A Zod 3
+  schema keeps its real shape: the AI SDK adapter and the MCP server convert it with their own
+  converters and add the two fields. `messages` overrides the three sentences the tool says to the
+  model (`{minutes}` is replaced in `confirm`).
+
 ---
 
 ## Several `read` calls at once
