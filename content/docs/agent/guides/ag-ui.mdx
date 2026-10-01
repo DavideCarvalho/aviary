@@ -60,7 +60,7 @@ const backend: AgentBackend = {
 | content parts | `text` parts are the message's text. A media part carried **inline** (`data`) is staged through the bound `AGENT_ATTACHMENT_STAGING` store, within the [attachment limits](/docs/agent/reference/configuration), and sent to the model. A part by `url` or provider `file` handle is dropped, and an `agora.warning` says so — the model is only handed bytes the server staged itself. |
 | `resume` | Answers to the interrupts of the previous run — see below. |
 | `context` | Rides in the turn's page context as `agUiContext`, where a `PromptBuilder` and the tools read it. |
-| `forwardedProps` | `agent`, `model` and `pageContext` are read as the matching fields of a native send. (`persona` is read by `@adonis-agora/agent` only — there are no personas here.) |
+| `forwardedProps` | `agent`, `persona`, `model` and `pageContext` are read as the matching fields of a native send (see [Personas](/docs/agent/guides/personas)). |
 | `tools` | Frontend tools are not supported: the list is ignored, with a warning. |
 | `state` | Ignored; this producer emits no state events. |
 
