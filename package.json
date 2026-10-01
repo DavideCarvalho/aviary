@@ -5,7 +5,7 @@
   "scripts": {
     "sync:docs": "node scripts/sync-docs.mjs",
     "sync:registry": "node scripts/sync-registry.mjs",
-    "prebuild": "node scripts/sync-docs.mjs && node scripts/check-links.mjs --strict",
+    "prebuild": "node scripts/sync-docs.mjs && node scripts/check-mdx.mjs && node scripts/check-links.mjs --strict",
     "build": "next build",
     "postbuild": "node scripts/postbuild-og.mjs",
     "predev": "node scripts/sync-docs.mjs",
@@ -15,7 +15,8 @@
     "postinstall": "fumadocs-mdx",
     "lint": "biome check",
     "format": "biome format --write",
-    "check:links": "node scripts/check-links.mjs --strict"
+    "check:links": "node scripts/check-links.mjs --strict",
+    "check:mdx": "node scripts/check-mdx.mjs"
   },
   "dependencies": {
     "fumadocs-core": "16.15.8",
@@ -29,15 +30,17 @@
     "zbsearch": "^4.0.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.0",
+    "@mdx-js/mdx": "3.1.1",
     "@tailwindcss/postcss": "^4.3.1",
     "@types/mdx": "^2.0.14",
     "@types/node": "^25.9.3",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",
     "postcss": "^8.5.15",
+    "remark-gfm": "4.0.1",
     "serve": "^14.2.6",
     "tailwindcss": "^4.3.1",
-    "typescript": "^6.0.3",
-    "@biomejs/biome": "^2.5.0"
+    "typescript": "^6.0.3"
   }
 }
