@@ -225,8 +225,9 @@ AgentModule.forRoot({ model, emptyRoles: 'deny' }); // binds ClosedRolesPolicy
 
 Closed, the actor needs a role the tool declares (else one of `defaultRoles`): a tool with no `roles`
 and no default roles, or an explicitly empty list, is neither offered nor invocable. Building the
-policy yourself: `new ClosedRolesPolicy(defaultRoles)` (= `new DefaultRolesPolicy(defaultRoles,
-{ emptyRoles: 'deny' })`), `closeEmptyRoles(policy)` around a policy you did not build, or
+policy yourself: `new ClosedRolesPolicy(defaultRoles)`
+(= `new DefaultRolesPolicy(defaultRoles, { emptyRoles: 'deny' })`),
+`closeEmptyRoles(policy)` around a policy you did not build, or
 `new AuthzRolesPolicy(gate, { emptyRoles: 'deny' })` for its role fallback. `emptyRoles` is ignored
 when you pass your own `rolesPolicy`; the default stays `'allow'`. The MCP server takes the same key
 for its surface alone — see [`-mcp-server`](/docs/agent/packages/mcp-server).
