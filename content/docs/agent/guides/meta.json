@@ -19,6 +19,7 @@
     "frontend",
     "message-queue",
     "bring-your-own-ui",
+    "ag-ui",
     "file-uploads",
     "chat-components",
     "generative-ui",
