@@ -68,6 +68,15 @@ alter table agent_message add column reasoning_ms integer null;
 alter table agent_message add column ui json null;
 ```
 
+Upgrading from a release before [personas](/docs/agent/guides/personas): three more nullable
+columns, picked up the same three ways.
+
+```sql
+alter table agent_thread add column persona varchar(255) null;
+alter table agent_message add column persona varchar(255) null;
+alter table agent_queued_message add column persona varchar(255) null;
+```
+
 <Callout type="warn" title="MikroOrmAgentStoreModule.forFeature() is global">
 It binds `AGENT_STORE`, `AGENT_GOVERNANCE_QUERIES`, and `AGENT_PRICING_STORE` on a **global** Nest
 module. Import it once —

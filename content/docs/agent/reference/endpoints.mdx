@@ -12,7 +12,7 @@ All routes below assume the default `path: 'agent'` (set via [`AgentModule.forRo
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| `POST` | `/agent/chat` | `{ message: string; threadId?: string; agent?: string; model?: string; attachments?: { mediaId: string }[]; pageContext?: PageContext; regenerate?: true; transient?: boolean; mode?: 'auto' \| 'queue' \| 'interrupt' }` | SSE stream (see below) — or `202 { queued: true; threadId; messageId; position; queue: ChatQueueState; runId?; interrupting? }` when the thread already has a turn running (see [Message queue](#message-queue)); `409 run_active` for a `regenerate` on a busy thread |
+| `POST` | `/agent/chat` | `{ message: string; threadId?: string; agent?: string; persona?: string; model?: string; attachments?: { mediaId: string }[]; pageContext?: PageContext; regenerate?: true; transient?: boolean; mode?: 'auto' \| 'queue' \| 'interrupt' }` | SSE stream (see below) — or `202 { queued: true; threadId; messageId; position; queue: ChatQueueState; runId?; interrupting? }` when the thread already has a turn running (see [Message queue](#message-queue)); `409 run_active` for a `regenerate` on a busy thread; `400 persona_not_found` for a `persona` the agent does not declare |
 | `GET` | `/agent/chat/:runId/stream` | `?after=<seq>` (or `Last-Event-ID`) | SSE stream — reconnect to an in-flight run, skipping the frames numbered up to the cursor |
 | `POST` | `/agent/chat/:runId/cancel` | — | `{ aborted: boolean }` — the request was accepted; see [Cancelling a run](/docs/agent/guides/human-in-the-loop-and-durability#cancelling-a-run) for where the run actually stops |
 
@@ -130,7 +130,7 @@ tus endpoint (`PATCH /media/uploads/:uploadId`), never through these routes. See
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| `GET` | `/agent/agents` | — | `AgentCatalogEntry[]` (`{ name; description; isDefault?; lockedModel? }`) — the discovered `@Agent` classes, for a client picker instead of a hardcoded list |
+| `GET` | `/agent/agents` | — | `AgentCatalogEntry[]` (`{ name; description; isDefault?; lockedModel?; personas?: { id; label; description? }[]; defaultPersona? }`) — the discovered `@Agent` classes and their [personas](/docs/agent/guides/personas), for a client picker instead of a hardcoded list |
 | `GET` | `/agent/tools?agent=<name>` | — | `ToolCatalogEntry[]` (`{ name; kind; presentation? }`) — the tools the resolved actor can reach through that agent (default agent when omitted), with each tool's [`presentation`](/docs/agent/guides/tools#how-a-chat-talks-about-a-tool). Built by the same gates the model is offered tools through. `404` for an unknown agent. `?agent=*` answers the union across every agent, each tool once (`useToolCatalog({ agent: ALL_AGENTS })`), for a surface showing several agents' conversations. |
 
 ## Models
@@ -155,14 +155,14 @@ them. `lockedModel` on the agent's `GET /agent/agents` entry says the same befor
 |---|---|---|---|
 | `GET` | `/agent/threads` | — | `ThreadSummary[]` for the resolved actor |
 | `GET` | `/agent/threads/:id` | — | `ThreadDetail \| null` — with `queue: ChatQueueState` on a store that queues |
-| `PATCH` | `/agent/threads/:id` | `{ title?: string; defaultAgent?: string \| null; model?: string \| null }` | `{ ok: boolean }` — renames the thread, sets its default agent and/or pins its model (`model: null` unpins; the model must be offered by the catalog) (`defaultAgent: null` clears it; the key must be present in the body to change it at all — JSON has no `undefined`, so presence vs. absence is how "leave it alone" is distinguished from "clear it") |
+| `PATCH` | `/agent/threads/:id` | `{ title?: string; defaultAgent?: string \| null; model?: string \| null; persona?: string \| null }` | `{ ok: boolean }` — renames the thread, sets its default agent, pins its model (`model: null` unpins; the model must be offered by the catalog) and/or pins its [persona](/docs/agent/guides/personas) (`persona: null` clears; `400 persona_not_found` for one the agent does not declare) (`defaultAgent: null` clears it; the key must be present in the body to change it at all — JSON has no `undefined`, so presence vs. absence is how "leave it alone" is distinguished from "clear it") |
 | `DELETE` | `/agent/threads/:id` | — | `{ ok: boolean }` (soft-delete) |
 | `POST` | `/agent/threads/:id/fork-from/:messageId` | — | `ThreadSummary` — a new thread branched at `messageId` |
 | `POST` | `/agent/threads/:id/promote` | — | `{ ok: boolean }` — promotes a `transient` thread (see the chat body above) to a persisted one |
 | `DELETE` | `/agent/threads/:id/from/:messageId` | — | `{ ok: boolean }` — truncates the thread from `messageId` onward |
 
-<Callout type="info" title="No more personas/catalog">
-  The old `GET /agent/threads/personas/catalog` endpoint is gone — there's no persona system anymore. `GET /agent/agents` (above) is the picker catalog now.
+<Callout type="info" title="Persona catalog">
+  There is no `GET /agent/threads/personas/catalog` here (that is `@adonis-agora/agent`'s route): each agent's personas ride its `GET /agent/agents` entry. A thread's pinned persona is `persona` on its summary.
 </Callout>
 
 All `:id` routes are ownership-scoped: they resolve the acting actor and check they own the thread — `403` if it belongs to someone else, `404` if it doesn't exist.
