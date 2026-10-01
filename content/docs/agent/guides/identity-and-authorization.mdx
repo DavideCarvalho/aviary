@@ -212,6 +212,25 @@ can(actor, tool) {
 To make tools admin-only unless they say otherwise (the behaviour before the DX release):
 `AgentModule.forRoot({ defaultRoles: ['ADMIN'] })`.
 
+### Keeping an empty list closed
+
+An empty list means **open** — `roles: []`, or no `roles` with `defaultRoles: []`, lets every
+resolved actor through. Before core 0.27 the same list denied everyone, and nothing warns on upgrade.
+If your app uses an empty list to mean "no one" — a `roles` computed from permissions that can come
+out empty — keep it closed:
+
+```ts
+AgentModule.forRoot({ model, emptyRoles: 'deny' }); // binds ClosedRolesPolicy
+```
+
+Closed, the actor needs a role the tool declares (else one of `defaultRoles`): a tool with no `roles`
+and no default roles, or an explicitly empty list, is neither offered nor invocable. Building the
+policy yourself: `new ClosedRolesPolicy(defaultRoles)` (= `new DefaultRolesPolicy(defaultRoles,
+{ emptyRoles: 'deny' })`), `closeEmptyRoles(policy)` around a policy you did not build, or
+`new AuthzRolesPolicy(gate, { emptyRoles: 'deny' })` for its role fallback. `emptyRoles` is ignored
+when you pass your own `rolesPolicy`; the default stays `'allow'`. The MCP server takes the same key
+for its surface alone — see [`-mcp-server`](/docs/agent/packages/mcp-server).
+
 <Callout type="info" title="Tools reach the policy with roles: undefined, not a baked-in default">
 Discovery doesn't bake `defaultRoles` into a tool's `spec.roles` — a tool that declares no `roles`
 reaches whichever `RolesPolicy` is active with `roles: undefined`, and `DefaultRolesPolicy` is what

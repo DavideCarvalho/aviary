@@ -151,6 +151,21 @@ nobody. `ask`, `skill` and `memory` are settled by the loop against a run and ar
 all. Refusing all four keeps that true of this surface even if something registers one out of band,
 and it means `actions: 'execute'` cannot widen its way into them.
 
+### Closing an empty roles list on this surface
+
+The MCP server serves under the agent's own `RolesPolicy`, so by default an MCP caller reaches
+exactly what a chat would — including a tool that names no roles, which is open. A deployment whose
+chat is open but whose MCP surface is reached by callers it does not otherwise know can close it
+there alone:
+
+```ts
+AgentMcpServerModule.forRoot({ name: 'Acme Agent', version: '1.0.0', auth, emptyRoles: 'deny' });
+```
+
+A tool whose roles come out empty (declared `[]`, or none declared and no `defaultRoles`) is then
+neither listed nor callable over MCP; an `ability`-gated tool is left to the policy. Set
+`AgentModule`'s own `emptyRoles: 'deny'` to close both surfaces.
+
 ### `allowedTools` is enforced on the call, not only on the list
 
 ```ts
