@@ -143,6 +143,14 @@ If you set it, bound it on both sides: `allowedTools` for the names, and the rol
 calling identity for everything else.
 </Callout>
 
+### A write an MCP caller can make: confirmed tools
+
+Keeping `action` tools off this surface does not mean no writes: a
+[confirmed tool](/docs/agent/guides/tools#confirmed-writes--the-gate-inside-the-tool) is a `read`
+tool whose gate is inside it — it is listed (with `confirm` / `confirmToken` in its schema), its
+first call previews and returns a single-use `confirmToken`, and only the same arguments plus that
+token commit. The client's model relays the preview to its user to get there.
+
 ### Loop-served kinds are never exposed
 
 An `agent` (handoff) tool is registered with a **stub handler**, because the loop is what performs
