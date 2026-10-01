@@ -48,6 +48,14 @@ A turn's `attachments` may carry **only a `mediaId`** — see [Attachments](#att
   `POST /agent/chat` responds `Content-Type: text/event-stream` with headers `X-Agent-Run-Id` and `X-Agent-Thread-Id`. The first frame is `event: meta` carrying `data: { runId, threadId }`, followed by one `data:` frame per [stream event](/docs/agent/reference/stream-events) (`{ kind: 'text', text }`, tool calls, `ui`, `title`, …), and a closing `event: done`. `GET /agent/chat/:runId/stream` pipes the same format to resume/tail a run (its `meta` frame's `threadId` is `undefined`, since the thread isn't re-resolved on reconnect). A failed run (e.g. quota exceeded) ends the stream with `event: error` carrying `data: { code, message }` (a stable `code` — `quota_exceeded`, `output_rejected`, `structured_output_invalid`, `replay_diverged`, `model_no_output` or `run_failed`; for the last three `message` is a generic sentence in production, see [Error codes](/docs/agent/reference/stream-events#error-codes)) instead of appending error text to the assistant message.
 </Callout>
 
+## AG-UI
+
+Mounted only with `adapters: [agUiAdapter()]` — see [AG-UI](/docs/agent/guides/ag-ui).
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `POST` | `/agent/ag-ui` | AG-UI 1.0 `RunAgentInput` (a `resume` list continues an interrupted run) | `text/event-stream`, one AG-UI event per `data:` line, `RUN_STARTED` → `RUN_FINISHED` / `RUN_ERROR`; `400 { code: 'invalid_input' \| 'invalid_resume' \| 'no_user_message' }`, `403`, `409 run_not_active` before the stream opens |
+
 ## Message queue
 
 A send on a thread whose turn is still running is queued (per-thread FIFO, persisted) and runs when
