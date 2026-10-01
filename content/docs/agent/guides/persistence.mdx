@@ -446,6 +446,44 @@ governance surfaces are untouched.
 
 ---
 
+## The live stream across replicas (`sink`)
+
+The store holds threads; the **sink** holds a run's live stream while it is being written, so a
+browser that reconnects (`GET /agent/chat/:runId/stream?after=`) is replayed what it missed. The
+default sink keeps that in the process running the turn — with several replicas a reconnect landing
+elsewhere finds nothing. Share it: Redis (`@dudousxd/nestjs-agent-transport-redis`), or, with no
+Redis, the database these adapters already use:
+
+```ts
+import { DrizzleTokenStreamSink } from '@dudousxd/nestjs-agent-store-drizzle';
+AgentModule.forRoot({ model, sink: new DrizzleTokenStreamSink(db) });
+
+import { MikroOrmTokenStreamSink } from '@dudousxd/nestjs-agent-store-mikro-orm';
+AgentModule.forRootAsync({
+  inject: [EntityManager],
+  useFactory: (em: EntityManager) => ({ model, sink: new MikroOrmTokenStreamSink(em) }),
+});
+```
+
+- **One row per frame** in `agent_stream_frame`, numbered per run from 1 with no gaps — the next
+  number is taken in the insert itself and the `(run_id, seq)` key turns two writers' race (a parent
+  and its delegate on different replicas) into a retry.
+- **Polled**, not pushed: a subscriber reads the rows past its cursor every `pollIntervalMs` (250 ms),
+  slowing to `idlePollIntervalMs` (1 s) once the run has written nothing for five seconds. No
+  `LISTEN`/`NOTIFY`.
+- **Text is coalesced at write time**: consecutive `text` frames within `flushMs` (50 ms) become one
+  row. Every replica reads the same rows, so the SSE ids — and an `?after=` cursor — are the same
+  wherever the client reconnects. `flushMs: 0` writes every frame.
+- **TTL from the last write** (`ttlSeconds`, 1 h): a run parked on an approval for longer loses its
+  buffered frames — the persisted thread is the record. `purgeExpired()` runs on its own after a run
+  ends (at most once a minute; `autoPurge: false` to schedule it yourself).
+- A run that fails ends with a terminal row carrying its error: a subscriber replays, then gets the
+  stream's `event: error`.
+
+The logic is `SqlTokenStreamSink` in core, over a five-method `StreamFrameTable` (`append`, `read`,
+`has`, `remove`, `lapsedRuns`) — implement that for another database and the rest comes with it;
+`SQL_TOKEN_STREAM_SINK_CONTRACT` in `-testing` checks it.
+
 ## In-memory store for tests
 
 For offline tests and demos, `@dudousxd/nestjs-agent-testing` ships an `InMemoryAgentStore` (plus
