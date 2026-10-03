@@ -19,7 +19,7 @@
     "check:mdx": "node scripts/check-mdx.mjs"
   },
   "dependencies": {
-    "fumadocs-core": "16.15.8",
+    "fumadocs-core": "16.15.17",
     "fumadocs-mdx": "15.4.5",
     "fumadocs-ui": "16.15.17",
     "lucide-react": "^1.18.0",
