@@ -13,7 +13,9 @@ already has. For the walkthrough see the [Generative UI guide](/docs/agent/guide
 |---|---|---|
 | `@dudousxd/nestjs-agent-core/genui` (+ `/genui/builtins`) | server and browser | The catalog: definitions, validation, model text, fallbacks, tool factories. |
 | `@dudousxd/nestjs-agent/genui` | NestJS | `AgentGenuiModule`, `GENUI_CATALOG`, `GenuiCatalogResolver`. Re-exports the core subpath. |
-| `@dudousxd/nestjs-agent-react/genui` (+ `/genui/json-render`) | browser | `GenuiProvider`, `GenerativeUI`, `useGenerativeUI`. |
+| `@dudousxd/nestjs-agent-react/genui` (+ `/genui/json-render`) | browser | `GenuiProvider`, `GenerativeUI`, `useGenerativeUI`, `createReactComponentRegistry`. |
+| `@dudousxd/nestjs-agent-react/genui/server` | Node.js | `createReactServerRenderer`: static HTML and paginated PNG/PDF with your React registry. |
+| `@dudousxd/nestjs-agent-react/genui/server/playwright` | Node.js | `createPlaywrightCaptureAdapter`: optional capture using your installed browser. |
 
 <Callout type="info">
 Headless: definitions and renderers' plumbing only, never visuals. Each app draws components its
@@ -27,6 +29,9 @@ browser.
 
 | Export | What it is |
 |---|---|
+| `createComponent(def)` | Validating callable factory returning portable `{ component, props, version, fallbackText }`; exposes `.definition`. |
+| `createComponentRegistry(options?)` | App-owned channel renderers, authoritative `prepare`/`render`, `.catalog`, and `.manifest`. |
+| `table(props)` / `chart(props)` | Factories for the built-in DataTable and Chart contracts; definitions, not themed visuals. |
 | `defineComponent(def)` | Declares one component: `{ name, title, description, props, children?, fallbackText?, internal?, version? }`. |
 | `defineCatalog(defs, { jsonSchemaValidator? })` | A `Catalog`: `get`, `has`, `modelComponents()`, `validate(name, props)`, `validateSync`, `jsonSchemaFor(name)`, `extend(defs)`. |
 | `ajvValidator(ajv)` / `builtinJsonSchemaValidator` | JSON Schema checking: bring your Ajv for the full spec, or use the dependency-free subset. |
@@ -76,3 +81,11 @@ A genui tool returns `{ shown, id }` to the model: what it pushed, and the frame
 | `useGenuiProvider()` | The provider's settings. |
 | `GenerativeUIScope`, `GenuiTree` | Tree rendering for custom chrome. |
 | `/genui/json-render` | `GenuiProvider` with `jsonRender` (a json-render registry, or `true` to derive it from `registry`); `JsonRenderTree`, `jsonRenderTree`, `toJsonRenderRegistry`, `treeToJsonRenderSpec`. Optional peer `@json-render/react` >= 0.21. |
+
+## Shared React and server rendering
+
+`createReactComponentRegistry()` registers `{ react, text?, paginate? }` per definition. Its `.components` and `.catalog` serve `GenuiProvider`, and the same registry serves `createReactServerRenderer({ registry, stylesheet?, theme?, capture? })`. The server renderer exports `html(presentation)`, `images(presentation, options?)`, and `pdf(presentation, options?)`.
+
+The server and Playwright entries are optional Node-only imports. HTML needs matching React/ReactDOM versions; image/PDF capture additionally needs a `CaptureAdapter`. The Playwright implementation blocks scripts, unapproved asset traffic, and redirects, and keeps supplied browsers caller-owned.
+
+See [Component registries and server rendering](/docs/agent/guides/component-rendering) for code, pagination settings, and transport responsibilities.
