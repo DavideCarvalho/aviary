@@ -60,6 +60,18 @@ watching, and the same `toolCallId` resolves to the sub-agent's own child run.
 Both endpoints are ownership-scoped: the acting actor must own the tool call's run, or the request
 gets a `403` (`404` if the tool call doesn't exist at all).
 
+Before the prompt is shown, and again right before `execute`, the tool's optional
+[`preflight`](/docs/agent/guides/tools#preflight-checking-an-action-before-and-after-approval) checks
+your domain state. It can refuse the call, report it already done, or give this one call its own
+prompt wording (`confirmation`), which is streamed on `approval-requested` and stored on the call.
+
+<Callout type="info" title="Not blocking the conversation">
+This page describes the default, **blocking** mode: the turn waits for the decision. With
+`actionApprovalMode: 'independent'` the call becomes a proposal, the turn ends, and the decision can
+arrive later from the web, a text message ("yes"), AG-UI or a console, with a background worker
+running the approved action. See [Action proposals](/docs/agent/guides/action-proposals).
+</Callout>
+
 <Callout type="info" title="The frontend wraps this">
 `useAgentChat` surfaces pending approvals and exposes approve/reject callbacks, so a UI renders an
 "Approve?" prompt inline in the conversation. See [Frontend](/docs/agent/guides/frontend).

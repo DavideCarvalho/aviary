@@ -224,6 +224,16 @@ For WhatsApp, send each PNG as a normal image attachment; the table remains read
 
 Overflow rejects instead of silently clipping content. Reduce rows per page, increase height, or add a custom paginator. Fonts and images are awaited. The adapter closes its own pages and contexts on success and failure; a supplied browser remains caller-owned. The server entry does not import browser chat hooks.
 
+## Clients that cannot draw the component
+
+What `present` returns goes through the same negotiation as `ctx.emitUi`. A client that declared the
+component in `uiCapabilities` receives it as a `ui` frame. A client that did not (a text-only
+channel, `components: []`) receives the component's text, computed from the server catalog's
+definition, and the model sees that text too. A presented component the server catalog does not
+define is a presentation error: the domain result stands and nothing is shown. Over MCP the caller
+receives only the domain output. See
+[One answer, every surface](/docs/agent/guides/rendering-everywhere).
+
 ## Validation, replay, and capture boundaries
 
 Props can use Standard Schema (for example Zod) or JSON Schema. `createComponent` snapshots JSON-safe props and creates trusted fallback text. If an input transform changes the shape, declare an `outputProps` schema that accepts the normalized portable props; renderers, catalog validation, and manifests use `outputProps ?? props`. This avoids repeatedly applying an input transformation during rendering or replay.

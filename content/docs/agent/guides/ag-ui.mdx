@@ -60,7 +60,7 @@ const backend: AgentBackend = {
 | content parts | `text` parts are the message's text. A media part carried **inline** (`data`) is staged through the bound `AGENT_ATTACHMENT_STAGING` store, within the [attachment limits](/docs/agent/reference/configuration), and sent to the model. A part by `url` or provider `file` handle is dropped, and an `agora.warning` says so — the model is only handed bytes the server staged itself. |
 | `resume` | Answers to the interrupts of the previous run — see below. |
 | `context` | Rides in the turn's page context as `agUiContext`, where a `PromptBuilder` and the tools read it. |
-| `forwardedProps` | `agent`, `persona`, `model` and `pageContext` are read as the matching fields of a native send (see [Personas](/docs/agent/guides/personas)). |
+| `forwardedProps` | `agent`, `persona`, `model` and `pageContext` are read as the matching fields of a native send (see [Personas](/docs/agent/guides/personas)). `uiCapabilities` declares the components this client draws; the rest arrive as text (see [One answer, every surface](/docs/agent/guides/rendering-everywhere)). An invalid `uiCapabilities` is a `400`. |
 | `tools` | Frontend tools are not supported: the list is ignored, with a warning. |
 | `state` | Ignored; this producer emits no state events. |
 
@@ -95,7 +95,7 @@ What AG-UI has no event for travels as `CUSTOM` events, which a client that does
 | `name` | `value` |
 | --- | --- |
 | `agora.run` | `{ runId, threadId }` — the library's ids, e.g. for `POST /agent/chat/:runId/cancel` |
-| `agora.ui` | a [generative-UI](/docs/agent/guides/generative-ui) component `{ id, component, props, … }`; a repeat `id` replaces |
+| `agora.ui` | a [generative-UI](/docs/agent/guides/generative-ui) component `{ id, component, props, version?, toolCallId? }`; a repeat `id` replaces. Its `fallbackText` is not carried, so a client that cannot draw a component should leave it out of `uiCapabilities` to get the text instead |
 | `agora.title` | `{ title }` |
 | `agora.step-usage` | `{ usage, costUsd, reasoningMs }` of one model step |
 | `agora.approval-requested`, `agora.approval-settled`, `agora.elicitation` | the native frames, for a client that renders them live |
@@ -103,6 +103,14 @@ What AG-UI has no event for travels as `CUSTOM` events, which a client that does
 | `agora.warning` | `{ message }` — input this producer could not use |
 
 The names are shared with `@adonis-agora/agent`, which serves the same encoder.
+
+## Deciding an action proposal by text
+
+With [`actionApprovalMode: 'independent'`](/docs/agent/guides/action-proposals), a user message to an
+existing thread that is a decision word ("yes", "no #id", …) and carries no media decides a pending
+proposal instead of starting a run. The answer is `RUN_STARTED`, a `CUSTOM` event named
+`aviary.action-proposal-decision` with `{ threadId, proposalDecision }`, the receipt as one text
+message, and `RUN_FINISHED`. No model run is created.
 
 ## Interrupts and resume
 

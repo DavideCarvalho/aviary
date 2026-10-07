@@ -151,6 +151,19 @@ tool whose gate is inside it — it is listed (with `confirm` / `confirmToken` i
 first call previews and returns a single-use `confirmToken`, and only the same arguments plus that
 token commit. The client's model relays the preview to its user to get there.
 
+### What a call returns: the domain output, not the UI
+
+`tools/call` answers with the tool's `execute` result as JSON text. There is no conversation behind an
+MCP call, so `ctx.emitUi` resolves to an id and drops the component, and a `present` hook runs but
+what it returns is dropped too. No text fallback is produced either: keep everything an MCP caller
+needs in the domain output. An `action` tool reached through `actions: 'execute'` still runs its
+[preflight](/docs/agent/guides/tools#preflight-checking-an-action-before-and-after-approval)
+(`phase: 'execute'`) before `execute`. See
+[One answer, every surface](/docs/agent/guides/rendering-everywhere#mcp).
+
+The generic genui tools (`ui__show_*`, the tree and show tools) are `read` tools, so they are listed
+here as well, although a call has nowhere to draw. Name the tools you mean to expose in `allowedTools` to keep them off.
+
 ### Loop-served kinds are never exposed
 
 An `agent` (handoff) tool is registered with a **stub handler**, because the loop is what performs

@@ -12,7 +12,7 @@ All routes below assume the default `path: 'agent'` (set via [`AgentModule.forRo
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| `POST` | `/agent/chat` | `{ message: string; threadId?: string; agent?: string; persona?: string; model?: string; attachments?: { mediaId: string }[]; pageContext?: PageContext; regenerate?: true; transient?: boolean; mode?: 'auto' \| 'queue' \| 'interrupt' }` | SSE stream (see below) — or `202 { queued: true; threadId; messageId; position; queue: ChatQueueState; runId?; interrupting? }` when the thread already has a turn running (see [Message queue](#message-queue)); `409 run_active` for a `regenerate` on a busy thread; `400 persona_not_found` for a `persona` the agent does not declare |
+| `POST` | `/agent/chat` | `{ message: string; threadId?: string; agent?: string; persona?: string; model?: string; attachments?: { mediaId: string }[]; pageContext?: PageContext; regenerate?: true; transient?: boolean; mode?: 'auto' \| 'queue' \| 'interrupt'; uiCapabilities?: { components: { name: string; version: number }[] } }` | SSE stream (see below) — or `202 { queued: true; threadId; messageId; position; queue: ChatQueueState; runId?; interrupting? }` when the thread already has a turn running (see [Message queue](#message-queue)); `409 run_active` for a `regenerate` on a busy thread; `400 persona_not_found` for a `persona` the agent does not declare; `400 Invalid UI capabilities`; under `actionApprovalMode: 'independent'`, `200 { threadId; proposalDecision; text }` (JSON) when the message decided a pending [action proposal](#action-proposals) |
 | `GET` | `/agent/chat/:runId/stream` | `?after=<seq>` (or `Last-Event-ID`) | SSE stream — reconnect to an in-flight run, skipping the frames numbered up to the cursor |
 | `POST` | `/agent/chat/:runId/cancel` | — | `{ aborted: boolean }` — the request was accepted; see [Cancelling a run](/docs/agent/guides/human-in-the-loop-and-durability#cancelling-a-run) for where the run actually stops |
 
@@ -22,6 +22,11 @@ truncates everything after the thread's last user message and re-answers it. It 
 routes below, the caller must own that thread. `message` is ignored: the stored user message is the
 one answered, and it is never stored twice. A backend that serves these routes itself does the same,
 including dropping whatever its runner keeps of the replaced answer.
+
+`uiCapabilities` lists the generative-UI components this client renders, by exact version. Omitted,
+every catalog component is offered and sent; `components: []` is text only; anything else is
+intersected with the server catalog, and components left out arrive as their text. It is stored with
+a queued message. See [One answer, every surface](/docs/agent/guides/rendering-everywhere).
 
 `model` applies to **that turn only** — a send never stores it on the thread, new or existing. Pinning
 is `PATCH /agent/threads/:id { model }` (below), and only a pin outlives the turn.
@@ -94,7 +99,7 @@ configured `maxBytes` narrows that at request time and cannot raise it. Both siz
 resumable `/agent/attachments/uploads` routes are the documented upload path.
 
 `POST /agent/chat` names uploads as `attachments: [{ mediaId }]` — refs only; an entry with any other
-key is refused with `400`. `GET /agent/threads/:id` re-mints each attachment's `url` by `mediaId`.
+key is refused with `400`, and so are more than `MAX_ATTACHMENTS_PER_MESSAGE` (10) entries (`maxPerMessage` on `GET /agent/config`). With nothing bound to `AGENT_ATTACHMENT_STAGING`, a send that carries attachments answers `501`. `GET /agent/threads/:id` re-mints each attachment's `url` by `mediaId`.
 
 `GET` answers the question `GET /agent/threads/:id` cannot: an upload that was never sent belongs to
 no thread. It is scoped to the resolved actor and nothing else, bounded to `ATTACHMENT_PAGE_SIZE`
@@ -193,6 +198,23 @@ All four bodies are validated before anything is signalled — a human reply is 
 
 The run is derived server-side from the `toolCallId` — the call's own `runId` where the row carries one, falling back to its thread's active stream — so no run id is sent, and that is also how a delegated sub-agent's action tool routes to its own child run. All four routes are ownership-scoped: the acting actor must own the tool call — `403` if it belongs to someone else, `404` if it doesn't exist.
 
+## Action proposals
+
+Used with `actionApprovalMode: 'independent'` — see [Action proposals](/docs/agent/guides/action-proposals).
+Mounted with the other routes, in either mode; on a store without proposal support they answer `501`.
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `GET` | `/agent/threads/:threadId/action-proposals` | `?after=<cursor>` | `ActionProposal[]` the caller may see, up to 1000; header `X-Action-Proposals-Next` when there are more |
+| `POST` | `/agent/threads/:threadId/action-proposals/:proposalId/approve` | `{ remember?: boolean }` | `ActionProposalMutationResult` — `{ status: 'applied' \| 'unchanged' \| 'conflict' \| 'not_found' \| 'expired'; proposal? }` |
+| `POST` | `/agent/threads/:threadId/action-proposals/:proposalId/reject` | `{ reason?: string }` | `ActionProposalMutationResult` |
+
+The thread's owner sees every proposal; anyone else sees those the approval policy lets them decide.
+Deciding needs the same permission (`403` otherwise), and the thread's tenant must be the caller's
+(`403`). `404` for an unknown thread or proposal. A body field other than the one listed is a `400`.
+`X-Action-Proposals-Next` is URI-encoded JSON: decode it and pass it back as `after`; an invalid
+cursor is a `400`. The decision is recorded with `via: 'web'`.
+
 ## Quota
 
 | Method | Path | Body | Returns |
@@ -231,16 +253,30 @@ Mounted by `AgentDashboardModule.forRoot({ apiBasePath })` (default `/ai-gateway
 | `GET` | `/ai-gateway/api/reliability` | `from?`, `to?` | `ReliabilityOverview` — `{ metrics, byAgent, errors, trend }` (success/error rate, retries, p95 duration, run/failure trend, failure breakdown by error code) |
 | `GET` | `/ai-gateway/api/runs` | `limit?` (default 50, max 200) | `RecentRunRow[]` — latest-N reads, feeds the telescope bridge |
 | `GET` | `/ai-gateway/api/runs-page` | `page?` (default 1), `limit?` (default 25, max 200), `where[agentName\|status\|errorCode\|fromDay\|toDay]` | `GovernancePage<RecentRunRow>` — paginated, filterable runs for the Reliability table |
+| `GET` | `/ai-gateway/api/runs/:runId` | — | `RunDetailWithLabel` — the run, its thread's headline (actor-labeled) and its tool calls; `404` on an unknown run |
 | `GET` | `/ai-gateway/api/tool-calls` | `limit?` (default 50, max 200) | `ToolCallActivityRow[]` |
 | `GET` | `/ai-gateway/api/tool-calls-page` | `page?`, `limit?` (default 25, max 200), `where[toolName\|toolType\|status\|threadId\|fromDay\|toDay]` | `GovernancePage<ToolCallActivityRow>` — paginated, filterable tool-call activity |
 | `GET` | `/ai-gateway/api/tools` | `from?`, `to?` | `ToolStatRow[]` — per-tool calls/failed/rejected + p95 executionMs |
 | `GET` | `/ai-gateway/api/threads` | `limit?` (default 50, max 200) | `ThreadActivityRowWithLabel[]` |
+| `GET` | `/ai-gateway/api/threads/:threadId` | `messages?` (default 50, max 200), `runs?` (default 25, max 200) | `ThreadDetailWithLabel` — the thread, its runs and newest messages, with `runTotal` / `thread.messageCount` for what the caps hid; a soft-deleted thread comes back flagged `deleted: true`; `404` on an unknown thread |
 | `GET` | `/ai-gateway/api/threads-page` | `page?`, `limit?` (default 25, max 200), `where[actorRef\|title\|fromDay\|toDay]` (`title` is a case-insensitive substring match) | `GovernancePage<ThreadActivityRowWithLabel>` |
 | `GET` | `/ai-gateway/api/approvals` | `limit?` (default 50, max 200) | `PendingApprovalRow[]` — tool calls sitting `pending_approval`, oldest first |
+| `GET` | `/ai-gateway/api/approvals-page` | `page?`, `limit?` (default 25, max 200), `where[toolName\|threadId\|actorRef\|agentName\|fromDay\|toDay]` | `GovernancePage<PendingApprovalRow>` — the inbox with a `total`, oldest first |
 | `POST` | `/ai-gateway/api/approvals/:toolCallId` | `{ approved: boolean; reason?: string }` | `204 No Content` — decides a pending HITL tool call, attributed to the resolved decider (see below) |
 | `GET` | `/ai-gateway/api/pricing` | — | `CurrentModelPrice[]` |
 | `POST` | `/ai-gateway/api/pricing` | `{ modelId; inputPricePer1m; outputPricePer1m; cacheWritePricePer1m?; cacheReadPricePer1m? }` | sets a model's current price; `400` on a malformed body |
 | `GET` | `/ai-gateway/api/stream` | — | SSE — `{ data: LiveAgentEvent }`, one frame per `aviary:agent:*` diagnostics event |
+
+The inbox lists blocking approvals (tool calls in `pending_approval`). Pending
+[action proposals](/docs/agent/guides/action-proposals) are not in it; decide those through the
+thread's action-proposal routes or `AGENT_APPROVAL_PORT.approveActionProposal`.
+
+When the dashboard is configured with `dashboardAuth`, it also mounts `<basePath>/auth/*`, outside its
+own guards: `GET`/`POST /auth/login` (a server-rendered login form) and `POST /auth/logout` for the
+`login` mode, `POST /auth/session` (the host frontend exchanges its own auth for the dashboard cookie)
+and `GET /auth/session-required` for the `session` mode. A mode's routes `404` when it is not listed
+in `auth.modes`, and all of them `404` without `dashboardAuth`. See
+[`packages/dashboard`](/docs/agent/packages/dashboard).
 
 `GovernancePage<T>` is `{ rows: T[]; page: number; pageSize: number; total: number }` (real `COUNT` + offset, deterministic id tiebreaks); an unknown `where` field `400`s naming it. `LiveAgentEvent` is `{ event: string; ts: number; payload: Record<string, unknown> }` — see [Diagnostics events](/docs/agent/reference/diagnostics-events) for the `event` names and `payload` shapes.
 

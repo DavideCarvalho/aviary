@@ -5,6 +5,7 @@
     "tools",
     "identity-and-authorization",
     "human-in-the-loop-and-durability",
+    "action-proposals",
     "asking-the-user",
     "skills",
     "memory",
@@ -25,6 +26,7 @@
     "chat-components",
     "generative-ui",
     "component-rendering",
+    "rendering-everywhere",
     "governed-sql"
   ]
 }

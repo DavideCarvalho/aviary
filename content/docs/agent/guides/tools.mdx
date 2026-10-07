@@ -98,6 +98,9 @@ Every option lives on the `@AiTool({ … })` object.
 | `roles` | `string[]` | no | Roles allowed to invoke. Omit to inherit the module's `defaultRoles` — `[]` by default, i.e. any resolved actor (an anonymous visitor included). |
 | `ability` | `string` | no | An authz ability checked by an ability-aware policy instead of `roles`. |
 | `presentation` | `ToolPresentation` | no | How a chat talks about the tool without naming it. Never shown to the model. See [How a chat talks about a tool](#how-a-chat-talks-about-a-tool). |
+| `enabled` | `boolean \| () => boolean \| Promise<boolean>` | no | Whether the tool exists in this deployment, checked every turn before the role gate. `false` hides it from the model. When the answer needs DI, implement `isEnabled()` on the class instead. |
+| `terminal` | `boolean` | no | The turn ends once a call to this tool succeeds, with no model call to narrate it. See [Generative UI](/docs/agent/guides/generative-ui#3-pushing-from-your-own-tools-ctxemitui). |
+| `replacementKey` | `string \| (input, ctx) => string \| undefined` | no | Under [independent approvals](/docs/agent/guides/action-proposals#expiry-remembering-and-replacement), a new pending proposal supersedes pending ones with the same key. |
 
 <Callout type="info" title="Standard Schema, not just Zod">
 `input` is a [Standard Schema](https://standardschema.dev), so Zod, Valibot, and ArkType all work.
@@ -153,7 +156,7 @@ sentence that mentions it:
 | `label` | Noun phrase: "Database query". Also what a phrase falls back to while its slots are still empty. |
 | `running` / `done` | Sentence templates. A `{slot}` with nothing behind it collapses with the space before it, so `"Reading {bucket}"` degrades to `"Reading"`, never to braces. |
 | `icon`, `detail`, `tone` | Glyph key, one explanatory line, `neutral` / `destructive`. |
-| `confirm` | `{ title, verb, detail? }` — the approval prompt for an `action` tool, templated over the input. |
+| `confirm` | `{ title, verb, detail? }` — the approval prompt for an `action` tool, templated over the input. A [preflight](#preflight-checking-an-action-before-and-after-approval) can replace it for one call. |
 | `result` | How the output reads as content: `{ kind: 'metrics', fields }`, `{ kind: 'table', rows, columns, empty? }`, `{ kind: 'log', lines }`, `{ kind: 'note', text }`, or `{ kind: 'elsewhere' }` when it is drawn somewhere else already. Every variant names dotted paths, never shapes. |
 
 `GET /agent/tools?agent=<name>` serves `{ name, kind, presentation? }` for the tools the caller can
@@ -277,6 +280,55 @@ export class OrdersModule {}
   converters and add the two fields. `messages` overrides the three sentences the tool says to the
   model (`{minutes}` is replaced in `confirm`).
 
+### Preflight: checking an action before and after approval
+
+An `action` tool can implement `preflight(input, ctx, { phase })`, a **read-only** check of your
+domain state. It runs after authorization and input validation, twice:
+
+- `phase: 'prepare'`: before the approval prompt is shown.
+- `phase: 'execute'`: right before `execute`, after the approval.
+
+```ts
+@AiTool({
+  kind: 'action',
+  description: 'Refund an order.',
+  input: z.object({ orderId: z.string() }),
+  presentation: { label: 'Refund', confirm: { title: 'Refund order {orderId}?', verb: 'Refund' } },
+})
+export class RefundOrderTool implements ToolHandler<{ orderId: string }> {
+  constructor(private readonly orders: OrdersService) {}
+
+  async preflight({ orderId }: { orderId: string }, ctx: AiToolCtx, { phase }: ToolPreflightOptions) {
+    const order = await this.orders.find(orderId, ctx.actor);
+    if (!order) return { status: 'denied', reason: 'No such order' } as const;
+    if (order.refundId) return { status: 'completed', output: { refundId: order.refundId } } as const;
+    return phase === 'prepare'
+      ? ({
+          status: 'ready',
+          confirmation: { title: `Refund ${order.total} to ${order.customer}?`, verb: 'Refund' },
+        } as const)
+      : ({ status: 'ready' } as const);
+  }
+
+  async execute({ orderId }: { orderId: string }, ctx: AiToolCtx) {
+    return this.orders.refund(orderId, { idempotencyKey: ctx.idempotencyKey });
+  }
+}
+```
+
+| Result | Effect |
+| --- | --- |
+| `{ status: 'ready', confirmation? }` | Go on: show the prompt, or run. A `confirmation` (`{ title, verb, detail? }`, plain strings, not templates) replaces `presentation.confirm` for this call. It is streamed on `approval-requested`, stored on the tool call and shown again after a reload. |
+| `{ status: 'denied', reason }` | Nothing runs and nobody is asked. The model gets the reason as a refusal. |
+| `{ status: 'completed', output }` | The work is already done: `output` is the call's result, with no approval and no `execute`. The tool's `present` hook still runs on it. |
+
+The result of each phase is journaled, so a durable replay takes the same branch and never reruns a
+denied mutation. The `execute` phase also runs when the tool is invoked through `registry.invoke`
+or the [MCP server](/docs/agent/packages/mcp-server). Neither a remembered approval nor the approval
+policy skips it. `read` tools have no preflight.
+
+A functional tool passes `preflight` next to `execute` in `defineTool({ … })`.
+
 ---
 
 ## Several `read` calls at once
@@ -289,17 +341,29 @@ line is drawn there.
 
 ## The `ToolHandler` interface
 
-The contract is one method:
+The contract is one required method, plus optional hooks:
 
 ```ts
-export interface ToolHandler<I = unknown> {
-  execute(input: I, ctx: AiToolCtx): Promise<unknown>;
+export interface ToolHandler<I = unknown, O = unknown> {
+  execute(input: I, ctx: AiToolCtx): Promise<O>;
+  present?(output: O, ctx: AiToolCtx): ComponentPresentation | ComponentPresentation[] | undefined; // or a Promise of it
+  preflight?(input: I, ctx: AiToolCtx, options: { phase: 'prepare' | 'execute' }): ToolPreflightResult<O>;
+  isEnabled?(): boolean | Promise<boolean>;
+  canUse?(actor: Actor): boolean | Promise<boolean>;
+  describe?(scope: ToolDescribeScope): ToolDescription | undefined; // or a Promise of it
 }
 ```
 
 - `input` — the parsed, schema-validated input (the `I` generic).
 - `ctx` — the per-invocation `AiToolCtx` (below).
 - return — anything JSON-serializable; it's fed back to the model as the tool result.
+- `present` turns a successful result into components. See
+  [Component registries and server rendering](/docs/agent/guides/component-rendering) and
+  [One answer, every surface](/docs/agent/guides/rendering-everywhere).
+- `preflight` checks an `action` before and after approval. See [above](#preflight-checking-an-action-before-and-after-approval).
+- `isEnabled` and `canUse` are the per-turn gates (see [Authorization gates](#authorization-gates)).
+- `describe` changes what the model is told about the tool for one turn (the genui tools use it for
+  per-tenant catalogs and [UI capabilities](/docs/agent/guides/rendering-everywhere#what-changes-for-the-model)).
 
 Throwing from `execute` surfaces the error to the loop rather than crashing the turn — return a
 structured error shape if you want the model to reason about the failure.
@@ -338,10 +402,14 @@ globals. It's the same context whether the turn runs inline or as a durable work
 | `runId` | `string` | This turn's run id. |
 | `requestId` | `string` | The originating request id. |
 | `agentName` | `string?` | The name of the agent running this turn — provenance a tool can scope on (e.g. capability sets). |
+| `persona` | `string?` | The [persona](/docs/agent/guides/personas) the turn runs under, when it runs under one. |
 | `pageContext` | `PageContext?` | Host-supplied context about where the turn was started. |
 | `host` | `unknown?` | An optional host handle (e.g. an ORM `EntityManager`) the app threads through. |
 | `toolCallId` | `string?` | The id of the tool call this invocation serves. Absent outside a turn (the MCP server, a direct `registry.invoke`). |
 | `idempotencyKey` | `string?` | `<runId>:<toolCallId>` — the same for every execution of this call, and for no other. See [Making a tool safe to run twice](#making-a-tool-safe-to-run-twice). |
+| `emitUi` | `(component, props, options?) => Promise<{ id }>` | Push a component into the answer. Always present; a no-op where there is no conversation. See [Generative UI](/docs/agent/guides/generative-ui#3-pushing-from-your-own-tools-ctxemitui). |
+| `uiCapabilities` | `UiCapabilities?` | The components the client said it can draw, when it said. See [One answer, every surface](/docs/agent/guides/rendering-everywhere). |
+| `onPresentationError` | `(error, { toolName }) => void` | Set by a host to hear about a `present` hook that failed after a successful `execute`. |
 
 The actor is the load-bearing field, and the only source of identity: read `ctx.actor.id` and
 `ctx.actor.tenantRef` rather than any top-level shorthand. Never derive scope from tool input — derive
@@ -409,7 +477,9 @@ export class ListUsersTool implements ToolHandler { /* … */ }
 <Tab value="ability">
 Delegated policy. With `AgentAuthzModule` wired, `ability` is checked via
 `gate.forUser(actor).allows(ability)` — your `@dudousxd/nestjs-authz` abilities decide. Tools
-without an `ability` fall back to the role policy, so non-authz apps are unaffected.
+without an `ability` fall back to the role policy, so non-authz apps are unaffected. Without
+`AgentAuthzModule`, a tool that declares an `ability` and no `roles` is refused: the built-in policies
+cannot evaluate an ability, so it fails closed.
 
 ```ts
 @AiTool({

@@ -152,9 +152,9 @@ original stream.
 | `tool-output-error` | `id`, `error: string` | `tool-output-error` — the call failed, effects unknown |
 | `tool-output-denied` | `id`, `reason?` | `tool-output-denied` — a person said no; nothing ran |
 | `elicitation` | `id`, `request: { preamble?, questions[] }` | opens an `ask` tool call carrying the questions (see [Asking the user](#asking-the-user)) |
-| `approval-requested` | `id`, `approver: string`, `expiresAt?: string`, `reason?: string` | `data-approval-requested` part (id = call id) + native `tool-approval-request` (`approvalId` = call id); the tool part moves to `state: 'approval-requested'` |
+| `approval-requested` | `id`, `approver: string`, `expiresAt?: string`, `reason?: string`, `confirmation?: { title, verb, detail? }`, `target?: { kind: 'proposal', proposalId }` | `data-approval-requested` part (id = call id) + native `tool-approval-request` (`approvalId` = call id); the tool part moves to `state: 'approval-requested'` |
 | `approval-settled` | `id`, `status: 'approved' \| 'rejected' \| 'expired'`, `approver?`, `decidedBy?`, `decidedVia?`, `remember?: boolean`, `reason?` | `data-approval-settled` part (id = call id); folded into the call's `approval` by the transcript. The call's own state still moves on its output frame |
-| `ui` | `id`, `component: string`, `props: object`, `version?: number` | `data-ui` part (id = component id); a repeat `id` replaces the component in place. Closes the open prose so later text renders after it |
+| `ui` | `id`, `component: string`, `props: object`, `version?: number`, `fallbackText?: string`, `componentVersions?: Record<string, number>`, `toolCallId?: string` | `data-ui` part (id = component id); a repeat `id` replaces the component in place. Closes the open prose so later text renders after it |
 | `title` | `title: string` | transient `data-title` (not stored on the message); `useAgentChat({ onTitle })` |
 | `cancelled` | — | transient `data-cancelled`. Send it as the last frame before `done` when someone stopped the run, so a reader can tell a truncated answer from a complete one |
 | `queue` | `queue: { items, paused }`, `started?: { messageId, runId }` | transient `data-queue`. A snapshot of the thread's [message queue](/docs/agent/guides/message-queue) — on every change while this run holds the thread, and, with `started`, as the last frame before the terminal when the thread passes to the next queued message (attach with `GET /agent/chat/:runId/stream`). `useAgentChat` keeps `chat.queue` from it |
@@ -170,6 +170,19 @@ or without `approval-requested`. The frame adds who may decide and until when:
   a role or team name. A client uses it to show "waiting on an admin" instead of buttons the viewer
   cannot use.
 - `expiresAt` is ISO-8601. Absent → the request does not lapse.
+- `confirmation` is this call's prompt, already resolved by the tool's
+  [preflight](/docs/agent/guides/tools#preflight-checking-an-action-before-and-after-approval) or
+  from `presentation.confirm`. Render it as is; it wins over the catalog's templates and is stored
+  on the call, so a reload shows the same words.
+- `target: { kind: 'proposal', proposalId }` marks an
+  [independent approval](/docs/agent/guides/action-proposals). Decide it through
+  `POST <base>/threads/:threadId/action-proposals/:proposalId/approve` / `reject`, not the
+  `tool-call` routes. The run does not wait: the call's output is
+  `{ proposalId, status: 'pending', executed: false }` and the stream goes on to the end of the turn.
+  A later message that decides the proposal by text ("yes", "no #id") opens no stream:
+  `POST <base>/chat` answers `200 { threadId, proposalDecision, text }` as JSON, which the React
+  client surfaces as a transient `data-proposal-decision` part and follows by re-reading the
+  proposals.
 - A client that checked `part.state === 'input-available'` to find pending calls must also accept
   `'approval-requested'` once a runner sends this frame; `TranscriptToolCall.isAwaitingApproval`
   already covers both.
@@ -298,6 +311,14 @@ is a key into the client's own registry (the library ships none); `props` must b
 persisted. Emitting the same `id` again (e.g. streaming rows into a table) updates it; it never
 duplicates it.
 
+`fallbackText` is the component's text from the server catalog, for a client that cannot draw it
+(an unknown name, a removed renderer, a changed version). `componentVersions` lists the version of
+every component in a `genui:tree`. `toolCallId` places the component next to the call that pushed it.
+
+A client that declared [`uiCapabilities`](/docs/agent/guides/rendering-everywhere) receives no `ui`
+frame for a component it left out: that component's text arrives as ordinary `text` frames instead,
+and is stored as an assistant message.
+
 ## Tool catalog
 
 `GET /agent/tools?agent=<name>` returns `{ name, kind, presentation? }[]` for the tools the caller can
@@ -316,9 +337,9 @@ message may carry, per step:
 |---|---|
 | `reasoning?: string` | a `reasoning` part, placed before the text |
 | `reasoningMs?: number` | that part's `providerMetadata.agent.reasoningMs` (the transcript's `durationMs`) |
-| `ui?: { id, component, props, version? }[]` | `data-ui` parts, first-seen order, last props per `id` |
-| `approvals?: { toolCallId, approver, expiresAt?, status, remember?, decidedBy?, decidedVia?, reason? }[]` | a `data-approval-requested` part per entry, plus a `data-approval-settled` part once `status` is not `pending` — the same parts the live frames become |
-
+| `ui?: { id, component, props, version?, fallbackText?, componentVersions?, toolCallId? }[]` | `data-ui` parts, first-seen order, last props per `id` |
+| `approvals?: { toolCallId, approver, expiresAt?, status, remember?, decidedBy?, decidedVia?, reason?, confirmation?, target?, proposalId? }[]` | a `data-approval-requested` part per entry, plus a `data-approval-settled` part once `status` is not `pending` — the same parts the live frames become |
+| `actionProposalOutcome?: { proposalId, decision, executionStatus?, result?, error?, ui, text?, … }` | the fact an [action proposal](/docs/agent/guides/action-proposals) admitted into the thread when it settled; `useAgentChat` merges it into the transcript |
 | `feedback?: { value: 'up' \| 'down', comment?, updatedAt }` | `message.metadata.feedback` (a merged turn reads its last row's) — what `useMessageFeedback` shows |
 
 A runner serving these routes should persist the same values it streamed, so a reload shows what

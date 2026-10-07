@@ -41,6 +41,10 @@ browser.
 | `validateTree`, `treeJsonSchema`, `treeToText`, `treeToFlatSpec` | Tree mode: validation, the tool's input schema, text, json-render flat spec. |
 | `showToolJsonSchema`, `GENUI_SHOW_TOOL` | The generic show tool's input schema and default name (`ui__show`). |
 | `GENUI_TREE_COMPONENT` | `'genui:tree'` — the component name a tree frame is pushed under. |
+| `UiCapabilities`, `validateUiCapabilities(value)` | What a client declares it draws, `{ components: { name, version }[] }`, and its strict validator (throws `TypeError`). |
+| `negotiateCatalog(catalog, capabilities?)` | The catalog narrowed to the declared components, matched by name and exact version. `undefined` returns the catalog unchanged. |
+| `prepareUiEmission(catalog, capabilities, component, props, version?)` | Validates one emission against the trusted catalog and returns `{ kind: 'ui', …, fallbackText }` or `{ kind: 'text', text }`. What `ctx.emitUi` uses. See [One answer, every surface](/docs/agent/guides/rendering-everywhere). |
+| `validatePresentationBatch`, `snapshotComponentPresentation` | Check what a `present` hook returned; snapshot a presentation to plain JSON. |
 | `/builtins` | `BUILTIN_COMPONENTS` (DataTable, Chart, KpiCards, SourceCards, Checklist, Timeline, CodeBlock, Diff, Callout) and `LAYOUT_COMPONENTS` (Stack, Card, Heading, Text, Badge, Link, Image) — definitions only. |
 
 ### `genuiTools` / `AgentGenuiModule` options
@@ -75,7 +79,7 @@ A genui tool returns `{ shown, id }` to the model: what it pushed, and the frame
 
 | Export | What it is |
 |---|---|
-| `GenuiProvider` | `{ registry, catalog?, resolveComponent?, fallback?, loading?, onError?, treeRenderer? }` at the root. `MessageItem` / `MessageList` draw pushed components inside it with no `renderUi`. |
+| `GenuiProvider` | `{ registry, catalog?, resolveComponent?, fallback?, loading?, onError?, treeRenderer? }` at the root. Without `fallback`, a component that cannot be drawn shows its stored `fallbackText`. `MessageItem` / `MessageList` draw pushed components inside it with no `renderUi`. |
 | `GenerativeUI` | `<GenerativeUI part />` — one pushed component, with the provider's settings; its own props win. |
 | `useGenerativeUI(part, options?)` | The state (`ready` / `loading` / `problem`) for custom chrome. |
 | `useGenuiProvider()` | The provider's settings. |

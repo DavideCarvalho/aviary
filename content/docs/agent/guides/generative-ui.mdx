@@ -13,7 +13,8 @@ carries it and persists it. How it looks is always up to your app.
 ```text
 server                      stream                          client
 catalog ──► tool validates ──► { kind: 'ui', id, component, ──► registry[component]
-            ctx.emitUi          props, version? }                (your renderer)
+            ctx.emitUi          props, version?,                 (your renderer)
+                                fallbackText? }
                                    │
                                    └─► persisted on the message → reload shows the same thing
 ```
@@ -40,6 +41,10 @@ different looks can share one catalog.
 </Callout>
 
 For result-driven UI, use the tool’s optional `present` hook. See [Component registries and server rendering](/docs/agent/guides/component-rendering) for functional/class tools, custom components, shared React renderers, and WhatsApp image/PDF delivery.
+
+The same component reaches clients that cannot draw it as text. A client declares the components it
+renders (`uiCapabilities`), and the server sends the rest as their `fallbackText`. See
+[One answer, every surface](/docs/agent/guides/rendering-everywhere).
 
 ## 1. A catalog
 
@@ -69,8 +74,11 @@ defines and versions for itself (see [per-request catalogs](#per-request-catalog
 props go through a small built-in validator by default. Pass `ajvValidator(new Ajv())` to
 `defineCatalog` for the whole spec.
 
-`fallbackText` is what a channel that cannot draw the component shows (Slack, email, a CLI):
-`componentToText(catalog, component, props)`.
+`fallbackText` is what a channel that cannot draw the component shows (Slack, email, WhatsApp, a
+CLI): `componentToText(catalog, component, props)`. The server stores it on every pushed component,
+and sends it **instead of** the component to a client whose
+[`uiCapabilities`](/docs/agent/guides/rendering-everywhere#declaring-what-a-client-can-draw) do not
+list it. `version` (default `1`) is what a client's declaration has to match.
 
 ## 2. The server: `AgentGenuiModule`
 
@@ -176,7 +184,9 @@ A boot-time tool list cannot name a component that only one tenant has, so reach
 through the **tree** tool or the generic **show** tool (`showTool: true`, named `ui__show`): one
 tool taking `{ component, props }`, whose description and input schema list the tenant's components
 for that turn. Per-component tools still work for components every tenant shares; one the resolved
-catalog lacks is described to the model as unavailable, and refused if called.
+catalog lacks is left out of that turn's tool list, and refused if called anyway. The same per-turn
+narrowing applies to the client's
+[`uiCapabilities`](/docs/agent/guides/rendering-everywhere#what-changes-for-the-model).
 
 In a test, `overrideProvider(GenuiCatalogResolver).useValue({ resolve: () => testCatalog })`.
 
@@ -206,6 +216,10 @@ export class ForecastTool { // name: forecast, kind: read
 - **Always there.** `ctx.emitUi` is on every `AiToolCtx`. Where there is no conversation to push
   into (the MCP server, a bare `registry.invoke`) it is a no-op that still resolves to an id, so a
   tool never checks for it.
+- **Validated by the server.** With `AgentGenuiModule` installed, the component must be in the
+  catalog (or the resolver's catalog) and its props must validate, or the call throws. A component
+  the client did not declare in `uiCapabilities` goes out as its text instead. See
+  [What changes for your tools](/docs/agent/guides/rendering-everywhere#what-changes-for-your-tools).
 - **Live.** The frame streams while the tool runs, in the inline runner, the durable runner, and on
   the worker that serves a dispatched tool step.
 - **Persisted.** When the step's tools have settled, the loop writes every component of the step
@@ -264,7 +278,10 @@ without `AgentProvider` or a subtree with its own registry.
   at the exact version a message was rendered with. It is cached, and it may be async (`loading`
   shows meanwhile).
 - Every item, and every tree node, has its own error boundary. An unknown component, invalid props
-  or a renderer that throws each end up in your `fallback`.
+  or a renderer that throws each end up in your `fallback`. Without a `fallback`, the item's stored
+  `fallbackText` is shown.
+- Tell the server what this app draws with `<AgentProvider uiCapabilities={{ components: [...] }}>`.
+  It is not derived from `registry`. Omitted, the server offers and sends every catalog component.
 - `genui:tree` frames render node by node through the same registry.
 
 For your own transcript markup, `<GenerativeUI part={block} />` draws one component with the
