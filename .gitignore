@@ -16,6 +16,10 @@
 /content/docs/notifications/
 /content/docs/telescope/
 /content/docs/resilience/
+/content/docs/agent/
+/content/docs/authz/
+/content/docs/context/
+/content/docs/diagnostics/
 
 # test & build
 /coverage
