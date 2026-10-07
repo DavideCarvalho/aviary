@@ -14,8 +14,10 @@ wire protocol.
 
 ```ts
 interface AgentRunner {
-  start(input: AgentRunInput): Promise<{ runId: string }>;
-  signal(runId: string, toolCallId: string, decision: Decision): Promise<void>;
+  start(input: AgentRunInput, options?: { runId?: string }): Promise<{ runId: string }>;
+  isRunActive?(runId: string): Promise<boolean>;
+  // HumanReply = Decision (approve/reject an action) | ElicitationReply (answers to an `ask`)
+  signal(runId: string, toolCallId: string, reply: HumanReply): Promise<void>;
   cancel(runId: string): Promise<void>;
 }
 ```
@@ -43,6 +45,16 @@ behaviour, including what each runner does about a turn parked on a human.
 
 `AgentModule.forRoot` binds `InlineAgentRunner` to the `AGENT_RUNNER` token unless `durable: true` is
 set — inline is the real, zero-dependency default, not a fallback.
+
+<Callout type="info" title="Independent approvals don't park a turn under either runner">
+With `actionApprovalMode: 'independent'`, an `action` call is recorded as an action proposal and the
+turn ends — nothing waits on `signal`. Approved proposals are executed by an `ActionProposalWorker`
+that the module starts and stops with the application (not on `surface: 'http'`), tuned by
+`actionProposalWorker: { pollIntervalMs = 1000, leaseMs = 30000, maxConcurrency = 1 }` (positive
+integers; the poll interval must be under a third of the lease). Several workers coordinate through
+database leases. A durable run journaled before the mode was enabled keeps blocking. See
+[Action proposals](/docs/agent/guides/action-proposals).
+</Callout>
 
 ## When to pick which
 

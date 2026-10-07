@@ -39,7 +39,9 @@ export class AppModule {}
 ```
 
 Every file attached to `knowledge-base` is now chunked, embedded, and indexed with
-`{ mediaId, ownerType, ownerId, collection }` metadata; deleting the record removes its chunks.
+`{ mediaId, ownerType, ownerId, collection, size }` metadata (`size` is the real byte length, the
+fingerprint the reconciler compares); deleting the record removes its chunks. Add your own keys
+(e.g. an ACL `audience`) with `metadata: (event) => ({ … })` — merged over the defaults.
 
 <Callout type="warn" title="Owner comes from the server, never the client">
   The owner stamped onto each chunk is taken from the **server-side attach record**
@@ -51,14 +53,21 @@ Every file attached to `knowledge-base` is now chunked, embedded, and indexed wi
 
 | Export | What it is |
 |---|---|
-| `AgentMediaIngestionModule.forRoot(options)` | Registers `AgentMediaIngestionService`, which subscribes to the media channels on boot. Options: `{ readFile, embedder, store, collections?, extractor?, chunk?, maxBytes? }`. |
-| `AgentMediaIngestionService` | The subscriber. `settle()` awaits in-flight ingestion (graceful shutdown / tests); `handleAttach` / `handleDelete` are the ingest entry points. |
-| `ingestMediaFile(event, deps)` | The pure ingest function — size-gate → read → extract → `remove` → chunk → embed → upsert. Run it inside a durable workflow if you want at-least-once. |
+| `AgentMediaIngestionModule.forRoot(options)` | Registers `AgentMediaIngestionService`, which subscribes to the media channels on boot. Options: `{ readFile, embedder, store, collections?, extractor?, chunk?, maxBytes?, statFile?, metadata?, conversions?, enqueue? }`. |
+| `AgentMediaIngestionService` | The subscriber. `settle()` awaits in-flight ingestion (graceful shutdown / tests); `handleAttach` / `handleDelete` / `handleConversion` are the entry points. |
+| `ingestMediaFile(event, deps)` | The pure ingest function — size-gate (`statFile` if given) → read → real-size check → extract → `remove` → chunk → embed → upsert. Returns `{ status: 'ingested' \| 'skipped', … }`; throws on failure. |
 | `removeMedia(event, { store })` | The delete-sync half — drops a record's chunks. |
-| `reconcileMediaRag(query, deps)` | Drift repair — diff a `MediaSource` against the index, ingest what's missing, remove orphans. |
-| `applyMediaIngestJob(job, deps)` | Runs one `MediaIngestJob` — call it from your durable worker when using the `enqueue` hook. |
-| `TextExtractor` / `MimeTextExtractor` / `defaultTextExtractor()` | Bytes → text, dispatched by mime type. `text/*`, JSON, HTML shipped; register your own for PDF/DOCX. |
-| `MediaAttachEvent` / `MediaDeleteEvent` | The channel payload shapes (mirroring media's `AttachPayload` / `DeletePayload`). |
+| `reconcileMediaRag(query, deps)` | Drift repair — diff a `MediaSource` against the index; returns `{ ingested, reingested, removed }` (document ids). |
+| `applyMediaIngestJob(job, deps)` | Runs one `MediaIngestJob` and throws on failure — call it from your durable worker when using the `enqueue` hook, so the queue retries. |
+| `runMediaIngestJob(job, deps)` | Same, but never throws: returns a `MediaIngestOutcome` and publishes `media.failed` with the failing phase (`kind`: `read` / `extract` / `embed` / `store` / `unknown`) and the original error as `cause` (in-process only). |
+| `mediaIngestFailureKind(error)` | The failing phase of an error thrown by `ingestMediaFile` / `applyMediaIngestJob`, for your own retry policy. |
+| `TextExtractor` / `MimeTextExtractor` / `defaultTextExtractor()` | Bytes → text, dispatched by mime type (media type only, case-insensitive). `text/*`, JSON, HTML shipped; register your own for PDF/DOCX. Unregistered types throw `UnsupportedMimeTypeError` → skipped. |
+| `MediaAttachEvent` / `MediaDeleteEvent` / `MediaConversionEvent` | The channel payload shapes (mirroring media's `AttachPayload` / `DeletePayload` / conversion payload). |
+
+`maxBytes` defaults to 25 MB. `MediaAttachEvent.size` is a declared value and can only reject early;
+the real byte length is re-checked after the read. Wire `statFile: (disk, path) => Promise<number>`
+(S3 `HeadObject`, `fs.stat`) so an oversized object is never downloaded — `reconcileMediaRag` uses it
+too, keeping its size fingerprint comparison real-vs-real.
 
 ## Owner-scoped retrieval
 
@@ -159,8 +168,8 @@ const { ingested, removed } = await reconcileMediaRag(
 It ingests media that isn't indexed yet, re-ingests media whose content changed (the indexed `size`
 fingerprint no longer matches — catching a file replaced while nobody was listening), and removes
 indexed documents whose media record is gone — touching only the difference, so it's cheap to run on
-a schedule or at boot. It leans on `VectorStore.listDocuments(filter?)` (new in `-rag`) to enumerate
-what's indexed for the owner.
+a schedule or at boot. The result also lists `reingested` ids. It uses
+`VectorStore.listDocuments(filter?)` to enumerate what's indexed for the owner.
 
 ## At-least-once ingestion
 
@@ -181,15 +190,28 @@ AgentMediaIngestionModule.forRoot({
 
 // in the durable worker — pass the same config object you gave the module:
 async function handle(job) {
-  await applyMediaIngestJob(job, { store, embedder, readFile });
+  await applyMediaIngestJob(job, { store, embedder, readFile }); // throws → the queue retries
 }
 ```
+
+If the enqueue call itself throws, the service logs it and publishes `media.failed`.
 
 ## Observability
 
 Each file emits an `aviary:rag:media.*` diagnostics event — `media.ingested` (with chunk count),
-`media.removed`, `media.skipped` (`unsupported-type` / `too-large` / `empty-text`), `media.failed`.
-The Telescope bridge captures them automatically.
+`media.removed`, `media.skipped` (`unsupported-type` / `too-large` / `empty-text`), `media.failed`
+(with `error` and, when a phase ran, `kind`). Payloads carry `mediaId`, `ownerType` and `ownerId`;
+outcomes of an attach also carry `collection`, `source`, `size` and `mimeType`. The Telescope bridge
+captures them automatically.
+
+## Chat attachments
+
+Files users attach in the chat through `AgentMediaAttachmentsModule` (`@dudousxd/nestjs-agent/media`)
+are media records too (`ownerType: 'agent-actor'`, `ownerId` = the actor's id, collection
+`agent-attachments` by default). With `indexForRag: true` that module publishes each ready attachment
+on `aviary:media:attach` (and its removal on `aviary:media:delete`), so this package indexes it like
+any other upload. Scope retrieval by owner (`FilteredRetriever` on `ownerType` / `ownerId`) and list
+the attachment collection in `collections`. See [File uploads](/docs/agent/guides/file-uploads).
 
 ## Related
 

@@ -61,7 +61,12 @@ export class SearchOrdersTool {
   description: 'Refund an order.',
   input: z.object({ orderId: z.string() }),
   roles: ['SUPPORT'], // only support staff may even see it
-  presentation: { label: 'Refund', running: 'Refunding {orderId}', confirm: { title: 'Refund {orderId}?', verb: 'Refund' } },
+  presentation: {
+    label: 'Refund',
+    running: 'Refunding {orderId}',
+    done: 'Refunded {orderId}',
+    confirm: { title: 'Refund {orderId}?', verb: 'Refund' },
+  },
 })
 export class RefundOrderTool {
   async execute({ orderId }: { orderId: string }, ctx) {
@@ -126,6 +131,7 @@ export function Chat({ threadId, onNavigate }: { threadId?: string; onNavigate: 
                     {call.description.phrase}
                     {call.isAwaitingApproval ? (
                       <>
+                        <p>{call.description.confirm?.title}</p>
                         <button disabled={!call.approve.available} onClick={() => call.approve.run()}>
                           {call.description.confirm?.verb ?? 'Approve'}
                         </button>
@@ -203,6 +209,7 @@ export function Chat({ threadId, onNavigate }: { threadId?: string; onNavigate: 
 |---|---|
 | `useAgentChat({ threadId })` | read the thread, seeded the history, re-attached to a turn still streaming (`history: false` / `resume: false` opt out) |
 | `transcript.items[…].blocks` | grouped the parts, bound approve / reject / answer / skip / stop / fork / regenerate to this chat, read the tool catalog for `call.description`, and read `metadata.createdAt` / `metadata.usage` for `timestamp` / `usage` |
+| `call.description.confirm` | the approval wording for this call: the `confirmation` the tool's `preflight` returned for it, else the `presentation.confirm` template filled from the input |
 | `composer.submit()` | sent the draft with the ready uploads as `{ mediaId }` refs, cleared both; `canSend` is false while empty, uploading or over quota (`blockedBy` says which). Mid-turn it queued the draft on the thread instead (`'busy'` only with `whileRunning: 'block'`) |
 | `transcript.queued` / `queue` | messages sent mid-turn, waiting server-side for the running turn; the chat attached to each as it started. `queue.move` / `edit` / `remove` / `resume` change what waits — see [Typing ahead](/docs/agent/guides/message-queue) |
 | `composer.files` | validated against the server's own limits (`GET /agent/config`), uploaded each file resumably, with progress and cancel |
@@ -215,9 +222,16 @@ Every piece is also a hook of its own — `useChatTranscript`, `useAttachments`,
 for a layout that splits them across components. Override any of the chat's wiring with
 `useAgentChat({ transcript: { … }, composer: { … }, blocked, model })`.
 
+An approval that should not hold the conversation — the refund decided later, by someone else — is
+`actionApprovalMode: 'independent'` on the server. Nothing changes in this component: the call's
+`approval.target` becomes a proposal, `useAgentChat` re-reads the thread's proposals after each turn
+and while one is pending or running, and `call.approve.run()` decides it through the proposal routes.
+See [Action proposals](/docs/agent/guides/action-proposals).
+
 <Callout type="info" title="Prefer the shipped components?">
 Replace the transcript and composer markup with `<MessageList messages={chat.messages} status={chat.status} queue={chat.queue} />`
-and `<ChatInput onSubmit={(text) => chat.sendMessage({ text })} />` — approvals and questions are
-actionable there too, and `genui` on the provider draws pushed components. See
-[Chat components](/docs/agent/guides/chat-components).
+and `<ChatInput onSubmit={(text) => chat.sendMessage({ text })} />`, and `genui` on the provider
+draws pushed components. `MessageList` does not draw tool calls (only through `renderToolPart`, which
+gets the raw part) or question sets, so keep the approval and question markup above, or install the
+registry's `AgentChat`, which draws both. See [Chat components](/docs/agent/guides/chat-components).
 </Callout>

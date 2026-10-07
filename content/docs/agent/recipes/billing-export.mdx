@@ -15,7 +15,7 @@ system, or you just don't want to stand up either shipped surface.
 
 ## The contract
 
-From [`governance-queries.ts`](https://github.com/dudousxd/nestjs-agent/blob/main/packages/core/src/spi/governance-queries.ts):
+From [`governance-queries.ts`](https://github.com/DavideCarvalho/nestjs-agent/blob/master/packages/core/src/spi/governance-queries.ts):
 
 ```ts
 /** Inclusive UTC day range, each YYYY-MM-DD. */
@@ -29,17 +29,22 @@ interface ActorSpendRow {
   requests: number;
   totalTokens: number;
   costUsd: number;
+  /** Distinct threads the actor used in the range. */
+  threadCount: number;
 }
 
 interface AgentGovernanceQueries {
   spendByModel(range: GovernanceRange): Promise<ModelSpendRow[]>;
   spendByActor(range: GovernanceRange): Promise<ActorSpendRow[]>;
+  /** Top threads by spend, highest cost first, capped at `limit`. */
+  spendByThread(range: GovernanceRange, limit: number): Promise<ThreadSpendRow[]>;
   usageTrend(range: GovernanceRange): Promise<UsageTrendPoint[]>;
   recentToolCalls(limit: number): Promise<ToolCallActivityRow[]>;
   recentThreads(limit: number): Promise<ThreadActivityRow[]>;
   // ...plus reliability (runMetrics/runsByAgent/runErrors/runTrend/recentRuns), toolStats,
-  // pendingApprovals, and paginated toolCallsPage/threadsPage/runsPage — all REQUIRED members
-  // an external adapter must implement (see the source link above for the full, current shape).
+  // pendingApprovals, paginated approvalsPage/toolCallsPage/threadsPage/runsPage, and the
+  // runDetail/threadDetail drill-downs — all REQUIRED members an external adapter must implement
+  // (see the source link above for the full, current shape).
 }
 ```
 
@@ -67,9 +72,10 @@ export class BillingExportService {
 
   async spendCsv(fromDay: string, toDay: string): Promise<string> {
     const rows = await this.governance.spendByActor({ fromDay, toDay });
-    const header = 'actorRef,requests,totalTokens,costUsd';
+    const header = 'actorRef,requests,totalTokens,threadCount,costUsd';
     const lines = rows.map(
-      (row) => `${row.actorRef},${row.requests},${row.totalTokens},${row.costUsd.toFixed(4)}`,
+      (row) =>
+        `${row.actorRef},${row.requests},${row.totalTokens},${row.threadCount},${row.costUsd.toFixed(4)}`,
     );
     return [header, ...lines].join('\n');
   }
@@ -113,7 +119,7 @@ Beyond the shipped surfaces, your app can query `AGENT_GOVERNANCE_QUERIES` for i
 export, or subscribe to the `aviary:agent:*` diagnostics channel for alerts and metrics — the
 library instruments nothing in your code, so neither integration point is off-limits. `spendByModel`
 and `usageTrend` follow the same `GovernanceRange` shape if you need a per-model or a daily-trend
-export instead.
+export instead; `spendByThread(range, limit)` gives the top-N threads by cost.
 </Callout>
 
 ---

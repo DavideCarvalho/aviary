@@ -302,8 +302,8 @@ tokens it already spent.
 
 ## When a processor throws
 
-It surfaces as `ProcessorFailedError`, carrying `phase` (`'input'` | `'output'`) and the processor's
-`name`:
+It surfaces as `ProcessorFailedError`, carrying `phase` (`'input'` | `'output'`), `processor` (the
+processor's `name`) and the original error as `cause`:
 
 ```text
 output processor "moderation" failed: judge timed out
@@ -312,6 +312,88 @@ output processor "moderation" failed: judge timed out
 Wrapped deliberately: the model call is the only other thing that can fail at that point in the turn,
 and a bare `TypeError` from a classifier that would otherwise read as the provider going down is the
 kind of ambiguity that costs an hour at 3am.
+
+## Guardrails
+
+`@dudousxd/nestjs-agent-core/guardrails` (re-exported as `@dudousxd/nestjs-agent/guardrails`) ships
+PII, secret, prompt-injection and tool-poisoning detection as a ready-made pair of processors:
+
+```ts
+import { createGuardrails } from '@dudousxd/nestjs-agent/guardrails';
+
+const guardrails = createGuardrails({
+  pii: 'redact',                 // reversible: the model sees [EMAIL_1], the reader the address
+  secrets: 'block',
+  injection: { threshold: 0.6 }, // default action: block
+  toolPoisoning: true,           // for guardrails.screenTool, see below
+  rules: (ctx) => rulesForTenant(ctx.actor?.tenantRef), // more rules, resolved per scan
+  onEvent: (event) => audit.write(event),               // hits carry fingerprints, never values
+  fingerprint: (value) => hmac(value),
+});
+
+AgentModule.forRoot({
+  model,
+  inputProcessors: [guardrails.input],
+  outputProcessors: [guardrails.output],
+});
+```
+
+Each shorthand takes an action (`'allow' | 'log' | 'redact' | 'approve' | 'block'`) or an object
+(`{ action, types?, stages? }`; `pii` also takes `restore`, default `true`). The loop has no approval
+flow for guardrails, so `approve` is enforced as `block`.
+
+| Stage | Seen by | `redact` | `block` / `approve` |
+|---|---|---|---|
+| `llm_request` (system, messages, earlier tool-call arguments) | `guardrails.input`, every step | placeholders, restorable | the run fails: `ProcessorFailedError` whose `cause` is a `GuardrailBlockedError` |
+| `tool_result` | `guardrails.input`, one result at a time (`match.tools` applies) | placeholders, restorable | the result is **withheld**: the model is told why and the turn goes on |
+| `llm_response` | `guardrails.output` | one-way placeholders; the thread's own placeholders are then restored | `reject`, so `OutputRejectedError` |
+| `tool_args` | `guardrails.output` (read-only there) and `guardrails.wrapTool(name, handler)` | only through `wrapTool` | the step is rejected, or `wrapTool` throws and the model reads the tool's failure |
+| `tool_description` | `guardrails.screenTool(tool)` | n/a | `{ allowed: false, reason }` |
+
+- **Streaming stays on.** `guardrails.output` declares `incremental` with a 256-character lookback.
+  `incremental: { lookbackChars }` widens it; `incremental: false` gates the whole answer.
+- **Placeholders live per thread** in a `VaultStore` (option `vaults`, default `InMemoryVaultStore`,
+  bounded to 1,000 threads). A run resumed in another process finds no vault, so its placeholders
+  reach the reader unrestored; the values still never reach the model. `Vault.toJSON()` /
+  `Vault.fromJSON()` back a shared store, which then holds the raw values.
+- **`wrapTool`** is the only place a tool's arguments can be rewritten: it restores the thread's
+  placeholders (the tool needs the address, not `[EMAIL_1]`) and runs the `tool_args` rules on what
+  the tool receives. That is why the `pii` shorthand does not cover `tool_args`; `secrets` does.
+- **Injection** is scored on what the user typed and what tools returned, not on your system prompt.
+- **Custom rules** are `{ id, stages, detectors, action, match?: { sources?, tools? }, when?, options? }`.
+  Detectors are `pii`, `secrets`, `injection`, `tool_poisoning`, `regex`, `keywords`, or
+  `{ kind: 'custom', name, detect }` for a classifier or LLM judge. A detector that throws follows the
+  rule's `options.failMode` (`'open'` by default).
+
+`onEvent` is awaited, and a throw from it is swallowed: an audit sink cannot change a decision. Each
+hit is reported once per turn, since every step re-sends the prompt.
+
+### Tool poisoning on MCP
+
+A remote tool's description never enters the transcript, so no processor sees it. `AgentMcpModule`
+takes a `screen` (module-wide, or per server) that runs on every listed definition before import;
+`screenTool` has its shape:
+
+```ts
+import { createGuardrails } from '@dudousxd/nestjs-agent-core/guardrails';
+
+const guardrails = createGuardrails({ toolPoisoning: true });
+
+AgentMcpModule.forRoot({
+  servers: [{ name: 'docs', transport: { type: 'http', url } }],
+  screen: guardrails.screenTool, // bound to its instance, so it can be passed as is
+});
+```
+
+A refused tool is skipped and logged, and a screen that throws skips the tool too. `McpToolsService.refresh()`
+re-screens. It is a heuristic, not a proof.
+
+### Without the loop
+
+Everything but `Guardrails` is standalone (no NestJS, no Node-only API), for a gateway proxying raw
+provider traffic: `scan`, `Vault`, `StreamGuard` (OpenAI / Anthropic stream chunks), the `*Slots`
+helpers, and the detectors `detectPii`, `detectSecrets`, `scoreInjection`, `scoreToolText`,
+`screenToolDefinition`.
 
 ## Building blocks
 

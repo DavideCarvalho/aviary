@@ -53,7 +53,7 @@ one that cost money to produce.
 |---|---|---|
 | `rule` | Deterministic, derived from the run alone. Free. | `RunCompletionScorer`, `ApprovalOutcomeScorer` |
 | `statistical` | An estimate over a corpus of past runs. Free, but only as good as the sample. | `ApprovalRiskScorer` |
-| `model` | LLM-as-judge. The expensive one. | `AnswerRelevancyScorer` |
+| `model` | LLM-as-judge. The expensive one. | `AnswerRelevancyScorer({ model, systemPrompt? })` — `model` is the judge's own `ModelProvider` |
 
 ---
 
@@ -80,17 +80,19 @@ An action that was approved and then crashed counts as **approved** — the huma
 the tool's own failure is `RunCompletionScorer`'s business.
 
 **`ApprovalRiskScorer`** turns the same corpus into a prediction: how likely is a human to reject
-what this run proposed, *before* anyone looks. It is smoothed with a Beta(1,1) prior, so a tool
-nobody has ever decided on sits at exactly `0.5` ("no evidence either way") and a single rejection
-never reads as certainty:
+what this run proposed, *before* anyone looks. The score is the smoothed probability that a human
+**approves** (`approvalPosterior`), so lower is riskier. It is smoothed with a Beta(1,1) prior, so a
+tool nobody has ever decided on sits at exactly `0.5` ("no evidence either way") and a single
+rejection never reads as certainty:
 
 ```text
 0 approved of 1  → 0.33      0 approved of 3  → 0.20      0 approved of 50 → 0.02
 ```
 
 A run scores as its **riskiest** proposed action, not the average — a turn proposing one tool humans
-reject nine times in ten is a risky turn no matter how many safe reads it made alongside. That makes
-it the sort order for a pending-approvals inbox.
+reject nine times in ten is a risky turn no matter how many safe reads it made alongside. Sorted
+ascending, that is the order for a pending-approvals inbox. `metadata` carries `riskiestTool` and the
+per-tool counts the number rests on.
 
 ```ts
 const prior = await loadApprovalPrior(governanceQueries, { fromDay: '2026-06-01' });
@@ -152,7 +154,7 @@ export class CitesSourcesScorer implements Scorer {
 
 For a model-graded scorer, `discardingSink()` gives you the sink a judge call needs (there is no live
 stream to join) and `parseJudgeVerdict()` reads a `SCORE: n` / `REASON: …` reply, normalizing the
-band to `0..1`. It **throws** on a reply it cannot read, which the batch records as a failure —
+band (`MAX_JUDGE_SCORE`, 5) to `0..1`. It **throws** a `JudgeVerdictError` on a reply it cannot read, which the batch records as a failure —
 scoring an unreadable judge as 0 would blame the agent for the judge's mistake.
 
 ---

@@ -228,7 +228,8 @@ and no default roles, or an explicitly empty list, is neither offered nor invoca
 policy yourself: `new ClosedRolesPolicy(defaultRoles)`
 (= `new DefaultRolesPolicy(defaultRoles, { emptyRoles: 'deny' })`),
 `closeEmptyRoles(policy)` around a policy you did not build, or
-`new AuthzRolesPolicy(gate, { emptyRoles: 'deny' })` for its role fallback. `emptyRoles` is ignored
+`new AuthzRolesPolicy(gate, { emptyRoles: 'deny' })` (or `AgentAuthzModule.forRoot({ emptyRoles: 'deny' })`)
+for its role fallback — the authz module does not read `AgentModule`'s `emptyRoles`. `emptyRoles` is ignored
 when you pass your own `rolesPolicy`; the default stays `'allow'`. The MCP server takes the same key
 for its surface alone — see [`-mcp-server`](/docs/agent/packages/mcp-server).
 
@@ -258,7 +259,8 @@ export class ListOrdersTool implements ToolHandler<{ limit: number }> {
 ```
 
 An actor with `roles: []` (e.g. a `HeaderActorResolver` request that sent no `x-actor-role`) intersects
-with nothing and can call no tools — the fail-closed default.
+with nothing, so it can call no tool that names `roles`. Tools that name none stay open to it unless
+`defaultRoles` is non-empty (or `emptyRoles: 'deny'` is set).
 
 ---
 
@@ -304,6 +306,11 @@ Under the hood `AgentAuthzModule` binds an `AuthzRolesPolicy` as the agent's `Ro
 - Tool **has no `ability`** → falls through to the built-in role policy (its `fallbackRoles` default to
   `[]` — no restriction — overridable via `AgentAuthzModule.forRoot({ fallbackRoles })`).
 
+`AgentModule` forwards to that policy whatever the import order, unless you also pass
+`AgentModule.forRoot({ rolesPolicy })`, which wins (boot warns when both are set). Without
+`AgentAuthzModule`, the built-in policies refuse a tool that declares an `ability` and no `roles`:
+they cannot evaluate an ability, so the tool fails closed instead of opening to everyone.
+
 <Callout type="info" title="The actor is all authz needs">
 The Gate is handed `{ id, roles }` derived from the actor — exactly what authz's default role resolver
 reads. No host user entity is required, so a role-based ability resolves from the same `roles` the
@@ -319,7 +326,7 @@ the root; otherwise the `Gate` provider is missing and DI fails at boot.
 
 ## The governance endpoints are ownership-scoped
 
-`POST /agent/tool-call/approve` · `/reject`, the `/agent/threads/:id` family (`GET`, `DELETE`,
+`POST /agent/tool-call/approve` · `/reject` · `/answer` · `/skip`, the `/agent/threads/:id` family (`GET`, `DELETE`,
 `POST .../fork-from/:messageId`), and `POST /agent/chat/:runId/cancel` resolve the acting actor via
 the same `ActorResolver` and assert they own the target thread, tool call, or run before acting on
 it: someone else's returns `403`, a missing one returns `404`. There's no path to approve, reject,

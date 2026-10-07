@@ -46,11 +46,12 @@ class — register it with the umbrella's `provideAgentTool` (or list it under
 | Export | What it is |
 |---|---|
 | `createExecuteSqlTool(deps: ExecuteSqlDeps)` | Assembles the guardrail pipeline; returns `{ spec: ToolSpec, handler: ToolHandler }`. |
-| `SqlValidator` | Layer 1 — AST-parses the statement, asserts it's exactly one `SELECT`, extracts the referenced base tables. |
+| `SqlValidator` | Layer 1 — AST-parses the statement (MySQL dialect, `node-sql-parser`), asserts it's exactly one `SELECT`, extracts the referenced base tables (CTEs, joins and subqueries walked). Throws `SqlValidationError`. |
 | `TableAccessPolicy` | The interface `GroupTableAccessPolicy` implements — `canAccess(roles, table): boolean`. |
-| `GroupTableAccessPolicy` | Layer 2 — a fail-closed, group-based table allowlist (`roleGroups` + `tablesByGroup`). |
-| `TenantScopeRewriter` | Layer 3 — AND-s `tenantColumn = '<tenantRef>'` into every scoped table's `WHERE`, or rejects what it can't statically verify. |
-| `injectLimit` | Layer 4 — wraps an un-`LIMIT`ed query in a bounding subquery. |
+| `GroupTableAccessPolicy` | Layer 2 — a fail-closed, group-based table allowlist (`roleGroups` + `tablesByGroup`; entries are exact names or `prefix_*` patterns). An unclassified table, unknown roles, or no roles are denied. |
+| `TenantScopeRewriter` | Layer 3 — `new TenantScopeRewriter({ tenantColumn, scopedTables })`. AND-s `tenantColumn = '<tenantRef>'` into the `WHERE` for each scoped table in every `SELECT`'s `FROM`/`JOIN`s, subqueries in the select list, `WHERE`, `HAVING` and `JOIN … ON` included; rejects a CTE, `UNION`/`INTERSECT`/`EXCEPT`, a subquery in `FROM` (at any depth), or an explicit predicate naming another tenant. An actor with no `tenantRef` is refused on a query that reads a scoped table, unless `onMissingTenant: 'passthrough'` lets it through unscoped. |
+| `injectLimit(sql, max)` | Layer 4 — wraps a query with no `LIMIT`, or a `LIMIT` above `max`, as `SELECT * FROM (<sql>) AS subq LIMIT <max>`. A `LIMIT` within `max` is left as is. |
+| `SqlValidationError`, `QueryRunner`, `ExecuteSqlResult`, `GroupTableAccessConfig`, `TenantScopeConfig`, `SqlValidationResult` | The error class and the supporting types. |
 
 `ExecuteSqlDeps`:
 
@@ -60,11 +61,18 @@ class — register it with the umbrella's `provideAgentTool` (or list it under
 | `tableAccess` | `TableAccessPolicy` | — | Required. The Layer 2 allowlist. |
 | `tenantScope` | `TenantScopeRewriter` | — | Optional. Omit only if `tableAccess` alone is sufficient isolation. |
 | `validator` | `SqlValidator` | fresh instance | Swap in a custom validator. |
-| `maxRows` | `number` | `100` | Row cap injected when the query has no `LIMIT`. |
+| `maxRows` | `number` | `100` | Row cap, injected when the query has no `LIMIT` and applied over a larger one. |
+
+The tool is registered as `executeSql` (`kind: 'read'`, input `{ sql: string }`) and returns
+`{ rows, rowCount, sql, truncated? }` — `sql` is the statement actually run, after rewriting. A result
+whose JSON exceeds 256 KB keeps the leading rows that fit and sets `truncated: true`.
 
 <Callout type="warn" title="Defense-in-depth, not a substitute for read-only credentials">
 Point `runner` at a read-only pool with a least-privilege DB user. The four guardrails (single-SELECT,
 table allowlist, tenant scoping, row cap) are the mechanism; a read-only connection is your backstop.
+Tenant scoping only constrains tables you list in `scopedTables`, and an existing tenant predicate
+counts even under an `OR` — for multi-tenant data, enforce tenancy in the database (views, row-level
+security) as well.
 </Callout>
 
 ## When to use it

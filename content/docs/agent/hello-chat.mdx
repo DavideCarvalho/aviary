@@ -67,9 +67,17 @@ The hook talks to the same origin under `/agent`. If the API lives elsewhere, wr
 
 <Callout type="info" title="What you get without writing it">
 Each browser is its own anonymous actor (an `HttpOnly` cookie), so `useThreads()` lists only that
-visitor's conversations. Pending approvals and questions in `MessageList` are actionable — they are
-settled through the same backend. Components ship no styles: pass `classNames`, or render your own
-markup off `chat.transcript` ([Bring your own UI](/docs/agent/guides/bring-your-own-ui)).
+visitor's conversations. Components ship no styles: pass `classNames`, or render your own markup off
+`chat.transcript` ([Bring your own UI](/docs/agent/guides/bring-your-own-ui)).
+</Callout>
+
+<Callout type="warn" title="MessageList does not draw tool calls or questions">
+`MessageList` renders text, reasoning, files and pushed components (through `renderUi` or a
+`<GenuiProvider>`). A tool call appears only through your `renderToolPart` / `renderToolGroup`,
+which get the raw part, and a question set not at all — so an `action` tool's approval has no button
+there unless your `renderToolPart` draws one (`chat.approve({ toolCallId })`). `chat.transcript` carries both with
+approve / reject / answer / skip already bound to the backend: render them from it, or install the
+registry's `AgentChat` ([Chat components](/docs/agent/guides/chat-components)), which draws them.
 </Callout>
 
 ## Next

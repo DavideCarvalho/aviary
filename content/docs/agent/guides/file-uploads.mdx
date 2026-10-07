@@ -108,7 +108,7 @@ The bytes never pass through the agent:
 | 3. Complete | `POST /agent/attachments/uploads/:mediaId/complete` → `MessageAttachment` | agent: checks the bytes landed at the declared size (`409` still missing, `422` wrong size) |
 | Remove | `DELETE /agent/attachments/uploads/:mediaId` | agent: aborts the session, deletes bytes and record |
 
-`remove` in `useAttachments` aborts step 2 and calls step 4. A failed upload is discarded the same
+`remove` in `useAttachments` aborts step 2 and sends the Remove request. A failed upload is discarded the same
 way. Refusals throw `MediaUploadError` with the HTTP `status` (`413`, `415`, …).
 
 The resumable routes are **the** upload path with this module. The buffered multipart
@@ -133,7 +133,8 @@ but it is not the documented path here. `GET /agent/attachments` lists attachmen
 ### Cleanup
 
 Records are created at step 1, so an upload abandoned half-way is still in the actor's inventory. It
-ages into `collectableAttachments` like any other unsent file. Delete it through the store so the tus
+ages into `collectableAttachments` like any other unsent file. A file on a message still waiting in a
+thread's [queue](/docs/agent/guides/message-queue) counts as referenced, so it is never offered. Delete it through the store so the tus
 session is aborted too:
 
 ```ts
@@ -243,3 +244,12 @@ need it only for `GET /agent/attachments` and for sweeping (see
   records and never from the request. The chat route accepts attachments only as `{ mediaId }` refs
   (anything more is a `400`).
 </Callout>
+
+## Limits the client reads
+
+`GET /agent/config` serves the rules in force as `attachments`:
+`{ enabled, upload: 'multipart' | 'resumable' | null, maxBytes, allowedContentTypes, maxPerMessage }`.
+`enabled` is false (and `upload` `null`) when no staging store is bound — `POST /agent/attachments`
+then answers `501`. `maxPerMessage` is 10: a send naming more attachments is refused with `400`.
+`useAttachments` (and `chat.composer.files`) takes its `accept`, `maxBytes` and `maxFiles` defaults
+from this answer; pass them to override. `useAgentConfig()` reads it for anything else.

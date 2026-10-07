@@ -12,11 +12,11 @@ others.
 
 | Layer | What it does | Where configured | Guide |
 |---|---|---|---|
-| Identity + authorization | Resolves the actor from the request — an anonymous identity per browser by default, your login when configured; gates each tool by role intersection or a delegated ability | `actorResolver` + per-tool `roles`/`ability` on `AgentModule.forRoot` | [Identity & Authorization](/docs/agent/guides/identity-and-authorization) |
+| Identity + authorization | Resolves the actor from the request — an anonymous identity per browser by default, your login when configured; gates each tool by role intersection or a delegated ability | `actorResolver`, `defaultRoles`, `emptyRoles` or `rolesPolicy` on `AgentModule.forRoot`, plus per-tool `roles`/`ability` | [Identity & Authorization](/docs/agent/guides/identity-and-authorization) |
 | Quota | Refuses a send (`429`) while the actor's budget — day/month, tokens/USD — is used up | `quota: { limits }` or `quota: yourQuotaProvider` on `AgentModule.forRoot`; omitted → reported, never enforced | [Cost & Governance](/docs/agent/guides/cost-and-governance) |
 | Cost | A usage row per model call, rolled into spend per model/actor/day; a gateway's reported cost wins, else a cache-aware token estimate | The store's `AgentGovernanceQueries` + a versioned `AgentModelPricing` table | [Cost & Governance](/docs/agent/guides/cost-and-governance) |
 | Reliability | Every run's start/end is durably recorded (success/failure, duration, retries, `promptHash`), independent of thread history | Automatic once the bound `AgentStore` implements the optional recording SPI (both bundled stores do) | [Cost & Governance](/docs/agent/guides/cost-and-governance) |
-| Approvals inbox | A cross-thread queue of `action` tool calls awaiting a HITL decision, decidable from the console without re-deriving thread ownership | `AGENT_APPROVAL_PORT` — bound automatically by `AgentModule`/`AgentDurableModule` | [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability) |
+| Approvals | Who must approve an `action` call and for how long (`ApprovalPolicy`); per-call `preflight` checks; a cross-thread inbox of blocking calls awaiting a decision; optionally, independent proposals that don't hold the turn | `approvalPolicy` and `actionApprovalMode` on `AgentModule.forRoot`; `AGENT_APPROVAL_PORT` — bound automatically by `AgentModule` | [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability), [Action proposals](/docs/agent/guides/action-proposals) |
 | Audit | Every stage of a run announced on Node's `diagnostics_channel`, plus tracing spans for a per-run waterfall | Nothing to configure — `aviary:agent:*` always fires; consumed by Telescope or your own subscriber | [Cost & Governance](/docs/agent/guides/cost-and-governance) |
 
 ## Identity + authorization
@@ -25,9 +25,13 @@ Two questions gate every tool call: who is calling, and may they call this. With
 `actorResolver` every browser is its own anonymous actor (an `HttpOnly` cookie), so two visitors never
 share an identity; configure one to require login. Once an actor is resolved, each tool declares exactly one gate: `roles` (a
 tool with none declared reaches the policy as `roles: undefined`, and `DefaultRolesPolicy` applies
-`defaultRoles` there) or `ability` (delegated to a `nestjs-authz` Gate via `AgentAuthzModule`). Both
-checks run server-side, before the tool's `execute` is ever called — a model can *ask* for anything,
-it can't talk its way past the gate.
+`defaultRoles` there — an empty list is **open** unless `emptyRoles: 'deny'` binds `ClosedRolesPolicy`)
+or `ability` (delegated to a `nestjs-authz` Gate by `AuthzRolesPolicy` from
+[`-authz`](/docs/agent/packages/authz), which `AgentModule` picks up in either import order; without it, the built-in policies refuse a tool that has an `ability` and no `roles`). A handler's own
+`isEnabled()` and `canUse(actor)` run alongside the policy, and a persona's `allowedTools` narrows the
+set further. All of it runs server-side, both when the turn's tool list is built and again on invoke,
+before the tool's `execute` is ever called — a model can *ask* for anything, it can't talk its way
+past the gate.
 
 The same "the agent never fabricates a caller" principle carries into the governance endpoints:
 `POST /agent/tool-call/approve` · `/reject` and the `/agent/threads/:id` family resolve the acting
@@ -65,6 +69,13 @@ steps are dispatched across the fleet.
 
 ## Approvals inbox
 
+Whether an `action` call needs approval at all, who may decide it (`'requester'` — the thread's owner
+— or a role), and how long the request stays open (`ttlMs`, after which it settles `expired`) is the
+`ApprovalPolicy`'s call; the default asks the requester, with no expiry. Before the card is shown and
+again right before execution, the tool's own `preflight` can deny the call, report it already done,
+or supply per-call confirmation wording — no approval, remembered or not, skips the execution-time
+check.
+
 An `action` tool's suspend (see [The agent loop](/docs/agent/concepts/the-agent-loop) and
 [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability)) is normally
 decided from the thread it happened in. The approvals inbox is the cross-thread view of the same
@@ -78,6 +89,15 @@ so the loop can persist who actually decided (`decision.executedByRef ?? the run
 dashboard's `approvalActorRef` option stamps it from the live request, defaulting to the same
 `ActorResolver` chat already uses. No port bound → the API answers `501` and the console renders
 read-only rather than silently no-op-ing an approval.
+
+With `actionApprovalMode: 'independent'`, an `action` call becomes an **action proposal** instead of a
+parked turn: the turn finishes, and the proposal is decided later — over
+`GET <base>/threads/:threadId/action-proposals` and
+`POST <base>/threads/:threadId/action-proposals/:proposalId/approve` · `/reject`, a text command in
+the thread, or the port's `approveActionProposal` / `rejectActionProposal` (which require an actual
+actor and an explicit thread/proposal target). A worker executes approved proposals under the
+requester's *current* identity and permissions. Proposals are not `pending_approval` tool calls, so
+they don't appear in `pendingApprovals`. See [Action proposals](/docs/agent/guides/action-proposals).
 
 ## Audit
 

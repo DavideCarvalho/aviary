@@ -34,9 +34,11 @@ durable in production without touching your tools or UI. See
 ## What you get
 
 - **Tool framework** — `@AiTool({ kind: 'read' | 'action' })` classes, auto-discovered. `action`
-  tools never auto-execute; the run pauses for approval.
-- **Governance out of the box** — RBAC per tool, per-agent system prompts and tool allow-lists, daily
-  token quota, and an audit trail of every tool call.
+  tools never auto-execute; the run pauses for approval — or, with
+  `actionApprovalMode: 'independent'`, the call becomes a proposal decided later while the
+  conversation moves on.
+- **Governance out of the box** — RBAC per tool, per-agent system prompts and tool allow-lists, a
+  token / USD quota per day and month, and an audit trail of every tool call.
 - **Cost accounting** — a usage ledger per turn, rolled up into spend per model / per actor / over
   time. A gateway's real reported cost wins; otherwise a **cache-aware** estimate against a versioned
   pricing table (prompt cache-write / cache-read priced at their own rates).
@@ -54,8 +56,9 @@ durable in production without touching your tools or UI. See
   tool; each delegation is a durable child run.
 - **The data satellite** — `@dudousxd/nestjs-agent-data` packages governed, read-only SQL
   (AST-validated, RBAC + tenant scoping) as an opt-in tool.
-- **A React frontend** — `@dudousxd/nestjs-agent-react`'s `useAgentChat` (Vercel AI SDK v7) plus
-  styling-agnostic chat components and an optional markdown renderer.
+- **A React frontend** — `@dudousxd/nestjs-agent-react`'s `<AgentProvider>` and `useAgentChat`
+  (Vercel AI SDK v7): history, resume, quota, model picker, message queue, approvals and a headless
+  transcript, plus styling-agnostic chat components and an optional markdown renderer.
 - **Zero provider code** — `@dudousxd/nestjs-agent-ai-sdk`'s `aiSdkModel(model)` adapts any Vercel AI
   SDK v7 `LanguageModel` to the `ModelProvider` SPI, the first of a family of provider adapters, so an
   app supplies `model` without writing a wrapper.
@@ -65,7 +68,7 @@ durable in production without touching your tools or UI. See
 - **Diagnostics** — emits `aviary:agent:*` point events (`run.started`, `message`, `tool-call`,
   `delegated`, `retrieved`, `quota.exceeded`, `run.failed`, `run.finished`) on Node's
   `diagnostics_channel`, plus tracing **spans** (`llm.turn`, `tool.execution`, `retrieval`,
-  `follow-ups`) correlated by `traceId = runId`.
+  `follow-ups`, `structured-output`) correlated by `traceId = runId`.
 - **Telescope** — `@dudousxd/nestjs-agent-telescope` adds an "Agent" tab with the governance
   sections (including Reliability and Approvals); runs also appear in the durable "Workflows" tab
   for free, and each run's spans render as a nested waterfall in Telescope's TRACES tab.
@@ -92,6 +95,7 @@ and SPIs are still stabilizing.
   <Card title="Tools" href="/docs/agent/guides/tools" description="@AiTool classes, read vs. action, the handler signature, and the tool context." />
   <Card title="Identity & Authorization" href="/docs/agent/guides/identity-and-authorization" description="Anonymous by default, login in one line, and role vs. ability gates." />
   <Card title="Human-in-the-loop & Durability" href="/docs/agent/guides/human-in-the-loop-and-durability" description="Action approval as a durable signal — the run suspends and resumes across restarts." />
+  <Card title="Action proposals" href="/docs/agent/guides/action-proposals" description="Approvals that do not hold the turn — decided later, in chat, a console or a text reply." />
   <Card title="Asking the user" href="/docs/agent/guides/asking-the-user" description="An authored intake, or a model-callable ask — collecting the scope before the work, on the same durable wait." />
   <Card title="Multi-agent" href="/docs/agent/guides/multi-agent" description="Orchestrators delegating to named sub-agents via a synthesized ask_<name> tool." />
   <Card title="Input & output processors" href="/docs/agent/guides/processors" description="Rewrite the prompt on the way out; redact, replace or refuse the answer on the way back." />

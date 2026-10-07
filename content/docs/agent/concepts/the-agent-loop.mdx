@@ -17,7 +17,10 @@ iteration.
 Each pass through the loop is one **step**:
 
 1. The model is called with the system prompt, the thread's messages so far, and the tools the actor
-   is allowed to see. This is one `ModelProvider.runTurn` call.
+   is allowed to see (after the agent's allow-list, the persona's `allowedTools` when the turn runs
+   under a [persona](/docs/agent/guides/personas), `enabled`/`isEnabled`, the roles policy, `canUse`,
+   and — when the client declared `uiCapabilities` — the negotiated component catalog). This is one
+   `ModelProvider.runTurn` call.
 2. A usage row is appended — unconditionally, whether or not the model asked for a tool.
 3. If the model returned zero tool calls, the loop **breaks** — the turn is done.
 4. Otherwise, each requested tool call is resolved by its `kind`, and the results are fed back to the
@@ -43,16 +46,32 @@ A tool call's `kind` decides whether it runs unattended or waits for a human —
 | `kind` | What happens | Use for |
 |---|---|---|
 | `read` | Auto-executes immediately, same step | Lookups, queries — anything side-effect-free |
-| `action` | Loop suspends for an explicit approve/reject before `execute` runs | Anything that mutates, spends, sends, or deletes |
+| `action` | Loop suspends for an explicit approve/reject before `execute` runs — unless the `ApprovalPolicy` says no approval is required, or the tool was remembered as approved for the thread | Anything that mutates, spends, sends, or deletes |
 | `agent` | Synthesized, never hand-authored — delegates to a named sub-agent | Multi-agent orchestration |
+| `ask` / `skill` / `memory` | Synthesized by the loop when `ask`, `skills` or `memory` is configured — a clarifying question set (parks like an approval), loading a skill, writing a memory | Built-ins, not authored |
+
+Before an `action` parks, its handler's `preflight(input, ctx, { phase: 'prepare' })` may deny it,
+report it already done (`completed` — no card, no execution), or supply per-call confirmation wording
+for the card. It runs again with `phase: 'execute'` immediately before `execute`.
 
 A rejected `action` call doesn't throw — its result (`{ rejected: true, reason }`) is fed back to the
 model like any other tool result, so the model can adapt within the same turn instead of failing it.
+A preflight denial and an expired approval (`{ rejected: true, expired: true, reason }`) are fed back
+the same way.
+
+<Callout type="info" title="Independent approvals end the turn instead of parking it">
+With `actionApprovalMode: 'independent'`, an `action` that needs approval is recorded as an action
+proposal, the model's tool result is `{ proposalId, status: 'pending', executed: false }`, and the turn
+ends at the end of that step without another model call. The proposal is decided and executed outside
+the turn; its outcome is added to the thread as an assistant message, with no model continuation. See
+[Action proposals](/docs/agent/guides/action-proposals).
+</Callout>
 
 ## Several tool calls in one turn
 
-A model routinely asks for more than one tool at a time. When **every** call in the turn is a `read`,
-the loop runs their invocations **concurrently** — the turn costs its slowest call, not the sum of
+A model routinely asks for more than one tool at a time. When **every** call in the turn is a `read`
+(or a `skill` load or `memory` write, which take a read's positions), the loop runs their invocations
+**concurrently** — the turn costs its slowest call, not the sum of
 them. Two independent three-second lookups take three seconds.
 
 Concurrency stops at the invocation. The bookkeeping around it stays strictly in call order:
@@ -77,7 +96,7 @@ launching the batch in one tick pins the block in call order however the tools t
   `ctx.all` — one workflow over a reserved block of positions, with the bookkeeping that makes a fan
   render as a fan — not a set of independent tasks, so it does not ride this path.
 
-A turn with a single call, or one containing an `action` or an `agent` call, runs exactly as it
+A turn with a single call, or one containing an `action`, `agent` or `ask` call, runs exactly as it
 always has: one call at a time, start to finish, before the next one is claimed.
 </Callout>
 
@@ -98,7 +117,9 @@ for (let i = 0; i < maxSteps; i += 1) {
 `maxSteps` comes from the agent that runs the turn — set it per agent with `@Agent({ maxSteps })` —
 and **defaults to 8** when omitted. It exists to stop a
 model that keeps calling tools from running away with an unbounded turn — hitting the ceiling ends
-the turn with whatever text the last step produced.
+the turn with whatever text the last step produced. Two things end the loop earlier, after the step's
+tools settle and without another model call: a successful call to a tool declared `terminal`, and
+(in independent mode) a call that created an action proposal.
 
 ## What the model is given: the whole thread, unless you bound it
 

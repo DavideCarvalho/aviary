@@ -20,9 +20,11 @@ import { Callout } from 'fumadocs-ui/components/callout';
   </Tab>
 </Tabs>
 
-`aiSdkModel(model, opts?)` is the whole package: it wraps any Vercel AI SDK v7 `LanguageModel` so
-`AgentModule.forRoot({ model })` needs no hand-written `ModelProvider`. Pick a model from any AI SDK
-provider package and pass it straight in.
+`aiSdkModel(model, opts?)` is the core of the package: it wraps any Vercel AI SDK v7 `LanguageModel`
+so `AgentModule.forRoot({ model })` needs no hand-written `ModelProvider`. Pick a model from any AI SDK
+provider package and pass it straight in. The package also exports `aiSdkModels` (several models
+behind one provider, for a picker), `aiSdkEmbedding` (an `EmbeddingProvider` for RAG), and
+`attachmentFetchDownloader`.
 
 ```ts
 import { aiSdkModel } from '@dudousxd/nestjs-agent-ai-sdk';
@@ -36,14 +38,15 @@ AgentModule.forRoot({
 ```
 
 `opts` is `CallSettings` — anything you'd pass to the SDK's `streamText` (`temperature`,
-`maxOutputTokens`, `providerOptions`, headers, …). `model`, `system`, `messages`, `tools`, and
-`abortSignal` are owned by the adapter and always win over `opts`.
+`maxOutputTokens`, `providerOptions`, headers, …) plus `experimental_download` (below). `model`,
+`instructions` (the turn's system prompt), `messages`, `tools`, and `abortSignal` are owned by the
+adapter and always win over `opts`.
 
 ## What the adapter does
 
 | Concern | Behavior |
 |---|---|
-| Streaming | Calls `streamText`, forwards every `text-delta` to `args.sink` as it arrives, and assembles the full text for the turn result. |
+| Streaming | Calls `streamText` and translates its parts into the agent stream vocabulary on `args.sink`: `text-delta` → `text` frames (also assembled into the turn's text), `reasoning-delta` → `reasoning`, and `tool-input-start` / `tool-input-delta` / `tool-call` → live tool-call card frames (`tool-input-start` / `tool-input-delta` / `tool-input-available`, with `toolKind` collapsed to `'read' \| 'action'`). An `error` part is rethrown as the provider's own error instead of surfacing as the SDK's generic "No output generated". |
 | Tool calls | Builds an SDK `ToolSet` **without** an `execute` function, so the SDK returns tool-calls for the agent loop to run as its own steps — the adapter never executes a tool itself. |
 | Usage | Maps SDK `LanguageModelUsage` to the core `MessageUsage` shape, including cache (`cacheWriteTokens` / `cacheReadTokens`) and reasoning (`reasoningTokens`) breakdowns when the provider reports them. |
 | Cost | Reads a gateway's real reported cost — Vercel AI Gateway's `providerMetadata.gateway.cost`, then OpenRouter's `total_cost` — into `costUsd`. Direct providers (Anthropic/OpenAI/Bedrock direct) report only tokens, so `costUsd` is left `undefined` and the governance read-model estimates instead. See [Cost & Governance](/docs/agent/guides/cost-and-governance). |
@@ -62,6 +65,10 @@ to the SDK's own schema conversion rather than degrading them:
   (`~standard.jsonSchema`); the SDK calls its `input()` converter.
 
 Either way the model sees the tool's real parameter names and required fields, not a generic object.
+A schema wrapped by `withConfirmFields` (a core `SchemaExtension`, used by
+[confirmed writes](/docs/agent/packages/core#gating-writes-blocking-approval-independent-proposals-confirmed-writes))
+is converted through its inner schema, with `confirm` / `confirmToken` added to the JSON properties.
+
 A hand-rolled Standard Schema that implements neither still validates correctly (the loop calls
 `~standard.validate` before running the handler), but the adapter degrades its *model-facing* schema
 to a permissive `{ type: 'object', additionalProperties: true }` — the model has to guess the
@@ -133,10 +140,27 @@ AgentModule.forRoot({
 });
 ```
 
+An entry is a bare `LanguageModel` or `{ model, label?, description?, badges?, contextWindow?, provider? }`.
 Entries group by provider (`provider`, else the id's prefix before `/`, else the model's own
 provider); `providerLabels` names the groups. A turn with no pick runs on `default` (the first entry
-when omitted); one naming a model the map does not hold fails. For availability that depends on the
+when omitted; a `default` that isn't in the map throws at construction); one naming a model the map
+does not hold fails. Other options are passed to `streamText` like `aiSdkModel`'s. For availability that depends on the
 caller, pass your own `models` catalog next to it.
+
+## Embeddings: `aiSdkEmbedding`
+
+`aiSdkEmbedding(model)` adapts an AI SDK `EmbeddingModel` to core's `EmbeddingProvider` — the
+retrieval-side sibling of `aiSdkModel`. It batches through `embedMany` and returns one vector per
+input, in order (an empty input makes no call).
+
+```ts
+import { aiSdkEmbedding } from '@dudousxd/nestjs-agent-ai-sdk';
+import { openai } from '@ai-sdk/openai';
+
+const embedder = aiSdkEmbedding(openai.embedding('text-embedding-3-small'));
+```
+
+See [RAG](/docs/agent/guides/rag).
 
 ## Related
 

@@ -43,8 +43,8 @@ export class AppModule {}
 
 | Static method | Purpose |
 |---|---|
-| `forRoot(options: AgentModuleOptions)` | Register the module synchronously — `model` (required), then optionally systemPrompt, store, actorResolver, quota, models, sink, rolesPolicy, path, durable, tools, defaultAgent, … |
-| `forRootAsync(options: AgentModuleAsyncOptions)` | Register via a factory (`imports` / `inject` / `useFactory`); `path` stays static since routes mount before the factory resolves. |
+| `forRoot(options: AgentModuleOptions)` | Register the module synchronously — `model` (required), then optionally systemPrompt, store, actorResolver, quota, models, attachments, sink, rolesPolicy, approvalPolicy, actionApprovalMode, path, durable, surface, adapters, tools, defaultAgent, … |
+| `forRootAsync(options: AgentModuleAsyncOptions)` | Register via a factory (`imports` / `inject` / `useFactory`); `path`, `durable`, `guards`, `surface` and `adapters` stay static since routes and the runner are wired before the factory resolves. |
 
 There is no `forFeature` — named agents beyond the default are declared as `@Agent`-decorated
 providers and discovered at boot (see [multi-agent](/docs/agent/guides/multi-agent)), not passed as a
@@ -99,11 +99,34 @@ providers: [
 
 A dependency-free functional tool can also be passed straight into `AgentModule.forRoot({ tools: [...] })`.
 
-## `InlineAgentRunner` and `HeaderActorResolver`
+## Independent approvals
+
+`actionApprovalMode: 'independent'` turns a parked `action` call into a persisted proposal: the turn
+ends, the conversation takes the next message, and a decision made later — in the chat, the console,
+or a text reply — queues the work for a background worker that runs it as the requester.
+
+```ts
+AgentModule.forRoot({
+  model,
+  actionApprovalMode: 'independent', // default 'blocking'
+  backgroundActorResolver: { resolve: ({ actorRef, tenantRef }) => findCurrentActor(actorRef, tenantRef) },
+  actionProposalWorker: { pollIntervalMs: 1_000, leaseMs: 30_000, maxConcurrency: 1 }, // optional
+  actionProposalText: ptBrActionProposalText, // optional: text decisions are English by default
+});
+```
+
+Boot fails without a `backgroundActorResolver` or on a store that lacks proposal and queue support.
+The module starts and stops `ActionProposalWorkerService` with the app (not on `surface: 'http'`),
+and `ActionProposalController` mounts `GET <path>/threads/:threadId/action-proposals` and
+`POST …/:proposalId/approve|reject`. See [Action proposals](/docs/agent/guides/action-proposals).
+
+## Runner and identity exports
 
 | Export | What it is |
 |---|---|
 | `InlineAgentRunner` | The default `AgentRunner` — runs a turn in-process, no extra dependencies. Swapped for `DurableAgentRunner` when `durable: true`. |
+| `AnonymousActorResolver` | The default when no `actorResolver` is set: one anonymous actor per browser, keyed by an `HttpOnly` cookie. |
+| `requestUserActorResolver(map?)` | An `ActorResolver` over `req.user` (Passport, cookie sessions). |
 | `HeaderActorResolver` | An `ActorResolver` reading `x-actor-id` / `x-actor-role` / `x-tenant-ref`. Only safe behind a trusted gateway that strips and re-sets those headers — see [Identity & Authorization](/docs/agent/guides/identity-and-authorization). |
 
 ## Durable subpath — `@dudousxd/nestjs-agent/durable`
@@ -153,12 +176,18 @@ clear error at boot rather than silently falling back to the inline runner.
 import { RedisTokenStreamSink } from '@dudousxd/nestjs-agent/sink-redis';
 ```
 
-The default `TokenStreamSink` buffers tokens in-process. Under `durable: true` (dispatched steps or
+The default `TokenStreamSink` (`InProcessTokenStreamSink`) buffers tokens in-process. Under `durable: true` (dispatched steps or
 not), a turn's `agent.run` workflow — and, with dispatching on, the `llm` step itself — may execute on
 any worker in the fleet, not the pod holding the client's SSE connection. A multi-pod deployment must
 bind a cross-process sink such as `RedisTokenStreamSink` (Redis pub/sub) via
-`AgentModule.forRoot({ sink: new RedisTokenStreamSink(redis) })`; boot logs a warning when it detects
-the default in-process sink under an effectively-dispatched config.
+`AgentModule.forRoot({ sink: new RedisTokenStreamSink(redis) })` — or, without Redis, the SQL sinks
+the store packages ship (`DrizzleTokenStreamSink`, `MikroOrmTokenStreamSink`). The durable runner
+logs a warning at boot when it is handed the default in-process sink.
+
+`new RedisTokenStreamSink(redis, { keyPrefix?, ttlSeconds?, blockMs? })` takes an ioredis client and
+keeps each run in a Redis Stream. `ttlSeconds` (default `3600`) is re-armed on every write and set when
+the run ends or fails, so a run whose process crashed still expires; `0` keeps the stream until
+`close()`.
 
 ### Run reliability recording
 

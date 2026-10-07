@@ -92,9 +92,9 @@ function CustomChat({ threadId }: { threadId?: string }) {
 ```
 
 `chat` is the AI SDK v7 `useChat` return value (`messages`, `status`, `sendMessage`, `stop`, `error`,
-…) spread together with the agent extras: `transcript`, `composer`, `models`, `quota` / `blocked`,
-`runId` / `activeRunId`, `backend`, `fork` / `truncateFrom` / `promote`, `cancel`, HITL `approve` /
-`reject` / `answer` / `skip`, and `regenerate` — see [Frontend](/docs/agent/guides/frontend#useagentchat).
+…) spread together with the agent extras: `transcript`, `composer`, `queue`, `models`, `quota` /
+`blocked`, `proposals`, `runId` / `activeRunId`, `runError`, `backend`, `fork` / `truncateFrom` /
+`promote`, `cancel`, HITL `approve` / `reject` / `answer` / `skip`, and `regenerate` — see [Frontend](/docs/agent/guides/frontend#useagentchat).
 The connection (`baseUrl`, `path`, headers, credentials) lives on `<AgentProvider>`.
 
 The options worth knowing beyond the basics (`threadId`, `agent`):
@@ -230,15 +230,17 @@ every host writes the same buffer-and-flush loop. `item.blocks` has already run 
 - **`reasoning`** — a run of the model's thinking, with its own `isOpen` / `toggle(open?)`
   disclosure state. It defaults to open while streaming and folded once done, per run.
 - **`ui`** — a component the server pushed into the message (the stream's `ui` frame):
-  `{ id, component, props, version }`. `component` is a key into YOUR registry — the library ships
-  none. A repeat `id` updates the component in place.
+  `{ id, component, props, version, fallbackText?, componentVersions?, toolCallId }`. `component` is
+  a key into YOUR registry — the library ships none. A repeat `id` updates the component in place.
+  `fallbackText` is the server's text for it, for a renderer you no longer have.
 
 Each `tools` block also carries `calls` (the same parts with their human-decision state) and
 `roots` — the calls as a tree. A call the stream sent with a `parentId` (the inner calls of a
 code-mode `execute`, a delegated agent's tools) sits in its parent's `children`; a parent that is not
 in the block, or a cycle, leaves the call at the top level. Every call also exposes `toolKind`,
-`parentId` and `approval` — `{ approver, expiresAt, reason }` when the runner said who has to
-decide, else `null`.
+`parentId` and `approval` — `{ approver, expiresAt, reason, status, confirmation?, target?, … }`
+when the runner said who has to decide, else `null` (see
+[Frontend → Human-in-the-loop](/docs/agent/guides/frontend#human-in-the-loop)).
 
 ```tsx
 function ToolTree({ calls }: { calls: TranscriptToolCall[] }) {
@@ -258,8 +260,9 @@ function ToolTree({ calls }: { calls: TranscriptToolCall[] }) {
 ```
 
 Other `data-*` parts are omitted, but they still end a tool run — where they sit in the transcript
-is meaningful even when their content isn't modelled. (`data-approval-requested` is the exception:
-it is folded into its call's `approval` and takes no position.)
+is meaningful even when their content isn't modelled. (`data-approval-requested`,
+`data-approval-settled` and `data-action-proposal` are the exception: they are folded into their
+call's `approval` and take no position.)
 
 ### Reasoning
 
@@ -340,7 +343,9 @@ Beyond text, reasoning and tool calls, the transport maps the rest of the
 |---|---|
 | `ui` | a `data-ui` part keyed by the component id (a repeat id updates it in place) |
 | `approval-requested` | a `data-approval-requested` part keyed by the call id, plus the SDK's native approval request — the tool part moves to `state: 'approval-requested'` |
-| `title` / `cancelled` | transient `data-title` / `data-cancelled` — never stored on the message. `useAgentChat({ onTitle })` fires with the title |
+| `approval-settled` | a `data-approval-settled` part keyed by the call id (who decided, through what, remembered or not) |
+| `message-metadata` | merged into the message's `metadata` |
+| `title` / `cancelled` / `queue` | transient `data-title` / `data-cancelled` / `data-queue` — never stored on the message. `useAgentChat({ onTitle })` fires with the title; `chat.queue` follows the queue |
 | a kind this version does not know | a `data-<kind>` part — forwarded, never dropped |
 
 ---
@@ -434,7 +439,15 @@ function ApprovalActions({ toolCallId }: { toolCallId: string }) {
 ```
 
 `approve` resolves the durable suspend and the run resumes streaming; `reject` (with an optional
-`reason`) feeds the decline back to the model. See
+`reason`) feeds the decline back to the model. Label the card with `call.description.confirm`
+(`{ title, verb, detail }`) — the per-call wording the tool's `preflight` returned, else its
+`presentation.confirm` template — rather than with the tool name.
+
+Under `actionApprovalMode: 'independent'` the pending call is a **proposal** and the turn has
+already ended: the decision needs its target, which `call.approval.target` carries once
+`useAgentChat` has merged the thread's proposals in —
+`chat.approve({ toolCallId, target: call.approval.target })`, or simply `call.approve.run()`. See
+[Frontend → Approvals that do not hold the turn](/docs/agent/guides/frontend#approvals-that-do-not-hold-the-turn). See
 [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability) for what
 backs the pause — an in-process hold under the inline runner, a real durable **signal** under the
 durable one. The wire protocol, and everything above it, is identical either way.
@@ -483,9 +496,11 @@ sums to a real number, so only an all-unknown turn reports `null`.
 
 ## Attachments
 
-`useAttachments` is the composer's file tray, minus the tray. It validates each file, uploads it
-with progress and cancel, keeps the per-file state, and hands you the handlers for a file input, a
-drop zone and paste. The markup is yours:
+`useAttachments` is the composer's file tray, minus the tray (`chat.composer.files` is one, already
+on the chat's backend). It validates each file, uploads it with progress and cancel, keeps the
+per-file state, and hands you the handlers for a file input, a drop zone and paste. `accept`,
+`maxBytes` and `maxFiles` default to the server's limits (`GET /agent/config`). The markup is
+yours:
 
 ```tsx
 import { messageFiles, useAttachments } from '@dudousxd/nestjs-agent-react';
@@ -528,8 +543,8 @@ the `{ mediaId }`s `POST /agent/chat` takes — the server reads only the id and
 from its own storage, so a url you built by hand never reaches the model. `onPaste` stages pasted
 screenshots and leaves a text paste alone; `dropZoneProps` only reacts to drags that carry files.
 
-For resumable uploads through Aviary media, use `useAgentChat({ attachments: mediaAttachments() })`
-(`@dudousxd/nestjs-agent-react/media`) and pass `chat.backend` to `useAttachments`. For your own
+For resumable uploads through Aviary media, set `<AgentProvider attachments={{ upload: mediaAttachments() }}>`
+(`@dudousxd/nestjs-agent-react/media`); `useAttachments` under it uploads that way. For your own
 storage, pass your own strategy or `upload`. Both are covered in
 [File uploads](/docs/agent/guides/file-uploads).
 

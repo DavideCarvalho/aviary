@@ -67,7 +67,8 @@ export class RefactorerAgent {}
 ```
 
 `when: 'thread-start'` (the default) asks once, on the first turn of a thread. `when: 'every-turn'`
-asks before each one.
+asks before each one. `multiple: true` allows more than one option; `allowFreeText: true` accepts a
+value that is not among the options.
 
 **It costs nothing.** The questions, their options and their pre-picked answers are all authored on
 the agent, so no model call produces them and no usage row is written for them. That is also what
@@ -82,8 +83,9 @@ For the case an intake cannot anticipate: the model itself judges the scope is m
 AgentModule.forRoot({ /* … */ ask: true })   // or @Agent({ ask: true }) for one persona
 ```
 
-The model now sees an `ask` tool whose schema **requires** a `defaults` array on every question. A
-question with nothing pre-picked is refused before it ever reaches a user, because "I have pre-picked
+The model now sees an `ask` tool whose schema **requires** a `defaults` array on every question that
+picks from options, and caps a call at five questions (`MAX_ASK_QUESTIONS`). A question with nothing
+pre-picked is refused before it ever reaches a user, because "I have pre-picked
 what I would choose" is the claim the whole surface rests on, and a schema is the only place to make
 it mandatory rather than aspirational.
 

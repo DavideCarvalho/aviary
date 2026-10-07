@@ -121,6 +121,76 @@ it('suspends an action tool until approved, then executes', async () => {
 });
 ```
 
+## Independent approvals, offline
+
+With `actionApprovalMode: 'independent'` the action becomes a persisted proposal and the turn ends
+without waiting. `InMemoryAgentStore` implements the proposal store (single process), and the
+proposal worker starts with the app, so the whole flow runs in the test:
+
+```ts
+import { ActionProposalService } from '@dudousxd/nestjs-agent';
+
+const actor = { id: 'u1', roles: ['ADMIN'] };
+// ...module as above, plus:
+//   actionApprovalMode: 'independent',
+//   backgroundActorResolver: { resolve: async () => actor },
+//   actionProposalWorker: { pollIntervalMs: 20, leaseMs: 1_000 }, // poll < lease / 3
+
+const { runId, threadId } = await service.chat({ actor, message: 'purge it' });
+await collect(service.subscribe(runId)); // the turn ends; nothing has run yet
+
+const scope = { threadId, actorRef: actor.id, tenantRef: null };
+const [proposal] = await store.listActionProposals(scope);
+await app.get(ActionProposalService).decide(threadId, proposal!.id, actor, { decision: 'approved' });
+
+// The worker executes it and admits the outcome into the thread as an assistant message.
+await vi.waitFor(async () => {
+  const current = await store.getActionProposal(scope, proposal!.id);
+  expect(current?.outcomeDelivery?.status).toBe('admitted');
+});
+```
+
+The origin call's tool result is `{ proposalId, status: 'pending', executed: false }`. See
+[Action proposals](/docs/agent/guides/action-proposals).
+
+## Contract suites for your own store
+
+If you implement a store SPI yourself, `@dudousxd/nestjs-agent-testing` exports the same behavior
+suites the shipped MikroORM/Drizzle adapters run. Each is an array of `{ name, run(subject) }`
+cases:
+
+| Export | Subject |
+|---|---|
+| `ACTION_PROPOSAL_STORE_CONTRACT` | `{ store: ActionProposalStore, setNow(ms) }` |
+| `ACTION_PROPOSAL_WORKER_STORE_CONTRACT` | `{ store: ActionProposalStore & ActionProposalWorkerStore, setNow(ms) }` |
+| `CHAT_QUEUE_STORE_CONTRACT` | `{ store: AgentStore & ChatQueueStore, threadId }` |
+| `CONFIRM_TOKEN_STORE_CONTRACT` | `{ store: ConfirmTokenStore, rows() }` |
+| `SQL_TOKEN_STREAM_SINK_CONTRACT` | `{ sinkOn(replica, options?), rowCount(runId), seqs(runId), ... }` |
+
+```ts
+import { ACTION_PROPOSAL_STORE_CONTRACT } from '@dudousxd/nestjs-agent-testing';
+
+for (const contract of ACTION_PROPOSAL_STORE_CONTRACT) {
+  it(contract.name, async () => {
+    let now = 1000;
+    await contract.run({
+      store: new MyAgentStore(db, { clock: () => now }), // your store, with an injectable clock
+      setNow: (value) => {
+        now = value;
+      },
+    });
+  });
+}
+```
+
+## RAG without an embedding model
+
+`hashedEmbeddings(dimensions = 64)` returns a deterministic hashed bag-of-words
+`EmbeddingProvider` with Unicode tokens. There's no model and no network. Similar wording ranks
+close; similar meaning doesn't. It's enough to run ingest → embed → retrieve offline.
+`FakeEmbeddingProvider({ dimensions?, tokens?: 'ascii' | 'unicode' })` is the class behind it, and
+`FakeReranker` reorders passages by query-term overlap for testing `RerankingRetriever`.
+
 <Callout type="info" title="Governance doubles, when you need them">
 `InMemoryGovernanceQueries` wraps an `InMemoryAgentStore` and takes an optional pricing map (default
 empty → zero cost, tokens still counted) — bind it to `AGENT_GOVERNANCE_QUERIES` to test a

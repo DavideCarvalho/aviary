@@ -15,10 +15,13 @@ in `-core`, so the agent runtime stays storage-agnostic.
 
 ## The pieces
 
-- **`EmbeddingProvider`** (core SPI) — text → vectors. `aiSdkEmbedding(model)` implements it over any
-  Vercel AI SDK embedding model.
-- **`VectorStore`** (`-rag`) — `upsert` + `search` + `remove` + `listDocuments`. Ships `MemoryVectorStore` (in-JS cosine) and
-  `PgVectorStore` (pgvector). The extension point for Qdrant/Pinecone/etc.
+- **`EmbeddingProvider`** (core SPI) — text → vectors. `aiSdkEmbedding(model)` (`-ai-sdk`)
+  implements it over any Vercel AI SDK embedding model; `openAiEmbeddings({ model, baseUrl? })`
+  (`-rag`) over any OpenAI-compatible `/embeddings` endpoint with no SDK.
+- **`VectorStore`** (`-rag`) — `upsert` + `search` + `remove` + `listDocuments` and the other
+  maintenance methods. Ships `MemoryVectorStore` (in-JS cosine), `PgVectorStore` /
+  `PgLexicalVectorStore` (pgvector) and `RedisVectorStore` (RediSearch). The extension point for
+  Qdrant/Pinecone/etc.
 - **`Retriever`** (core SPI) — `retrieve(query) → Passage[]`. `EmbeddingRetriever` bridges an
   embedder + a vector store into one.
 
@@ -106,8 +109,14 @@ A client detects provenance **structurally** — a tool output shaped `{ passage
 rather than by tool name, which is what lets both modes land in the same block even though one is
 named `retrieve` and the other is whatever you called `createRetrievalTool`.
 
-Either way, each retrieval also emits an `aviary:agent:retrieved` diagnostics event
-(`{ runId, query, count }`) — subscribe for retrieval metrics without instrumenting your code.
+In inject mode the loop also emits an `aviary:agent:retrieved` diagnostics event
+(`{ runId, query, count }`) per retrieval.
+
+For retrieval quality metrics (latency, zero-hit rate, scores, store, collection), `-rag` publishes
+`aviary:rag:retrieval`. `createRetrievalTool` instruments its retriever by default; for inject mode,
+wrap the retriever yourself with `instrumentRetriever(retriever)` before passing it to
+`forRoot({ retrieval })`. [Telescope](/docs/agent/packages/telescope) renders these on its Agent tab.
+See [Telemetry](/docs/agent/packages/rag#telemetry).
 
 ## Better relevance: hybrid + reranking
 
@@ -132,12 +141,36 @@ keyword.add(chunks);                                // lexical BM25 (same chunk 
 const hybrid = new HybridRetriever([new EmbeddingRetriever(embedder, store), keyword]);
 ```
 
-**Reranking** over-fetches cheap candidates, then reorders them with a stronger model (a
-cross-encoder / Cohere / Voyage rerank endpoint behind the `Reranker` SPI):
+`KeywordRetriever` is in-process: it only works where ingestion and search share a process, and a
+deleted document must also be dropped with `keyword.remove(documentId)`. When the store has its own
+full-text index (`PgLexicalVectorStore`, `RedisVectorStore`), use `LexicalRetriever(store)` as the
+lexical leg instead — nothing to feed or keep in sync:
 
 ```ts
-import { RerankingRetriever } from '@dudousxd/nestjs-agent-rag';
+import { LexicalRetriever } from '@dudousxd/nestjs-agent-rag';
 
+const hybrid = new HybridRetriever([
+  new EmbeddingRetriever(embedder, store),
+  new LexicalRetriever(store),
+]);
+```
+
+To let an unanswerable query return nothing, set a similarity floor on the dense leg —
+`new EmbeddingRetriever(embedder, store, { minScore: 0.2 })` (measure the number for your model). Fused
+`HybridRetriever` scores are rank-based and carry no threshold.
+
+**Reranking** over-fetches cheap candidates, then reorders them with a stronger model (a
+cross-encoder behind the `Reranker` SPI). `HttpReranker` covers Cohere / Jina / Voyage / TEI-style
+`/rerank` endpoints:
+
+```ts
+import { HttpReranker, RerankingRetriever } from '@dudousxd/nestjs-agent-rag';
+
+const reranker = new HttpReranker({
+  url: 'https://api.cohere.com/v2/rerank',
+  model: 'rerank-v3.5',
+  apiKey: process.env.COHERE_API_KEY,
+});
 const retriever = new RerankingRetriever(hybrid, reranker, { fetchTopK: 20 });
 // fetch 20 candidates → rerank → return the top few. Still just a `Retriever`.
 ```
@@ -149,19 +182,21 @@ Any of these drops straight into `createRetrievalTool(retriever)` or `forRoot({ 
 `MemoryVectorStore` is for tests and small corpora. For scale, two shipped adapters — both take an
 injected client (no driver dependency) and expose `ensureSchema()`:
 
-**pgvector** (Postgres):
+**pgvector** (Postgres) — takes a `pg` Pool, a Drizzle database or a `postgres.js` `sql` directly:
 
 ```ts
 import { Pool } from 'pg';
-import { PgVectorStore } from '@dudousxd/nestjs-agent-rag';
+import { PgLexicalVectorStore } from '@dudousxd/nestjs-agent-rag';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const store = new PgVectorStore(
-  { query: (sql, params) => pool.query(sql, params).then((r) => r.rows) },
-  { dimensions: 1536 }, // match your embedding model
-);
-await store.ensureSchema(); // vector extension + table + HNSW cosine index
+const store = new PgLexicalVectorStore(pool, { dimensions: 1536 }); // match your embedding model
+await store.ensureSchema(); // vector extension + table + HNSW cosine index + GIN full-text index
 ```
+
+Use `PgVectorStore` for vectors only; `PgLexicalVectorStore` adds Postgres full-text `searchText` for
+the `LexicalRetriever` leg. `schemaStatements()` returns the DDL for a migration. Mixed embedding
+widths, nullable embeddings and pgvector ≥ 0.8 iterative scans are options — see
+[pgvector](/docs/agent/packages/rag#pgvector).
 
 **Redis** (RediSearch — Redis Stack / Redis 8+), the ecosystem-native option if you already run Redis:
 
@@ -179,7 +214,19 @@ await store.ensureSchema(); // FT.CREATE — HNSW cosine index
 ```
 
 Swap `MemoryVectorStore` for either in the wiring above; nothing else changes. For any other backend
-(Qdrant, Pinecone, Weaviate), implement the `VectorStore` SPI — `upsert` + `search` + `remove` + `listDocuments`.
+(Qdrant, Pinecone, Weaviate), implement the `VectorStore` SPI (see
+the [package reference](/docs/agent/packages/rag) for the required methods).
+
+## Long documents: tree navigation
+
+On long structured documents (regulations, contracts, 10-Ks), chunk search tends to find the right
+document but not the right page. `-rag` ships PageIndex-style tree navigation: `indexDocumentTree`
+builds a table-of-contents tree per long document at ingestion, and `TreeNavigationRetriever` has an
+LLM walk it at query time. `TwoStageRetriever(hybrid, navigator)` keeps hybrid search as the first
+stage and navigates only the top long documents; `createNavigateDocumentTool(navigator)` exposes it to
+the model as `navigate_document({ documentId, question })`. It costs LLM calls per query, so it sits
+behind the existing search rather than replacing it. See
+[Tree navigation](/docs/agent/packages/rag#tree-navigation-long-documents).
 
 ## Ingesting uploads automatically
 
@@ -210,6 +257,9 @@ const forThisUser = new FilteredRetriever(new EmbeddingRetriever(embedder, store
   ownerId: actor.id,
 });
 ```
+
+Chat attachments uploaded through `AgentMediaAttachmentsModule` (`@dudousxd/nestjs-agent/media`) feed
+the same pipeline with `indexForRag: true` — see [File uploads](/docs/agent/guides/file-uploads).
 
 See the [rag-media package reference](/docs/agent/packages/rag-media) for custom extractors
 (PDF/DOCX), durable ingestion, and the emitted diagnostics.

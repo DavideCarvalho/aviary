@@ -95,7 +95,9 @@ structured-output instruction and the system block is the cache prefix. The ques
 <Callout title="`outputFromTranscript` for an answer that cannot stand alone">
   `AgentLoopDeps.outputFromTranscript: true` gives the pass the turn's whole transcript again, at the
   cost above. It is for the case where the prose genuinely cannot be restated from its own words — an
-  agent that reports on rows a tool returned and names only their total. Off by default.
+  agent that reports on rows a tool returned and names only their total. Off by default. Like
+  `outputInstruction`, it is a loop dependency only: neither `AgentModule.forRoot` nor `@Agent`
+  exposes it.
 </Callout>
 
 An instruction is not a control, though, so the pass **also goes through the gate itself**: the chain

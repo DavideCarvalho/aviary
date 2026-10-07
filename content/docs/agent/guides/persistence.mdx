@@ -18,13 +18,15 @@ and Drizzle. Pick one, wire it, and the agent reads it through a DI token.
 ## The `AgentStore` SPI
 
 `AgentStore` (from `@dudousxd/nestjs-agent-core`) is ORM-agnostic — refs are string ids, and an
-adapter is free to back them with real relations. It covers five concerns across five tables:
+adapter is free to back them with real relations. Its core is five concerns across five tables (the
+SQL adapters own more — queue, runs, memory, stream frames, confirm tokens, action proposals —
+covered below):
 
 | Concern | Table | SPI methods |
 |---|---|---|
-| Threads | `agent_thread` | `createThread`, `getThread`, `listThreads`, `softDeleteThread`, `forkThread`, `setTitle`, `updateThread`, `setActiveStream`, `ownerOfThread`, `ownerOfActiveStream` |
+| Threads | `agent_thread` | `createThread`, `getThread`, `listThreads`, `softDeleteThread`, `forkThread`, `setTitle`, `promoteThread`, `updateThread`, `setActiveStream`, `ownerOfThread`, `ownerOfActiveStream` |
 | Messages | `agent_message` | `appendMessage`, `setMessageToolResults`, `truncateFrom` |
-| Tool calls | `agent_tool_call` | `recordToolCall`, `updateToolCall`, `ownerOfToolCall` |
+| Tool calls | `agent_tool_call` | `recordToolCall`, `updateToolCall`, `ownerOfToolCall`, `runForToolCall` |
 | Token usage (ledger) | `agent_token_usage` | `recordUsage`, `quotaToday` |
 | Model pricing | `agent_model_pricing` | read by the governance read-model; written by the separate `AgentPricingStore` SPI (`upsertModelPrice`, `listCurrentPrices`) — see [Cost & Governance](/docs/agent/guides/cost-and-governance#seeding-prices) |
 
@@ -40,12 +42,12 @@ export interface AgentStore {
   setMessageToolResults(messageId: string, results: ToolResult[]): Promise<void>;
   recordToolCall(input: RecordToolCallInput): Promise<void>;
   recordUsage(input: RecordUsageInput): Promise<void>;
-  quotaToday(actorRef: string, day: string): Promise<{ usedTokens: number }>;
+  quotaToday(actorRef: string, day: string): Promise<{ usedTokens: number; costUsd: number }>;
   ownerOfThread(threadId: string): Promise<string | null>;
   ownerOfToolCall(toolCallId: string): Promise<string | null>;
   runForToolCall(toolCallId: string): Promise<string | null>;
   ownerOfActiveStream(runId: string): Promise<string | null>;
-  // …setTitle, setActiveStream, truncateFrom, updateToolCall
+  // …setTitle, promoteThread, setActiveStream, truncateFrom, updateToolCall, plus optional members
 }
 ```
 
@@ -173,6 +175,14 @@ Both adapters' `ensureAgentSchema` add them on boot; on your own migrations, see
 [`-store-mikro-orm`](/docs/agent/packages/store-mikro-orm).
 </Callout>
 
+### What a confirmation card said
+
+An action tool's preparation preflight can replace the `presentation.confirm` wording for one call.
+Both SQL adapters persist it in a nullable JSON column, `agent_tool_call.confirmation`, and return it
+in `StoredMessage.approvals`, so a reloaded transcript shows the card the user actually saw. Both
+`ensureAgentSchema` helpers add the column; on your own migrations add it before upgrading (`jsonb`
+on Postgres, `json` on MySQL, JSON text on SQLite).
+
 ---
 
 ## The message queue (optional)
@@ -188,7 +198,9 @@ keeps the old behaviour, where a send on a busy thread starts a second turn.
 
 The in-memory, Drizzle and MikroORM stores implement it; the SQL ones add an
 `agent_queued_message` table (cascading off `agent_thread`, indexed on `(thread_id, position)`) and
-an `agent_thread.queue_pause` column when they heal the schema on boot. A store of your own can run
+an `agent_thread.queue_pause` column through `ensureAgentSchema`. A queued message also keeps the
+sender's renderer capabilities (`uiCapabilities`, column `ui_capabilities`), so the turn it starts
+offers the same component catalog the send would have. A store of your own can run
 `CHAT_QUEUE_STORE_CONTRACT` from `@dudousxd/nestjs-agent-testing` — framework-agnostic cases, each
 throwing on the first mismatch:
 
@@ -240,7 +252,7 @@ Three properties are worth knowing before you point that at a production bucket.
 **References are re-derived, never latched.** `truncateFrom` deletes messages, and regenerating a
 turn does exactly that — so media that was referenced becomes unreferenced again. A `referenced`
 flag written when a message is sent would never be unset by that delete, and the bytes would be
-pinned for ever. Every call answers from the surviving message rows instead.
+pinned for ever. Every call answers from the surviving message rows (and queued messages) instead.
 
 **`olderThan` is required and has no default.** Freshly staged media is an upload in flight, not
 garbage; how long one of your composers may sit open with a file attached is your knowledge, not the
@@ -294,18 +306,57 @@ Both bundled adapters (`-store-mikro-orm`, `-store-drizzle`) implement all three
 
 ---
 
-## Three tokens, bound together
+## Action proposals (optional)
 
-An adapter binds **three** DI tokens — the write side, the read side, and the pricing writer — so
-wiring one module gives you persistence, analytics, and priced cost estimates:
+With `actionApprovalMode: 'independent'`, an action waiting for approval no longer holds the turn: it
+is persisted as an **action proposal** that a worker executes after the decision (see
+[Action proposals](/docs/agent/guides/action-proposals)). The configuration check requires the
+`AGENT_STORE` itself to carry these capabilities (all from `@dudousxd/nestjs-agent-core`) and fails
+at boot otherwise:
+
+| Capability | Methods |
+|---|---|
+| `ActionProposalStore` | `createActionProposal`, `getActionProposal`, `listActionProposals`, `decideActionProposal`, `claimActionProposal`, `extendActionProposalLease`, `settleActionProposal` — all scoped to tenant, actor and thread |
+| `ActionProposalSupersessionStore` | `createReplacingActionProposal`, `supersedeActionProposal` |
+| `ActionProposalWorkerStore` | `claimNextActionProposal`, `expireActionProposals` — privileged, unscoped, worker-only |
+| `ActionProposalOutcomeStore` | `getThreadActionProposalScope`, `claimNextActionProposalOutcome`, `admitActionProposalOutcome` |
+| `ChatQueueStore` | the [message queue](#the-message-queue-optional) |
+
+`DrizzleAgentStore` and `MikroOrmAgentStore` implement all of them over `agent_action_proposal` (one
+row per proposal: canonical snapshot, decision and execution work, version-fenced), plus
+`agent_message.action_proposal_outcome` for the result message a worker admits and
+`agent_tool_call.proposal_id`. The Drizzle adapter advertises admission only on better-sqlite3,
+node-postgres, mysql2 and libSQL (`actionProposalAdmissionSupported`); MikroORM supports SQLite,
+Postgres and MySQL. `InMemoryAgentStore` implements them for a single process. A store of your own can
+run `ACTION_PROPOSAL_STORE_CONTRACT` and `ACTION_PROPOSAL_WORKER_STORE_CONTRACT` from
+`@dudousxd/nestjs-agent-testing`.
+
+<Callout type="warn" title="Rollout on an existing database">
+SQL stores also implement `ActionProposalDiscoveryIndexStore.backfillActionProposalDiscoveryIndex({ limit })`
+(`limit` 1–1000). Workers only discover rows whose discovery metadata is current, and older rows
+need the backfill. In order: stop older writers → apply the additive schema (`ensureAgentSchema` or
+your migration) → repeat the backfill until it returns `0` → deploy the new writers and workers.
+Never run the backfill implicitly from a worker tick, and do not mix old and new writers. Details per
+adapter: [`-store-drizzle`](/docs/agent/packages/store-drizzle#action-proposals-independent-approvals),
+[`-store-mikro-orm`](/docs/agent/packages/store-mikro-orm#action-proposals-independent-approvals).
+</Callout>
+
+---
+
+## Four tokens, bound together
+
+An adapter binds **four** DI tokens — the write side, the read side, the pricing writer, and the
+confirm-token ledger — so wiring one module gives you persistence, analytics, priced cost estimates,
+and single-use confirmed writes:
 
 | Token | Bound to | Consumed by |
 |---|---|---|
 | `AGENT_STORE` | the store (`MikroOrmAgentStore` / `DrizzleAgentStore`) | the agent module — every turn reads it |
 | `AGENT_GOVERNANCE_QUERIES` | the read-model (`…GovernanceQueries`) | the dashboard & Telescope surfaces |
-| `AGENT_PRICING_STORE` | the pricing writer (`MikroOrmPricingStore` / `DrizzlePricingStore`) | your app, to seed/update model prices — see [Cost & Governance](/docs/agent/guides/cost-and-governance#seeding-prices) |
+| `AGENT_PRICING_STORE` | the pricing writer (`MikroOrmPricingStore` / `DrizzlePricingStore`, or your `pricingStore` option) | your app, to seed/update model prices — see [Cost & Governance](/docs/agent/guides/cost-and-governance#seeding-prices) |
+| `AGENT_CONFIRM_TOKEN_STORE` | `MikroOrmConfirmTokenStore` / `DrizzleConfirmTokenStore` | [confirmed writes](/docs/agent/guides/tools#confirmed-writes--the-gate-inside-the-tool) — single use across replicas |
 
-All three are `Symbol.for(...)` tokens from `@dudousxd/nestjs-agent-core` (global-registry symbols,
+All four are `Symbol.for(...)` tokens from `@dudousxd/nestjs-agent-core` (global-registry symbols,
 so DI survives pnpm's dual ESM/CJS copies). A store module binds them **globally** (a Nest global
 module), so any module in the app resolves them without re-importing. That's why `store` on
 `AgentModule.forRoot({ … })` is **optional**: import a store module and the agent resolves the store
@@ -313,8 +364,8 @@ from the app-wide `AGENT_STORE` — leave `store` off entirely. Pass `store` onl
 bind through a module (the in-memory testing store, say).
 
 <Callout type="info" title="One import, read + write + pricing">
-Importing a store module binds `AGENT_GOVERNANCE_QUERIES` and `AGENT_PRICING_STORE` as well as
-`AGENT_STORE`. That's why the governance console and Telescope tab "just work" once persistence is
+Importing a store module binds `AGENT_GOVERNANCE_QUERIES`, `AGENT_PRICING_STORE` and
+`AGENT_CONFIRM_TOKEN_STORE` as well as `AGENT_STORE`. That's why the governance console and Telescope tab "just work" once persistence is
 wired — they read the same adapter's read-model. Cost estimates are the exception: they stay `$0`
 until something writes to `AGENT_PRICING_STORE`, since a fresh pricing table has no rows to read. See
 [Cost & Governance](/docs/agent/guides/cost-and-governance).
@@ -324,7 +375,7 @@ until something writes to `AGENT_PRICING_STORE`, since a fresh pricing table has
 
 ## Wiring an adapter
 
-The same SPI, two ORMs. MikroORM registers entities and leans on MikroORM migrations; Drizzle takes
+The same SPI, two ORMs. MikroORM runs on your app's ORM and heals its tables at boot; Drizzle takes
 an already-opened db handle that the host owns.
 
 <Tabs items={['MikroORM', 'Drizzle']}>
@@ -334,18 +385,23 @@ an already-opened db handle that the host owns.
 pnpm add @dudousxd/nestjs-agent-store-mikro-orm @mikro-orm/core @mikro-orm/nestjs
 ```
 
-`MikroOrmAgentStoreModule.forFeature()` registers the agent entities (`EntitySchema`) and binds
-all three tokens. It needs a `MikroOrmModule.forRoot(...)` in scope for the `EntityManager`.
+`MikroOrmAgentStoreModule.forFeature()` binds all four tokens. It needs a `MikroOrmModule.forRoot(...)`
+in scope for the `EntityManager`, and it does **not** register the entities — add them to your
+MikroORM config.
 
 ```ts
+import { Module } from '@nestjs/common';
 import { MikroOrmModule } from '@mikro-orm/nestjs';
-import { MikroOrmAgentStoreModule } from '@dudousxd/nestjs-agent-store-mikro-orm';
-import { AgentModule } from '@dudousxd/nestjs-agent';
+import { AGENT_ENTITIES, MikroOrmAgentStoreModule } from '@dudousxd/nestjs-agent-store-mikro-orm';
+import { AgentModule, HeaderActorResolver } from '@dudousxd/nestjs-agent';
 
 @Module({
   imports: [
-    MikroOrmModule.forRoot(/* your config */),
-    MikroOrmAgentStoreModule.forFeature(), // registers entities + binds AGENT_STORE (+ queries + pricing)
+    MikroOrmModule.forRoot({
+      // …driver, dbName
+      entities: [...yourEntities, ...AGENT_ENTITIES],
+    }),
+    MikroOrmAgentStoreModule.forFeature(), // binds AGENT_STORE (+ queries, pricing, confirm tokens); heals the schema at boot
     AgentModule.forRoot({
       model: myModelProvider,
       // no `store` — the agent reads it from AGENT_STORE
@@ -356,14 +412,16 @@ import { AgentModule } from '@dudousxd/nestjs-agent';
 export class AppModule {}
 ```
 
-Create the tables with your normal MikroORM migrations. For a quick start (or a shared, multi-owner
-DB), the exported `ensureAgentSchema` helper runs a non-destructive `schema.update({ safe: true })` —
-create + add-column only, never a drop or alter:
+By default (`autoSchema: true`) the module runs `ensureAgentSchema(orm)` on application bootstrap — a
+non-destructive `getUpdateSchemaSQL({ safe: true })` over the agent tables only: create +
+add-column, never a drop or alter. Pass `forFeature({ autoSchema: false })` when your own MikroORM
+migrations own the tables (`agentSchemaSql(this.config)` renders the DDL inside a `Migration`), and
+call the helper yourself if you want it:
 
 ```ts
 import { ensureAgentSchema } from '@dudousxd/nestjs-agent-store-mikro-orm';
 
-await ensureAgentSchema(orm); // safe: true by default
+await ensureAgentSchema(orm);
 ```
 
 It is fingerprint-gated (a steady-state boot is one cheap read) and it verifies itself: what the heal
@@ -381,10 +439,12 @@ pnpm add @dudousxd/nestjs-agent-store-drizzle drizzle-orm
 ```
 
 The host app opens the connection and hands `DrizzleAgentStoreModule.forRoot({ db })` an
-already-opened Drizzle handle — the module never opens one itself. Any SQLite-dialect driver works
-(better-sqlite3, libsql, D1, …).
+already-opened Drizzle handle — the module never opens one itself. SQLite, Postgres and MySQL all
+work: build the handle with `agentSchema`, `pgAgentSchema` or `mysqlAgentSchema` and the stores read
+the dialect off it.
 
 ```ts
+import { Module } from '@nestjs/common';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import {
@@ -392,14 +452,14 @@ import {
   agentSchema,
   ensureAgentSchema,
 } from '@dudousxd/nestjs-agent-store-drizzle';
-import { AgentModule } from '@dudousxd/nestjs-agent';
+import { AgentModule, HeaderActorResolver } from '@dudousxd/nestjs-agent';
 
 const db = drizzle(new Database('app.db'), { schema: agentSchema });
-await ensureAgentSchema(db); // idempotent CREATE TABLE IF NOT EXISTS — or run your own migrations
+await ensureAgentSchema(db); // creates what is missing, never drops — or run your own migrations
 
 @Module({
   imports: [
-    DrizzleAgentStoreModule.forRoot({ db }), // binds AGENT_STORE + AGENT_GOVERNANCE_QUERIES + AGENT_PRICING_STORE
+    DrizzleAgentStoreModule.forRoot({ db }), // binds AGENT_STORE + AGENT_GOVERNANCE_QUERIES + AGENT_PRICING_STORE + AGENT_CONFIRM_TOKEN_STORE
     AgentModule.forRoot({
       model: myModelProvider,
       actorResolver: new HeaderActorResolver(),
@@ -409,17 +469,18 @@ await ensureAgentSchema(db); // idempotent CREATE TABLE IF NOT EXISTS — or run
 export class AppModule {}
 ```
 
-The package ships `agentSchema` (the Drizzle tables), `ensureAgentSchema` (the
-`CREATE TABLE IF NOT EXISTS` helper), `DrizzleAgentStore`, `DrizzleGovernanceQueries`, and
-`DrizzlePricingStore`.
+The package ships the tables per dialect (`agentSchema` · `pgAgentSchema` · `mysqlAgentSchema`),
+`ensureAgentSchema` and `agentSchemaDdl(dialect)`, `DrizzleAgentStore`, `DrizzleGovernanceQueries`,
+`DrizzlePricingStore`, and the rest listed in [`-store-drizzle`](/docs/agent/packages/store-drizzle#exports).
 
 <Callout type="warn" title="ensureAgentSchema is a quick start, not a migration story">
-`ensureAgentSchema` is additive only: `CREATE TABLE IF NOT EXISTS` plus `CREATE INDEX IF NOT EXISTS`,
-and an explicit add-column pass for columns this package introduced after a table shipped (so an
-existing database picks them up on the next boot). It never drops a column, never changes a type, and
-can't express anything else a real migration can. For production, prefer drizzle-kit migrations over
-the helper — treat `ensureAgentSchema` as the "stand it up with no migration files" path (tests,
-demos, first boot). A host on its own migrations owns those additive statements itself.
+`ensureAgentSchema` is additive only: its DDL is rendered from the dialect's schema object, so it
+creates missing tables and adds missing columns and indexes (so an existing database picks them up
+when you next call it — the module does not call it for you). It never drops a column, never changes
+a type, and can't express anything else a real migration can. On Postgres/MySQL it holds a
+cross-replica lock. For production, prefer drizzle-kit migrations pointed at your dialect's schema
+object — treat `ensureAgentSchema` as the "stand it up with no migration files" path (tests, demos,
+first boot). A host on its own migrations owns those additive statements itself.
 </Callout>
 
 </Tab>
@@ -436,9 +497,11 @@ rest of your stack.
 |---|---|---|
 | Import | `MikroOrmAgentStoreModule.forFeature()` | `DrizzleAgentStoreModule.forRoot({ db })` |
 | Connection | MikroORM owns it (`forRoot`) | host owns it, passes `db` in |
-| Schema | MikroORM migrations (or `ensureAgentSchema`) | drizzle-kit migrations (or `ensureAgentSchema`) |
-| Dialects | whatever your MikroORM driver supports | SQLite-dialect (better-sqlite3, libsql, D1, …) |
-| Binds | `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` + `AGENT_PRICING_STORE` | `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` + `AGENT_PRICING_STORE` |
+| Entities / tables | you add `AGENT_ENTITIES` to your MikroORM config | `agentSchema` / `pgAgentSchema` / `mysqlAgentSchema` on your handle |
+| Schema | healed at boot (`autoSchema`, default on), or MikroORM migrations with `agentSchemaSql` | drizzle-kit migrations (or call `ensureAgentSchema` yourself) |
+| Dialects | SQLite, Postgres, MySQL (all CI-tested) | SQLite, Postgres, MySQL (CI: better-sqlite3, node-postgres, mysql2) |
+| Independent approvals | SQLite, Postgres, MySQL | certified drivers only: better-sqlite3, node-postgres, mysql2, libSQL |
+| Binds | `AGENT_STORE` + `AGENT_GOVERNANCE_QUERIES` + `AGENT_PRICING_STORE` + `AGENT_CONFIRM_TOKEN_STORE` | same four |
 
 Reach for the adapter that matches the ORM already in your app. The SPI is the portability guarantee:
 if you migrate ORMs later, only the store module import changes — the agent, the tools, and the
@@ -480,9 +543,14 @@ AgentModule.forRootAsync({
 - A run that fails ends with a terminal row carrying its error: a subscriber replays, then gets the
   stream's `event: error`.
 
-The logic is `SqlTokenStreamSink` in core, over a five-method `StreamFrameTable` (`append`, `read`,
-`has`, `remove`, `lapsedRuns`) — implement that for another database and the rest comes with it;
-`SQL_TOKEN_STREAM_SINK_CONTRACT` in `-testing` checks it.
+Both constructors take an optional second argument, `SqlTokenStreamSinkOptions` (`pollIntervalMs`,
+`idlePollIntervalMs`, `flushMs`, `ttlSeconds`, `autoPurge`). The sink is not bound by the store
+modules — you pass it.
+
+The logic is `SqlTokenStreamSink` in core, over a six-method `StreamFrameTable` (`append`, `read`,
+`has`, `remove`, `lapsedRuns`, `isUniqueViolation`) — implement that for another database and the
+rest comes with it; `SQL_TOKEN_STREAM_SINK_CONTRACT` in `-testing` checks it. The adapters' tables
+are exported as `DrizzleStreamFrameTable` and `MikroOrmStreamFrameTable`.
 
 ## In-memory store for tests
 
@@ -511,4 +579,5 @@ The repo's `examples/agent-demo` is a runnable proof built entirely on these in-
 - [Getting Started](/docs/agent/getting-started) — install, declare a tool, and stream your first turn
 - [Cost & Governance](/docs/agent/guides/cost-and-governance) — the usage ledger, `AGENT_GOVERNANCE_QUERIES`, and the console
 - [Human-in-the-loop & Durability](/docs/agent/guides/human-in-the-loop-and-durability) — when a suspended run is checkpointed to the store
+- [Action proposals](/docs/agent/guides/action-proposals) — independent approvals, which persist through the proposal capabilities above
 - [Identity & Authorization](/docs/agent/guides/identity-and-authorization) — the actor whose ref keys every thread and usage row

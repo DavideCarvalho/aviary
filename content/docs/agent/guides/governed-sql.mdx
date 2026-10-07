@@ -32,7 +32,7 @@ prove safe is rejected, and the error message goes back to the model so it can r
 | 1 | Parse & shape | `SqlValidator` | Rejecting anything that isn't exactly one `SELECT` — no INSERT/UPDATE/DELETE/DDL, no multi-statement strings, no unparseable input |
 | 2 | Table access | `GroupTableAccessPolicy` | Denying any referenced table the caller's roles can't read — an unclassified table, unknown role, or empty role set is denied |
 | 3 | Tenant scope | `TenantScopeRewriter` | AND-ing `tenantColumn = '<tenantRef>'` into every scoped table; rejecting cross-tenant predicates and shapes it can't statically verify |
-| 4 | Row cap | `injectLimit` | Wrapping any un-`LIMIT`ed query in a bounding subquery; a ~256KB result payload is truncated on top |
+| 4 | Row cap | `injectLimit` | Wrapping a query with no `LIMIT`, or one above `maxRows`, in a bounding subquery; a ~256KB result payload is truncated on top |
 
 The order matters: shape is proven before table names are trusted, table access is proven before the
 query is rewritten, and the tenant rewrite happens before the `LIMIT` wrap — so the cap always applies
@@ -69,7 +69,7 @@ const { spec, handler } = createExecuteSqlTool({
     tenantColumn: 'tenant_id',
     scopedTables: ['orders', 'order_items'],
   }),
-  // maxRows: 100,          // default row cap when the query has no LIMIT
+  // maxRows: 100,          // default row cap; a larger LIMIT is capped too
   // validator: myValidator // defaults to a fresh SqlValidator
 });
 ```
@@ -82,7 +82,7 @@ The `ExecuteSqlDeps` options in full:
 | `tableAccess` | `TableAccessPolicy` | — | Coarse table-level allowlist, checked for every referenced table. |
 | `tenantScope` | `TenantScopeRewriter` | — (optional) | Per-row tenant constraint applied before the query runs. |
 | `validator` | `SqlValidator` | fresh instance | The single-SELECT AST validator. |
-| `maxRows` | `number` | `100` | Row cap injected when the query carries no `LIMIT`. |
+| `maxRows` | `number` | `100` | Row cap: injected when the query carries no `LIMIT`, and applied over a larger one. |
 
 ---
 
@@ -147,13 +147,17 @@ that one method yourself and pass it as `tableAccess`.
 
 `TenantScopeRewriter` rewrites an accepted `SELECT` so every reference to a scoped table is constrained
 to a single tenant: `tenantColumn = '<tenantRef>'` is AND-ed into the `WHERE` for each scoped table in
-the `FROM`. The `tenantRef` comes from the tool context (`ctx.actor.tenantRef`), which the agent
+the `FROM` of every `SELECT`, subqueries included (in the select list, `WHERE`, `HAVING` and
+`JOIN … ON`). The `tenantRef` comes from the tool context (`ctx.actor.tenantRef`), which the agent
 derives from the caller's identity — the model never chooses it.
 
 - A query that already carries a matching tenant predicate is left as-is; one that targets a
   **different** tenant is rejected — no cross-tenant reads.
-- `tenantRef === undefined` is the **privileged path**: the SQL passes through unchanged (use it for
-  operators who legitimately query across tenants).
+- An actor with **no `tenantRef`** is refused on any query that reads a scoped table (an anonymous
+  visitor, a `HeaderActorResolver` request with no `x-tenant-ref`, a `req.user` with no tenant field).
+  Queries that read no scoped table still run. For operators who legitimately query across tenants,
+  `new TenantScopeRewriter({ …, onMissingTenant: 'passthrough' })` makes a missing `tenantRef` the
+  privileged path again: the SQL passes through unchanged.
 - Scoped mode fails closed on shapes it can't statically verify — CTEs (`WITH`), `UNION`/`INTERSECT`/
   `EXCEPT`, and subqueries in `FROM` are rejected with a message asking the model to rephrase, because
   it can't guarantee every tenant-bearing source is constrained.
@@ -166,22 +170,30 @@ new TenantScopeRewriter({ tenantColumn: 'tenant_id', scopedTables: ['orders'] })
 -- model wrote:
 SELECT id, total FROM orders WHERE status = 'open';
 
--- runner receives (tenantRef = 'acme'):
-SELECT id, total FROM orders WHERE status = 'open' AND orders.tenant_id = 'acme';
+-- runner receives (tenantRef = 'acme'), re-serialized by the parser in the MySQL dialect:
+SELECT `id`, `total` FROM `orders` WHERE `status` = 'open' AND `tenant_id` = 'acme'
 ```
+
+The added predicate is qualified with the table (or its alias) only when more than one scoped table
+is in the `FROM`.
 
 <Callout type="warn">
 Only tables listed in `scopedTables` are constrained. A tenant-bearing table you forget to list is
 **not** scoped — this layer is an allow-by-omission list, the mirror of Layer 2. Audit `scopedTables`
 against every table that carries a tenant key.
+
+An existing `tenantColumn = '<ref>'` predicate is recognized anywhere in the `WHERE`, including under
+an `OR`, and then no predicate is added for that table. Keep read-only DB
+credentials (and, where you have them, row-level policies) as the real boundary.
 </Callout>
 
 ---
 
 ## Layer 4 — row cap and payload guard
 
-`injectLimit` guarantees a bounded result. If the query already has a `LIMIT` it is untouched;
-otherwise it is wrapped in `SELECT * FROM (<sql>) AS subq LIMIT <maxRows>` (default `100`), which
+`injectLimit` bounds every query to `maxRows`. A query whose own `LIMIT` is within `maxRows` is left
+as written (`LIMIT n`, `LIMIT o, n` and `LIMIT n OFFSET o` are all read); one with no `LIMIT`, or a
+larger one, is wrapped in `SELECT * FROM (<sql>) AS subq LIMIT <maxRows>` (default `100`), which
 preserves any inner `ORDER BY` / `GROUP BY` / `UNION`. On top of the row cap, the handler truncates the
 serialized result once it would exceed ~256KB, keeping the prefix rows and flagging `truncated: true`
 so a single tool result can't blow the model's context.

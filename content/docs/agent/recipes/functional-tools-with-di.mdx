@@ -16,7 +16,7 @@ provider so `AiToolDiscoveryService` picks it up at boot.
 
 ## The contract
 
-From [`functional-tool.ts`](https://github.com/dudousxd/nestjs-agent/blob/main/packages/nestjs/src/functional-tool.ts):
+From [`functional-tool.ts`](https://github.com/DavideCarvalho/nestjs-agent/blob/master/packages/nestjs/src/functional-tool.ts):
 
 ```ts
 /** A tool expressed as data + handler, not an `@AiTool` class. */
@@ -31,11 +31,36 @@ function provideAgentTool(
   factory: (...deps: never[]) => FunctionalTool,
   inject?: FactoryProvider['inject'],
 ): Provider;
+
+// A LIST from one factory — for when the tool count is only known once deps resolve.
+function provideAgentTools(
+  factory: (...deps: never[]) => readonly FunctionalTool[] | Promise<readonly FunctionalTool[]>,
+  inject?: FactoryProvider['inject'],
+): Provider;
 ```
 
 A `ToolSpec` is the same shape a `@AiTool({ ... })` decorator captures — `{ name, kind, description,
-inputSchema, roles?, ability? }` — and a `ToolHandler` is the same `{ execute(input, ctx) }` contract
-a decorated class implements.
+inputSchema, presentation?, roles?, enabled?, ability?, terminal?, ... }` — and a `ToolHandler` is
+the same contract a decorated class implements: `execute(input, ctx)` plus the optional `present`,
+`preflight`, `isEnabled`, `canUse` and `describe` hooks.
+
+`defineTool` (also exported from `@dudousxd/nestjs-agent`) builds the `{ spec, handler }` pair from
+one flat object with inferred input types — `input` instead of `inputSchema`, `kind` defaulting to
+`'read'`, and the handler hooks inline:
+
+```ts
+import { defineTool, provideAgentTool } from '@dudousxd/nestjs-agent';
+import { z } from 'zod';
+
+const upperTool = defineTool({
+  name: 'upper',
+  description: 'Upper-cases the input.',
+  input: z.object({ text: z.string() }),
+  execute: async ({ text }) => ({ text: text.toUpperCase() }), // `text` is typed from the schema
+});
+
+export const UpperToolProvider = provideAgentTool(upperTool);
+```
 
 ---
 
@@ -82,7 +107,82 @@ export class OrdersModule {}
 ```
 
 `provideAgentTool` mints a fresh, unique provide token per call, so the same factory can be used more
-than once (e.g. one tool per configured integration) without collisions.
+than once (e.g. one tool per configured integration) without collisions. When the integrations
+themselves come from an injected config, `provideAgentTools(factory, inject)` returns the whole
+list from one factory (sync or async) and each element is registered.
+
+---
+
+## An action with preflight and a per-call confirmation
+
+An `action` tool parks for approval before it runs. Two optional pieces make that prompt accurate:
+`spec.presentation.confirm` (a template filled from the call's input) and `handler.preflight`, a
+read-only check that runs after authorization and validation — once with `phase: 'prepare'` before
+approval is requested, and again with `phase: 'execute'` right before the side effect.
+
+```ts
+import {
+  provideAgentTool,
+  type AiToolCtx,
+  type FunctionalTool,
+  type ToolPreflightOptions,
+  type ToolPreflightResult,
+} from '@dudousxd/nestjs-agent';
+
+type CancelInput = { orderId: string };
+type CancelOutput = { cancelled: boolean };
+
+function cancelOrderTool(orders: OrdersService): FunctionalTool {
+  return {
+    spec: {
+      name: 'cancelOrder',
+      kind: 'action',
+      description: 'Cancel an open order.',
+      inputSchema: z.object({ orderId: z.string() }),
+      presentation: {
+        label: 'Order cancellation',
+        running: 'Cancelling order {orderId}',
+        done: 'Cancelled order {orderId}',
+        tone: 'destructive',
+        // Fallback wording when preflight returns no confirmation of its own.
+        confirm: { title: 'Cancel order {orderId}?', verb: 'Cancel order' },
+      },
+    },
+    handler: {
+      async preflight(
+        input: CancelInput,
+        ctx: AiToolCtx,
+        _options: ToolPreflightOptions,
+      ): Promise<ToolPreflightResult<CancelOutput>> {
+        const order = await orders.find(input.orderId, ctx.actor.tenantRef);
+        if (!order) return { status: 'denied', reason: 'No such order.' };
+        if (order.status === 'cancelled') return { status: 'completed', output: { cancelled: true } };
+        return {
+          status: 'ready',
+          // Resolved strings, not templates — overrides presentation.confirm for THIS call.
+          confirmation: { title: `Cancel ${order.items} items for $${order.total}?`, verb: 'Cancel order' },
+        };
+      },
+      async execute(input: CancelInput, ctx: AiToolCtx): Promise<CancelOutput> {
+        await orders.cancel(input.orderId, ctx.actor.tenantRef, ctx.idempotencyKey);
+        return { cancelled: true };
+      },
+    },
+  };
+}
+
+export const CancelOrderToolProvider = provideAgentTool(cancelOrderTool, [OrdersService]);
+```
+
+- `denied` returns the reason to the model; `completed` returns an existing result. Both skip
+  approval and execution.
+- Preflight must not write or emit UI. Its `prepare` result is journaled with the call, so a
+  replay neither reruns it nor changes the approval branch. Read tools ignore the hook.
+- It does not replace idempotency or a transaction — pass `ctx.idempotencyKey` to the write.
+
+See [Human-in-the-loop & durability](/docs/agent/guides/human-in-the-loop-and-durability) for how
+the parked call is approved, and [Action proposals](/docs/agent/guides/action-proposals) for
+approving it outside the run.
 
 ---
 

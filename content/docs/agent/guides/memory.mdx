@@ -209,11 +209,12 @@ const verdict = memoryWriteVerdict({
 });
 ```
 
+- Only a scope in the actor's resolved `scopes` can be written at all.
 - Your **own** scope is yours, always.
 - A **wider** scope needs `elevated` — your answer to "may this person administer that scope".
 - **Nothing but a human may write above its own scope**, whatever elevation you grant.
 
-That third rule is the same one [skills](/docs/agent/guides/skills#who-may-write-one) carry, and it
+That last rule is the same one [skills](/docs/agent/guides/skills#who-may-write-one) carry, and it
 bites harder here. A tenant *skill* an agent could publish is a procedure anyone in the tenant can
 edit by talking to the assistant. A tenant *memory* is a **fact everyone in the tenant is then
 answered from** — with no document to inspect, and nobody aware it was written.
@@ -269,7 +270,8 @@ purpose: the endpoint that serves it must not be able to ask a host a question a
 console, with the same elevation a write there needs.
 
 **An id the actor cannot see answers 404, not 403.** Otherwise the endpoint is a way to find out what
-the assistant believes about other people.
+the assistant believes about other people. A memory the actor *can* see but that is held at a wider
+scope (a `tenant:` one) answers 403: deleting it is the console's job.
 
 ### A memory whose conversation is gone
 
@@ -354,7 +356,7 @@ Three clauses, and the third is the one that is easy to miss:
    mistake costs throughput rather than privacy, but **the drop is a backstop, not the boundary**.
 2. **Rank the *keys*** and take the best `limit` of them. Precedence resolves a key to one line, so
    `limit` keys is `limit` lines — the block's own unit.
-3. **Return every record sharing a returned key.** A search that returned the `global` half of a
+3. **Return every record sharing a returned key**, plus every `pinned` record at those scopes. A search that returned the `global` half of a
    conflict and not the `actor:` half would render the org default as the answer: the exact failure
    memory exists to prevent, and one nothing downstream can detect. It is one query either way — the
    subselect above.

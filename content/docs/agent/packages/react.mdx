@@ -45,8 +45,11 @@ function Assistant() {
 
 | Export | What it is |
 |---|---|
-| `AgentProvider` / `useAgentBackend()` | The connection (`baseUrl`, `path`, headers, credentials, upload strategy, `onHttpError`, `genui`) once, for every hook below it / the backend in scope. |
-| `useAgentChat(options?)` | The hook — the AI SDK `useChat` result plus `transcript`, `composer`, `models`, `quota`, `queue`, cancel/approve/reject/answer/skip/fork. Sends made mid-turn queue on the thread (`whileRunning: 'queue' \| 'interrupt' \| 'block'`) — [Typing ahead](/docs/agent/guides/message-queue). |
+| `useAgentUiCapabilities()` | The enclosing provider's `uiCapabilities` (or `undefined`), for your own send path. |
+| `AgentProvider` / `useAgentBackend()` | The connection (`baseUrl`, `path`, headers, credentials, upload strategy, `onHttpError`, `genui`, `uiCapabilities`) once, for every hook below it / the backend in scope. |
+| `useAgentChat(options?)` | The hook — the AI SDK `useChat` result plus `transcript`, `composer`, `models`, `quota`, `queue`, `proposals`, `runError`, cancel/approve/reject/answer/skip/fork. Sends made mid-turn queue on the thread (`whileRunning: 'queue' \| 'interrupt' \| 'block'`) — [Typing ahead](/docs/agent/guides/message-queue). Independent action proposals are read and merged into `messages` by itself — [Frontend](/docs/agent/guides/frontend#approvals-that-do-not-hold-the-turn). |
+| `useActionProposals(backend, threadId, setMessages, refreshKey, pollMs?)` | That proposal reconciliation as a standalone hook (`{ items, error, refresh() }`), for a chat on the SDK's `useChat`; `reconcileProposalMessages` / `proposalNeedsPolling` are its pure pieces. |
+| `UiCapabilities` | `{ components: { name, version }[] }` — what `uiCapabilities` on the provider / `useAgentChat` takes ([Which components this client can draw](/docs/agent/guides/frontend#which-components-this-client-can-draw)). |
 | `useAgentConfig(options?)` | `GET /agent/config` — attachment limits and upload mode, and which features are on; shared per backend. |
 | `AgentBackend` | The interface every hook talks to — implement it over your own client ([Your own backend](/docs/agent/guides/frontend#your-own-backend)). |
 | `AgentClient` | The default `AgentBackend`: a framework-agnostic REST client over this library's routes; usable standalone. |
@@ -57,12 +60,14 @@ function Assistant() {
 | `useQuota(options?)` | Budget windows (`day`/`month`), usage vs ceilings, `blocked`, and `warning` (the fullest window past its `warnAt` soft limit) — `useAgentChat` gates on it by itself. |
 | `useMessageFeedback(options?)` | Thumbs-up/down (+ comment) state and calls for messages, optimistic. |
 | `AgentChatTransport` | The `useChat` transport implementing the `/agent/chat` SSE protocol. |
+| `agUiChatStream(request, { url })` | An `openChatStream` over an AG-UI 1.0 producer, re-framed into this protocol ([AG-UI](/docs/agent/guides/ag-ui)). |
+| `useApprovalCountdown(expiresAt)` / `approvalCountdown` | `{ remainingMs, isExpired }` for an approval's `expiresAt`. |
 | `useToolCatalog(options?)` / `ALL_AGENTS` | Tool presentations for one agent, or with `agent: ALL_AGENTS` every tool the actor reaches through any agent. |
 | `useChatTranscript(options)` | The transcript model — messages normalized into items with their parts grouped into text/reasoning/tool blocks, per-message derived values, each action a state machine, plus list windowing and stick-to-bottom. Renders nothing. |
 | `useTranscriptItem(options)` | The same model for a single message, for a host that lays out the list itself. |
 | `useStickToBottom(options)` | Follow-the-stream-while-at-the-bottom, standalone. Also on `transcript.scroll`. |
 | `ChatInput` | The composer — Enter submits, Shift+Enter newlines, optional dictation, optional stop. |
-| `MessageList` | Windows the thread; typing indicator, error+retry banner, follow-up chips, tool and reasoning rendering; with `queue={chat.queue}`, the messages waiting in the thread's queue and a resume control. |
+| `MessageList` | Windows the thread; typing indicator, error+retry banner, follow-up chips, reasoning and files, tool calls through `renderToolPart` / `renderToolGroup` (no approval or question markup of its own); with `queue={chat.queue}`, the messages waiting in the thread's queue and a resume control. |
 | `MessageItem` | A single message, if you want to lay out the list yourself. |
 | `MessageItemView` | The default markup for one item you modelled yourself. |
 | `useSpeechRecognition` | Browser dictation hook backing `ChatInput`'s optional mic button. |
@@ -78,8 +83,15 @@ Subpath `@dudousxd/nestjs-agent-react/genui` exports `GenuiProvider`, `Generativ
 `useGenerativeUI`, `GenerativeUIScope` and `GenuiTree` — the headless renderer for server-pushed
 components (registry, optional catalog validation, versioned `resolveComponent`, per-item error
 boundaries, `genui:tree` frames). Put `<GenuiProvider>` at the root and `MessageItem` draws pushed
-components with no `renderUi`. `/genui/json-render` exports the same provider with a `jsonRender`
-option. See the [Generative UI guide](/docs/agent/guides/generative-ui).
+components with no `renderUi`. It also exports `createReactComponentRegistry`, one registry for the
+browser and server rendering. `/genui/json-render` exports the same provider with a `jsonRender`
+option; `/genui/server` (`createReactServerRenderer`) and `/genui/server/playwright`
+(`createPlaywrightCaptureAdapter`) render components outside the browser. See the
+[Generative UI guide](/docs/agent/guides/generative-ui) and
+[Component rendering](/docs/agent/guides/component-rendering).
+
+Subpath `@dudousxd/nestjs-agent-react/media` exports `mediaAttachments()`, `createMediaUpload` and
+`MediaUploadError` — resumable uploads through nestjs-media ([File uploads](/docs/agent/guides/file-uploads)).
 
 ## Headless, in the TanStack sense
 
@@ -95,7 +107,7 @@ const transcript = useChatTranscript({
   onStop: () => chat.cancel(),
 });
 
-transcript.items[0].blocks;        // [{ kind: 'reasoning' | 'text' | 'tools', … }]
+transcript.items[0].blocks;        // [{ kind: 'text' | 'reasoning' | 'tools' | 'files' | 'ui' | 'elicitation' | 'sources', … }]
 transcript.items[0].copy;          // { available, copied, copy() }
 transcript.items[0].edit;          // { isEditing, draft, canSave, save(), getTextareaProps() }
 transcript.window;                 // { hiddenCount, canLoadEarlier, loadEarlier() }
@@ -164,6 +176,8 @@ mount) are the client-side hooks that make that invisible.
 | `streamdown`, `@streamdown/code`, `@streamdown/math`, `@streamdown/mermaid`, `react-markdown`, `remark-gfm`, `remark-math`, `rehype-katex`, `rehype-sanitize`, `katex`, `prism-react-renderer`, `unist-util-visit` | Optional — only if you import the `/markdown` subpath. |
 | `@json-render/react` (>=0.21) | Optional — only if you import the `/genui/json-render` subpath. |
 | `@dudousxd/nestjs-media-client` (>=0.3) | Optional — only if you import the `/media` subpath (`mediaAttachments`, `createMediaUpload`; see [File uploads](/docs/agent/guides/file-uploads)). |
+| `react-dom` (>=18) | Optional — only for the `/genui/server` subpath. |
+| `playwright-core` (>=1.48) | Optional — only for the `/genui/server/playwright` subpath. |
 
 ## When to use it
 

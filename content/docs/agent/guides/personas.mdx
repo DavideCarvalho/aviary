@@ -110,6 +110,11 @@ carry the recorded allow-list rather than the worker's current config. A run tha
 spends no checkpoint on one, which is every run started before personas existed: those replay on the
 sequence they recorded after the upgrade.
 
+An [independent action proposal](/docs/agent/guides/action-proposals) is executed outside any run,
+by the proposal worker, so it does not read that checkpoint: it records the agent and persona it was
+proposed under, and execution resolves both against the configuration in force at that moment —
+applying that persona's current allow-list, and failing when either has been removed.
+
 ## Folding agents into personas
 
 An app that modelled variants as separate agents can fold them into one agent's personas without a

@@ -14,7 +14,7 @@ system prompt — has a default you can override one option at a time.
 
 ## Prerequisites
 
-- **Node.js 20+**, **NestJS 10+** (v10 and v11 are supported) on the Express platform
+- **Node.js 20+**, **NestJS 10+** (v10, v11 and v12 are supported) on the Express platform
 - **TypeScript 5+** with `experimentalDecorators` and `emitDecoratorMetadata` enabled
 - A model — any Vercel AI SDK v7 `LanguageModel` (`openai('gpt-5-mini')`, `anthropic('claude-sonnet-4-5')`,
   an AI Gateway id like `'openai/gpt-5-mini'`), or anything implementing the `ModelProvider` SPI
@@ -179,6 +179,7 @@ Continue with [Hello chat](/docs/agent/hello-chat) (the smallest end-to-end app)
 | One model, no picker | `model: aiSdkModels({ fast: …, smart: … }, { default: 'fast' })` |
 | Usage reported, never enforced | `quota: { limits: { day: { tokens: 200_000 }, month: { usd: 20 } } }` |
 | Turns run in-process | `durable: true` + `AgentDurableModule` ([Runners](/docs/agent/concepts/runners)) |
+| An `action` call holds its turn until someone decides | `actionApprovalMode: 'independent'` + a `backgroundActorResolver` — the turn finishes and the call waits as a proposal ([Action proposals](/docs/agent/guides/action-proposals)) |
 | Routes under `/agent` | `path: 'api/agent'` (and `<AgentProvider path="api/agent">` on the client) |
 
 <Callout type="warn" title="Before you go public">

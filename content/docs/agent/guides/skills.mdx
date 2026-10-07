@@ -62,7 +62,7 @@ flight when that deployment rolled would replay against a sequence one position 
   scope: 'tenant:berlin',
 })
 @Injectable()
-export class NormalizeUnitSkill implements SkillBody {
+export class LabelPalletSkill implements SkillBody {
   constructor(private readonly units: UnitService) {}
 
   body(ctx: SkillContext): string {
@@ -74,6 +74,7 @@ Known aliases for this base: ${this.units.aliasesFor(ctx.actor.tenantRef).join('
 
 The class is an ordinary provider, so it gets constructor DI — the reason a skill is a class and not
 a config entry. For a body that never varies, `@Skill({ name, description, body: '…' })` is enough.
+Omit `scope` and the skill publishes at `'global'`.
 
 ## Serving them from your own table
 
@@ -84,16 +85,17 @@ Implement `SkillProvider` and hand it over:
 skills: {
   provider: {
     // Asked on EVERY turn: keep it cheap, catalog columns only.
-    list: (scopes) => this.repo.find({ scope: { $in: [...scopes] } }, {
+    list: ({ scopes }) => this.repo.find({ scope: { $in: [...scopes] } }, {
       fields: ['name', 'description', 'scope'],
     }),
     // Asked only when the model actually wants that procedure.
-    load: (name, scope) => this.repo.findOne({ name, scope }).then((row) => row?.body ?? null),
+    load: ({ name, scope }) => this.repo.findOne({ name, scope }).then((row) => row?.body ?? null),
   },
 }
 ```
 
-Both sources feed one catalog. Between two skills of the same name *at the same scope*, the provider
+Both calls take one object (`{ scopes, ctx }`, `{ name, scope, ctx }`), so `name` and `scope` cannot
+be transposed. A row `list` returns outside `scopes` is dropped, not trusted. Both sources feed one catalog. Between two skills of the same name *at the same scope*, the provider
 you wired wins over a decorated class — the one you can edit without a deploy is the better answer.
 
 <Callout type="info">
@@ -149,6 +151,7 @@ const verdict = skillWriteVerdict({
 });
 ```
 
+- Only a scope in the actor's resolved `scopes` can be written at all.
 - Your **own** scope is yours, always.
 - A **wider** scope needs `elevated` — your answer to "may this person administer that scope".
 - **Nothing but a human may write above its own scope**, whatever elevation you grant. An agent that

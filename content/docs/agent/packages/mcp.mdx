@@ -138,6 +138,7 @@ has.
 |---|---|
 | the `action` default | A poisoned description can make the model *propose* a call; a human still approves it. Widening `kind` is what spends this. |
 | `include` | The tools you reviewed, by name — a server that grows a new tool cannot put it in your prompt. |
+| `screen` | A check on every listed definition **before** it is imported; a refused tool never reaches the prompt. |
 | `roles` / `ability` / `canUse` | The imported tool reaches the actors you allowed and nobody else. |
 | an agent's `tools` allow-list | The remote tool exists for one persona, not for the whole chat surface. |
 | `importedTools()` | The descriptions actually in your prompt. Log them at boot, diff them between deploys, alert when one changes. |
@@ -176,7 +177,28 @@ tag walks out of the fence unless you strip it first. What it buys is that the p
 labelled as data instead of as prose the model reads on equal terms with your own prompt.
 
 A tool **description** is never in the transcript, so nothing on that seam can see it. Descriptions
-are handled by `include` and by reviewing `importedTools()`.
+are handled by `include`, by `screen`, and by reviewing `importedTools()`.
+
+### Screening definitions
+
+`screen` — per server, or module-wide as `AgentMcpModule.forRoot({ servers, screen })` (a server's own
+wins) — receives `{ server, name, title?, description?, inputSchema }` and returns `{ allowed: true }`
+or `{ allowed: false, reason }`. Core's guardrails ship a tool-poisoning check in that shape:
+
+```ts
+import { createGuardrails } from '@dudousxd/nestjs-agent-core/guardrails';
+
+const guardrails = createGuardrails({ toolPoisoning: true });
+
+AgentMcpModule.forRoot({
+  servers: [/* … */],
+  screen: guardrails.screenTool, // bound to its instance, so it can be passed as is
+});
+```
+
+A refused tool is skipped and logged, like one whose schema will not compile. A screen that
+**throws** skips the tool too. It runs on every import, so `refresh()` re-screens a server whose
+descriptions changed after boot.
 
 ---
 
@@ -223,8 +245,8 @@ Two servers configured under the same `name` are refused at boot. A name identif
 shared one leaves every one of those pointing at an arbitrary member of the pair.
 </Callout>
 
-`McpToolsService.importedTools()` reports what is registered right now, and which server each tool
-came from.
+`McpToolsService.importedTools()` reports what is registered right now — `{ name, serverName,
+remoteName, description }` per tool.
 
 ---
 
@@ -272,7 +294,8 @@ the screen then only costs you tools it can no longer protect you from.
 | Failure | What happens |
 |---|---|
 | Server unreachable at boot | Logged; its tools are simply not registered. The app boots. `required: true` fails boot instead. |
-| Server hangs on a call | The SDK's own request timeout fires (`requestTimeoutMs`, default 30s) and cancels the request on the wire. |
+| Server slow to handshake | `connectTimeoutMs` (default 10s) caps the MCP initialize handshake. |
+| Server hangs on a call | The SDK's own request timeout fires (`requestTimeoutMs`, default 30s, also caps `tools/list`) and cancels the request on the wire. |
 | Connection dropped, socket reset, `429`/`503` | Classified transient, the client is recycled, and the call is retried on a fresh connection. |
 | Tool answers `isError` | Thrown as `McpToolCallError` — recorded as a failed tool call, and the turn carries on. Never retried, whatever its text says. |
 | `InvalidParams`, `MethodNotFound` | Not retried. The identical request would be refused identically. |
@@ -299,6 +322,12 @@ constructor(private readonly mcp: McpToolsService) {}
 await this.mcp.refresh('docs'); // or refresh() for every server
 ```
 
+`refresh` returns how many tools the re-imported servers just claimed (not the registry total). It
+also **retires** tools: a name the server owns but no longer lists is removed from the registry
+(`ToolRegistry.unregister`), so the model is not offered a tool that would fail at the remote. A
+server that could not be reached retires nothing — only an actual answer (even an empty list) does —
+and a name the server lost in a collision is never touched.
+
 ---
 
 ## Transports
@@ -319,13 +348,14 @@ await this.mcp.refresh('docs'); // or refresh() for every server
 | Export | What it is |
 |---|---|
 | `AgentMcpModule.forRoot(options)` / `.forRootAsync(options)` | The NestJS wiring. |
-| `McpToolsService` | Imports at boot, closes at shutdown; `refresh(serverName?)` re-imports, `importedTools()` reports. |
-| `McpToolSource` | One server as a source of tools, framework-free — `import()` / `close()`. |
-| `McpServerConfig` | One server's transport, gating, naming, kind policy and resilience settings. |
+| `McpToolsService` | Imports at boot, closes at shutdown; `refresh(serverName?)` re-imports (and retires tools no longer listed), `importedTools()` reports `McpRegisteredTool[]`. |
+| `McpToolSource` | One server as a source of tools, framework-free — `new McpToolSource(config, logger?)`, `import()` → `McpImportedTool[]` (`{ spec, handler, remoteName, serverName }`), `close()`. |
+| `McpServerConfig` | One server's transport, gating, naming, kind policy, screen and resilience settings. Also `clientInfo` (handshake identity, default `nestjs-agent-mcp`). |
+| `McpToolScreen` · `McpToolScreenInput` · `McpToolScreenVerdict` | The `screen` hook's types. |
 | `isTransientMcpError(error)` | The classifier, in the shape `toolTransientRetry.classify` takes. |
 | `mcpInputSchema(jsonSchema, options?)` | JSON Schema → the Standard Schema `ToolSpec.inputSchema` requires. |
 | `resolveMcpToolKind(tool, policy)` | The kind decision on its own. |
-| `localToolName(server, remote, namespace)` | The namespacing + sanitizing rule. |
+| `localToolName(server, remote, namespace)` · `MAX_TOOL_NAME_LENGTH` (64) | The namespacing + sanitizing rule. |
 | `isUnsafeRegex(pattern)` / `findUnsafePattern(schema)` | The backtracking screen on its own. |
 | `McpToolCallError` | A tool that answered `isError`. |
 | `AGENT_MCP_OPTIONS` | The options DI token. |

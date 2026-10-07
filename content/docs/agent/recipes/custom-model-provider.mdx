@@ -16,7 +16,7 @@ loop, the tool registry, or durability leaks into this interface — you only tr
 
 ## The contract
 
-From [`model-provider.ts`](https://github.com/dudousxd/nestjs-agent/blob/main/packages/core/src/spi/model-provider.ts) and [`token-stream-sink.ts`](https://github.com/dudousxd/nestjs-agent/blob/main/packages/core/src/spi/token-stream-sink.ts):
+From [`model-provider.ts`](https://github.com/DavideCarvalho/nestjs-agent/blob/master/packages/core/src/spi/model-provider.ts) and [`token-stream-sink.ts`](https://github.com/DavideCarvalho/nestjs-agent/blob/master/packages/core/src/spi/token-stream-sink.ts):
 
 ```ts
 interface ModelTurnArgs {
@@ -26,6 +26,10 @@ interface ModelTurnArgs {
   /** The model writes streamed text deltas here as it generates them. */
   sink: SinkWriter;
   abortSignal?: AbortSignal;
+  /** Set only on the structured-output formatting pass (always with `tools: []`). Ignoring it is safe. */
+  outputSchema?: StandardSchemaV1;
+  /** The catalog id picked for this turn (per-send or thread-pinned). Absent → your default. */
+  model?: string;
 }
 
 /** The outcome of ONE assistant turn. The loop — not the model — drives tool execution. */
@@ -37,11 +41,16 @@ interface ModelTurnResult {
   modelId?: string;
   /** A gateway's ACTUAL reported spend for the turn; omit it and the read-model estimates instead. */
   costUsd?: number;
+  /** Already-parsed reply when you constrained generation to `outputSchema` (the loop re-validates). */
+  object?: unknown;
+  // ...plus optional reasoning / reasoningMs / ui overrides, derived from the sink frames when omitted.
 }
 
 interface SinkWriter {
   write(chunk: Uint8Array): void | Promise<void>;
   end(): void | Promise<void>;
+  fail(error: StreamError): void | Promise<void>;
+  flush?(): void | Promise<void>;
 }
 
 /**
@@ -55,8 +64,8 @@ interface ModelProvider {
 ```
 
 <Callout type="warn" title="Never execute a tool inside runTurn">
-Tools are handed to your provider as `ToolDefinition[]` — name, kind, description, input schema,
-**no handler**. When the model asks to call one, translate that into a `ToolCallRequest` (`{ id,
+Tools are handed to your provider as `ToolDefinition[]` — `name`, `kind`, `description`,
+`inputSchema` (a Standard Schema), **no handler**. When the model asks to call one, translate that into a `ToolCallRequest` (`{ id,
 name, input }`) and return it in `toolCalls`. Do not look up a handler and run it here — the agent
 loop validates the input, checks authorization, and executes the tool as its own (durable-safe)
 step. A provider that executes tools breaks replay: a crashed-and-resumed durable turn would run
@@ -71,13 +80,20 @@ This adapts a hypothetical streaming HTTP completions endpoint — the shape you
 internal gateway. Swap the fetch/parsing block for your real client; the sink and return-shape
 plumbing around it stays the same regardless of what you're calling.
 
+The sink is a byte channel the client reads as **NDJSON `AgentStreamEvent` frames** — write each
+delta through `encodeStreamEvent({ kind: 'text', text })`, not as raw text bytes. The React client
+drops any `data:` frame that isn't a JSON object with a `kind`, so bare text would never render
+live (it still lands in the persisted message via `text`). See the
+[stream events reference](/docs/agent/reference/stream-events).
+
 ```ts
 // src/model/raw-http-model.ts
-import type {
-  ModelProvider,
-  ModelTurnArgs,
-  ModelTurnResult,
-  ToolCallRequest,
+import {
+  encodeStreamEvent,
+  type ModelProvider,
+  type ModelTurnArgs,
+  type ModelTurnResult,
+  type ToolCallRequest,
 } from '@dudousxd/nestjs-agent';
 
 type StreamEvent =
@@ -102,7 +118,7 @@ export function rawHttpModel(endpoint: string, apiKey: string): ModelProvider {
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      const encoder = new TextEncoder();
+      let buffered = '';
       let text = '';
       let inputTokens = 0;
       let outputTokens = 0;
@@ -113,7 +129,10 @@ export function rawHttpModel(endpoint: string, apiKey: string): ModelProvider {
         if (done) {
           break;
         }
-        for (const line of decoder.decode(value).split('\n')) {
+        buffered += decoder.decode(value, { stream: true });
+        const lines = buffered.split('\n');
+        buffered = lines.pop() ?? ''; // keep a partial trailing line for the next chunk
+        for (const line of lines) {
           if (!line.startsWith('data:')) {
             continue;
           }
@@ -121,8 +140,20 @@ export function rawHttpModel(endpoint: string, apiKey: string): ModelProvider {
           if (event.type === 'text-delta') {
             text += event.delta;
             // Stream to the live data plane — this is NOT tool execution, just token transport.
-            await args.sink.write(encoder.encode(event.delta));
+            await args.sink.write(encodeStreamEvent({ kind: 'text', text: event.delta }));
           } else if (event.type === 'tool-call') {
+            // Optional: a live tool-call card on the client (aiSdkModel emits this too). The wire
+            // toolKind is only 'read' | 'action' — every other ToolKind collapses to 'read'.
+            const kind = args.tools.find((tool) => tool.name === event.name)?.kind;
+            await args.sink.write(
+              encodeStreamEvent({
+                kind: 'tool-input-available',
+                id: event.id,
+                name: event.name,
+                input: event.input,
+                toolKind: kind === 'action' ? 'action' : 'read',
+              }),
+            );
             // Translate the endpoint's tool-call event into a request for the loop to run.
             toolCalls.push({ id: event.id, name: event.name, input: event.input });
           } else {
@@ -143,7 +174,7 @@ Wire it in exactly where any `ModelProvider` goes:
 ```ts
 AgentModule.forRoot({
   model: rawHttpModel(process.env.LLM_ENDPOINT ?? '', process.env.LLM_API_KEY ?? ''),
-  // ...store, actorResolver, etc.
+  // everything else is optional — `forRoot({ model })` alone is a working setup
 });
 ```
 

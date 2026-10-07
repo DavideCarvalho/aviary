@@ -85,9 +85,16 @@ prompt app-wide — the way to inject a mentions legend or a schema hint without
 
 <Callout type="warn" title="handoff targets are validated at boot">
 Referencing an unregistered agent throws at startup — it no longer silently creates a handoff to an
-unrestricted phantom agent. Agent-to-agent delegation depth is also capped at `MAX_DELEGATION_DEPTH`
-(5, exported from `@dudousxd/nestjs-agent-core`); an orchestrator chain deeper than that fails the
-same way.
+unrestricted phantom agent.
+</Callout>
+
+<Callout type="info" title="Cycles and depth are refused at runtime">
+A delegation that would put the same agent on one chain twice (`A → B → A`) is refused as a cycle;
+`maxAgentAppearances` (default `1`, `DEFAULT_MAX_AGENT_APPEARANCES`) raises that, counting
+appearances, so `2` admits one deliberate return. A chain longer than `maxDelegationDepth` (default
+`5`, `MAX_DELEGATION_DEPTH`) is refused too. Both are per-agent `@Agent` options. A refusal does not
+fail the run: the delegate tool's result is the reason, e.g.
+`(delegation cycle: alpha → beta → alpha — alpha 2 times on one chain)`, and the model goes on.
 </Callout>
 
 ---
@@ -105,7 +112,8 @@ Every `handoff` target becomes a real `agent`-kind tool in the registry. The nam
 
 The tool's description is generated for the model — `Delegate a task to the "weather-analyst" agent
 and get its answer.` — and, when the target's `systemPrompt` is a flat string, that prompt is
-appended so the orchestrator's model knows what the specialist is *for*. (A `PromptBuilder` prompt is
+appended (`It is: …`) so the orchestrator's model knows what the specialist is *for*. A detached
+edge's description says instead that the call returns a receipt, not an answer. (A `PromptBuilder` prompt is
 per-request and would stringify to source, so it's skipped.)
 
 The orchestrator's effective tool allow-list is its own `tools` **plus** these synthesized delegate
@@ -120,7 +128,7 @@ tools:
 
 <Callout type="info" title="You never write the delegate tool">
 There is no `@AiTool` for delegation. The discovery service synthesizes one `agent`-kind entry per
-edge at startup and logs `registered N AI tool(s) and M delegate tool(s)`. The handler is never
+edge at startup and logs `registered N AI tool(s), F functional tool(s) and M delegate tool(s)`. The handler is never
 called — delegation is resolved at the loop level, not by a tool handler.
 </Callout>
 
@@ -163,6 +171,12 @@ decorator is per-agent and overrides the shared defaults for that agent's turns:
 | `handoff` | `(Type \| { agent: Type; detached?: boolean })[]` | Other `@Agent` classes this agent may hand off to. A bare class becomes an `ask_<name>` tool the turn waits on; `{ agent, detached: true }` becomes a `start_<name>` tool the turn does not. |
 | `model` | `string` | Accounting/label override for this agent's turns (the model provider itself is shared). |
 | `maxSteps` | `number` | Tool-calling step cap for this agent's loop (default `8`). |
+| `maxDelegationDepth` | `number` | How deep delegation may nest below this agent (default `5`). |
+| `maxAgentAppearances` | `number` | How many times one agent may appear on a single delegation chain (default `1`). |
+| `history` | `AgentHistoryWindow` | Per-agent history ceiling — see [Conversation history](/docs/agent/guides/conversation-history). |
+| `outputSchema`, `outputRepairAttempts` | `StandardSchemaV1`, `number` | See [Structured output](/docs/agent/guides/structured-output). |
+| `intake`, `ask` | `AgentIntake`, `boolean` | See [Asking the user](/docs/agent/guides/asking-the-user). |
+| `personas`, `defaultPersona` | `Persona[]`, `string` | See [Personas](/docs/agent/guides/personas). |
 
 So each agent runs its **own system prompt, its own model label, and its own tool allow-list** —
 and that allow-list is further **intersected with the actor's role/ability gate** on each tool. An
@@ -188,15 +202,8 @@ the execution mode differs by runner:
   completion before the orchestrator's turn continues.
 
 Either way the sub-agent's result comes back as `{ text }` and is persisted as the delegate tool's
-output. A tool that needs to spawn a sub-agent itself can do so through the loop context:
-
-```ts
-async execute(input: { topic: string }, ctx: AiToolCtx) {
-  // ctx.runAgent runs another registered agent with delegation-aware execution
-  const { text } = await ctx.runAgent!('weather-analyst', input.topic);
-  return { summary: text };
-}
-```
+output. Delegation is reachable only through a `handoff` edge: a tool handler's `AiToolCtx` carries no
+way to start another agent.
 
 <Callout type="warn" title="Wire durability before you rely on it">
 The durable child run needs `durable: true` plus `AgentDurableModule` and a configured
@@ -274,7 +281,7 @@ tools, so an orchestrator may wait when it matters and background when it does n
 | | Awaited (`ask_<name>`) | Detached (`start_<name>`) |
 |---|---|---|
 | The parent turn | suspends until the child answers | ends; the child keeps running |
-| Durable primitive | `ctx.child` (suspend + join) | `ctx.startChild` (`spawn:<id>`, no suspend) |
+| Durable primitive | `ctx.child` (suspend + join) | a journaled `detach:<toolCallId>` step that starts an independent run (no suspend, not a child) |
 | The call's result | the child's `{ text }` | a `DetachedDelegationReceipt` |
 | Streaming | forwards into the parent's sink, so the human watching sees it | its own sink, on its own run id |
 | An `action` tool it hits | an approval card in the live turn | the [pending-approvals inbox](/docs/agent/guides/cost-and-governance), routed by the call's own run |
@@ -294,8 +301,11 @@ other run), which is what lets a client show a background agent working rather t
 - **Nobody comes back.** The answer is a persisted message. It is there on the next read of the
   thread, whether that is in five minutes or next week.
 - **Someone stops it.** `POST /agent/chat/:runId/cancel` on its own id — the receipt carries it.
-  Cancelling the turn that STARTED it takes it with it: the durable runtime cascades a cancel to a
-  run's children, started or awaited.
+  Stopping it while it is parked on a human settles its card `cancelled` and posts a "stopped"
+  message. Stopping the turn that STARTED it does **not** stop it: under the durable runner it is
+  started as a run of its own rather than a child, so the runtime's cancel cascade does not reach it
+  (it still records `parentRunId`). A run that journaled the older `spawn:` step before this change
+  replays unchanged.
 - **The thread is deleted.** The run is not resurrected into a conversation nobody kept — delivery
   is skipped when the thread is gone. The work already done cannot be un-done, only undelivered.
 - **It dies before answering.** The runner posts a message saying so and settles the delegation's
@@ -313,7 +323,8 @@ Whether a delegation detaches is settled inside the call's `persist:toolcall` ch
 kind and its target — never from a registry lookup in whichever process happens to be replaying. So
 flipping an edge to detached changes what NEW runs do and nothing about a run already in flight,
 which keeps replaying the branch its history holds. The loop writes the same checkpoint names either
-way; only the runner's own positions differ.
+way; only the runner's own positions differ (`ctx.child` for an awaited edge; `detach:<toolCallId>`,
+behind the `agent:detached-unlinked` patch marker, for a detached one).
 </Callout>
 
 ---

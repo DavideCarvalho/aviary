@@ -25,8 +25,10 @@ an answer:
 | `AgentStore` | Threads, messages, tool calls (the write path) | MikroORM or Drizzle (`-store-mikro-orm`, `-store-drizzle`); `InMemoryAgentStore` (`-core`, the module's fallback when no store is configured) |
 | `AgentGovernanceQueries` | Spend/usage read-model (the analytics path) | Same MikroORM/Drizzle store packages; `InMemoryGovernanceQueries` (`-testing`) |
 | `ActorResolver` | Who's calling | `AnonymousActorResolver` (`-nestjs`, the default — one identity per browser); `requestUserActorResolver()` (`req.user`); `HeaderActorResolver` (gateway-only) |
-| `RolesPolicy` | May this actor call this tool | `DefaultRolesPolicy` (role set-intersection, `-core`); `AuthzRolesPolicy` (`-authz`, delegates to a `nestjs-authz` Gate) |
-| `TokenStreamSink` | Live token transport (the data plane) | `InProcessTokenStreamSink` (`-nestjs`, the module default); for multi-pod fleets — required under `durable: true`, whose steps dispatch across the fleet — `RedisTokenStreamSink` (`-transport-redis`) via `forRoot({ sink })` |
+| `RolesPolicy` | May this actor call this tool | `DefaultRolesPolicy` (role set-intersection, empty list open, `-core`); `ClosedRolesPolicy` (empty list denies — bound by `emptyRoles: 'deny'`); `AuthzRolesPolicy` (`-authz`, delegates to a `nestjs-authz` Gate) |
+| `ApprovalPolicy` | Whether an `action` call needs approval, who decides, and its expiry | `DefaultApprovalPolicy` (`-core`: every `action`, decided by the requester, no expiry); yours via `approvalPolicy` |
+| `ActionProposalStore` (+ worker / outcome capabilities) | Independent action proposals: decisions, fenced execution leases, outcome delivery — only with `actionApprovalMode: 'independent'` | `InMemoryActionProposalStore` (`-core`, one process); the MikroORM and Drizzle stores |
+| `TokenStreamSink` | Live token transport (the data plane) | `InProcessTokenStreamSink` (`-nestjs`, the module default); for multi-pod fleets — which a durable fleet is, since its steps dispatch across workers — `RedisTokenStreamSink` (`-transport-redis`, or `@dudousxd/nestjs-agent/sink-redis`) or the polling SQL sinks `DrizzleTokenStreamSink` / `MikroOrmTokenStreamSink`, via `forRoot({ sink })` |
 | `QuotaProvider` | The actor's budget windows, and whether one blocks sends | `LedgerQuotaProvider` (`-nestjs`, ledger-backed; ceilings via `quota: { limits }`); your own via `quota: provider` |
 | `AgentRunner` | Executing a turn | `InlineAgentRunner` (`-nestjs`, the module default); the durable runner from `AgentDurableModule` |
 
@@ -35,10 +37,13 @@ an answer:
 single store adapter binds both, so you configure persistence once. See
 [Persistence](/docs/agent/guides/persistence) and [Cost & Governance](/docs/agent/guides/cost-and-governance).
 
-<Callout type="info" title="No SPI has an unsafe default">
-Most SPIs ship a working default (`DefaultRolesPolicy`, `InProcessTokenStreamSink`,
-`InlineAgentRunner`). `ActorResolver` is the deliberate exception: there is no default at all — it's
-a required field on `AgentModuleOptions`, so the agent never fabricates a caller. See
+<Callout type="info" title="Every SPI has a working default — know which are open">
+`AgentModule.forRoot({ model })` runs with defaults for everything else (`InMemoryAgentStore`,
+`InProcessTokenStreamSink`, `InlineAgentRunner`, `LedgerQuotaProvider`, `DefaultRolesPolicy`,
+`AnonymousActorResolver`). Two of those are open by design: without `actorResolver` the endpoints are
+public and every browser is its own anonymous actor (logged at boot), and `DefaultRolesPolicy` treats
+a tool with no roles as callable by anyone. Set `actorResolver` (e.g. `requestUserActorResolver()`)
+to require login, and `emptyRoles: 'deny'` or `defaultRoles` to close unscoped tools. See
 [Identity & Authorization](/docs/agent/guides/identity-and-authorization).
 </Callout>
 
@@ -124,7 +129,7 @@ degrades to a graceful no-op, not an error):
 Every run also emits diagnostics **spans** — not just the point events on `aviary:agent:*` — so a
 single turn can be reconstructed as a nested waterfall instead of a flat event list:
 
-- Four span events: `llm.turn`, `tool.execution`, `retrieval`, `follow-ups` — each correlated by
+- Five span events: `llm.turn`, `tool.execution`, `retrieval`, `follow-ups`, `structured-output` — each correlated by
   **`traceId = runId`**, emitted from *inside* the checkpointed step body that does the real work
   (including from `AgentRunSteps.llm`/`.tool` when a step is dispatched, so a span comes from
   whichever worker actually executed it). A replayed (cached) step never re-emits its span.
