@@ -46,7 +46,7 @@ to change, `configure-pages` reports an empty base path automatically.
 
 ### Keeping docs in sync
 
-The 6 synced libraries keep their docs in their own repos, so editing them there does **not**
+The synced libraries (every entry in `scripts/docs-sources.mjs`) keep their docs in their own repos, so editing them there does **not**
 rebuild Aviary on its own. Three triggers handle that:
 
 - **Scheduled** — the deploy workflow runs on a cron (every 3 hours) and re-syncs + redeploys,

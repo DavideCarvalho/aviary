@@ -1,5 +1,0 @@
-{
-  "title": "Concepts",
-  "icon": "Lightbulb",
-  "pages": ["architecture", "the-agent-loop", "runners", "governance"]
-}

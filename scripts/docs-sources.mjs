@@ -106,4 +106,52 @@ export const sources = [
     repoDir: "nestjs-resilience",
     migrated: true,
   },
+  {
+    slug: "agent",
+    name: "Agent",
+    description:
+      "A governed AI agent for NestJS — chat + tools + RBAC + quota + HITL, each turn an optionally-durable workflow.",
+    icon: "Bot",
+    repo: "DavideCarvalho/nestjs-agent",
+    ref: "master",
+    path: "website/content/docs",
+    repoDir: "nestjs-agent",
+    migrated: true,
+  },
+  {
+    slug: "authz",
+    name: "Authz",
+    description:
+      "Laravel-style Gates & Policies for NestJS — a zero-dependency authorization core.",
+    icon: "ShieldCheck",
+    repo: "DavideCarvalho/nestjs-authz",
+    ref: "main",
+    path: "website/content/docs",
+    repoDir: "nestjs-authz",
+    migrated: true,
+  },
+  {
+    slug: "context",
+    name: "Context",
+    description:
+      "Shared AsyncLocalStorage context for NestJS — user, tenant and traceId across the request.",
+    icon: "Boxes",
+    repo: "DavideCarvalho/nestjs-context",
+    ref: "main",
+    path: "website/content/docs",
+    repoDir: "nestjs-context",
+    migrated: true,
+  },
+  {
+    slug: "diagnostics",
+    name: "Diagnostics",
+    description:
+      "A vendor-neutral diagnostics channel for the NestJS ecosystem — emit once, observe anywhere.",
+    icon: "Activity",
+    repo: "DavideCarvalho/nestjs-diagnostics",
+    ref: "main",
+    path: "website/content/docs",
+    repoDir: "nestjs-diagnostics",
+    migrated: true,
+  },
 ];
