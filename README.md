@@ -75,6 +75,25 @@ rebuild Aviary on its own. Three triggers handle that:
               -d '{"event_type":"lib-docs-updated"}'
   ```
 
+### Docs versions
+
+Each library's latest docs (its default branch, `ref` in `scripts/docs-sources.mjs`) are served at
+`/docs/<slug>/...`. Older majors are pinned to a git tag and served at `/docs/<slug>/<id>/...`, with a
+version dropdown in the sidebar and an "older version" banner on every page. Search, `llms.txt` and
+`llms-full.txt` cover only the latest docs.
+
+When a library ships a new major (say durable 1.0), in its entry in `scripts/docs-sources.mjs`:
+
+1. Prepend the previous major to `versions`, pinned to its **last** release tag of the main package:
+   `{ id: 'v0', label: '0.x', ref: '@dudousxd/nestjs-durable@0.55.2' }`. Add `path: '...'` only if the
+   docs lived somewhere else in the repo at that tag.
+2. Bump `latestLabel` to `'1.x'`.
+
+Go by the real release line, not npm's highest version: a stray publish that the line never continued
+is not a major. Then run `pnpm sync:docs durable && pnpm check:links` (or `pnpm build`) to check it.
+Links inside an older version stay inside it; links to other libraries go to their latest docs. A
+library with no older majors has no `versions` and shows no dropdown.
+
 ### The shadcn registry (`public/r`)
 
 `public/r` is the agent chat components' shadcn registry (`npx shadcn add …/r/agent-chat.json`),

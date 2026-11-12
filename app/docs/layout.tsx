@@ -1,5 +1,6 @@
 import { DocsLayout } from "fumadocs-ui/layouts/docs";
 import { Bird } from "lucide-react";
+import { VersionSelect } from "@/components/version-select";
 import { baseOptions } from "@/lib/layout.shared";
 import { libs } from "@/lib/libs";
 import { source } from "@/lib/source";
@@ -19,7 +20,14 @@ const tabs = [
 
 export default function Layout({ children }: LayoutProps<"/docs">) {
   return (
-    <DocsLayout tree={source.getPageTree()} tabs={tabs} {...baseOptions()}>
+    // The version dropdown sits in the sidebar banner, under the library dropdown, and
+    // renders only for a library with older majors.
+    <DocsLayout
+      tree={source.getPageTree()}
+      tabs={tabs}
+      sidebar={{ banner: <VersionSelect /> }}
+      {...baseOptions()}
+    >
       {children}
     </DocsLayout>
   );

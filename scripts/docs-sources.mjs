@@ -7,6 +7,18 @@
 //
 // `path` is the docs directory *inside* the library repo. `repoDir` is the
 // sibling folder name used by the optional local mode (AVIARY_DOCS_LOCAL=1).
+//
+// Versions (TanStack-style, one dropdown per library):
+// - `ref` is always the latest major; it is served at /docs/<slug>/... and labelled
+//   `latestLabel` (its major, e.g. `2.x`) in the version dropdown.
+// - `versions` lists the OLDER majors, newest first. Each entry is
+//   `{ id, label, ref, path? }`: `id` is the URL segment (/docs/<slug>/<id>/...),
+//   `label` is what the dropdown shows, `ref` is a git tag (the last release of that
+//   major, e.g. `@dudousxd/nestjs-telescope@1.31.1`), and `path` overrides the docs
+//   dir when it moved between majors (defaults to the source's `path`).
+// When a library ships a new major, prepend one entry for the previous major (its last
+// tag) and bump `latestLabel` — see the README. Go by the real release line, not npm's
+// highest version: a stray publish (a lone 2.0.0 the line never continued) is no major.
 
 export const sources = [
   {
@@ -20,6 +32,7 @@ export const sources = [
     path: "apps/docs/content/docs",
     repoDir: "nestjs-codegen",
     migrated: true,
+    latestLabel: "0.x",
   },
   {
     slug: "durable",
@@ -31,6 +44,7 @@ export const sources = [
     path: "website/content/docs",
     repoDir: "nestjs-durable",
     migrated: true,
+    latestLabel: "0.x",
   },
   {
     slug: "filter",
@@ -43,6 +57,7 @@ export const sources = [
     path: "website/content/docs",
     repoDir: "nestjs-filter",
     migrated: true,
+    latestLabel: "1.x",
   },
   {
     slug: "inertia",
@@ -55,6 +70,7 @@ export const sources = [
     path: "website/content/docs",
     repoDir: "nestjs-inertia",
     migrated: true,
+    latestLabel: "1.x",
   },
   {
     slug: "media",
@@ -67,6 +83,7 @@ export const sources = [
     path: "website/content/docs",
     repoDir: "nestjs-media",
     migrated: true,
+    latestLabel: "0.x",
   },
   {
     slug: "notifications",
@@ -79,6 +96,7 @@ export const sources = [
     path: "website/content/docs",
     repoDir: "nestjs-notifications",
     migrated: true,
+    latestLabel: "0.x",
   },
   {
     slug: "telescope",
@@ -93,6 +111,10 @@ export const sources = [
     // Docs reference /screenshots/*.png from the site's public dir; vendor it.
     publicDir: "website/public",
     migrated: true,
+    latestLabel: "2.x",
+    versions: [
+      { id: "v1", label: "1.x", ref: "@dudousxd/nestjs-telescope@1.31.1" },
+    ],
   },
   {
     slug: "resilience",
@@ -105,6 +127,7 @@ export const sources = [
     path: "website/content/docs",
     repoDir: "nestjs-resilience",
     migrated: true,
+    latestLabel: "0.x",
   },
   {
     slug: "agent",
@@ -117,6 +140,10 @@ export const sources = [
     path: "website/content/docs",
     repoDir: "nestjs-agent",
     migrated: true,
+    latestLabel: "2.x",
+    versions: [
+      { id: "v1", label: "1.x", ref: "@dudousxd/nestjs-agent@1.39.1" },
+    ],
   },
   {
     slug: "authz",
@@ -129,6 +156,7 @@ export const sources = [
     path: "website/content/docs",
     repoDir: "nestjs-authz",
     migrated: true,
+    latestLabel: "0.x",
   },
   {
     slug: "context",
@@ -141,6 +169,7 @@ export const sources = [
     path: "website/content/docs",
     repoDir: "nestjs-context",
     migrated: true,
+    latestLabel: "1.x",
   },
   {
     slug: "diagnostics",
@@ -153,5 +182,6 @@ export const sources = [
     path: "website/content/docs",
     repoDir: "nestjs-diagnostics",
     migrated: true,
+    latestLabel: "0.x",
   },
 ];
