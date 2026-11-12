@@ -23,10 +23,10 @@ export default function Layout({ children }: LayoutProps<"/docs">) {
     // The version dropdown sits in the sidebar banner, under the library dropdown, and
     // renders only for a library with older majors.
     <DocsLayout
+      {...baseOptions()}
       tree={source.getPageTree()}
       tabs={tabs}
       sidebar={{ banner: <VersionSelect /> }}
-      {...baseOptions()}
     >
       {children}
     </DocsLayout>
