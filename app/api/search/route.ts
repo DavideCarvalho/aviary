@@ -1,9 +1,11 @@
 import { createFromSource } from "fumadocs-core/search/server";
-import { source } from "@/lib/source";
+import { latestSource } from "@/lib/source";
 
 export const revalidate = false;
 
-export const { staticGET: GET } = createFromSource(source, {
+// Only the latest docs are indexed: an older major (/docs/<lib>/v1/...) would otherwise
+// return every page twice.
+export const { staticGET: GET } = createFromSource(latestSource, {
   // https://docs.orama.com/docs/orama-js/supported-languages
   language: "english",
 });

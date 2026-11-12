@@ -7,8 +7,11 @@
 //   AVIARY_DOCS_LOCAL=1 node scripts/...   # copy from sibling repos instead of cloning
 //
 // For each library it: fetches the docs subtree, rewrites root-absolute /docs
-// links to be nested under /docs/<slug>, and turns the top-level meta.json into
-// a sidebar "root" tab carrying the library's name + icon.
+// links to be nested under /docs/<slug>, and writes a library meta.json that makes
+// it a sidebar "root" tab carrying the library's name + icon. The latest docs land
+// in content/docs/<slug>/(latest)/ (a folder group, so URLs stay /docs/<slug>/...);
+// each older major listed in the source's `versions` is pulled from its tag into
+// content/docs/<slug>/<id>/ (/docs/<slug>/<id>/...).
 
 import { execFileSync } from "node:child_process";
 import {
@@ -49,6 +52,34 @@ function walk(dir) {
   });
 }
 
+/** Clone `ref` (a branch or a tag) of `src.repo`, checking out only `paths`. */
+function sparseClone(src, ref, paths, tmp) {
+  rmSync(tmp, { recursive: true, force: true });
+  mkdirSync(tmp, { recursive: true });
+  const url = `https://github.com/${src.repo}.git`;
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "advice.detachedHead=false",
+      "clone",
+      "--depth",
+      "1",
+      "--filter=blob:none",
+      "--sparse",
+      "--branch",
+      ref,
+      url,
+      tmp,
+    ],
+    { stdio: ["ignore", "ignore", "inherit"] },
+  );
+  execFileSync("git", ["-C", tmp, "sparse-checkout", "set", ...paths], {
+    stdio: ["ignore", "ignore", "inherit"],
+  });
+  return tmp;
+}
+
 /**
  * Obtain the library repo root (a sibling checkout in local mode, or a sparse
  * clone otherwise). The caller reads `src.path` (docs) and `src.publicDir`
@@ -62,31 +93,74 @@ function fetchRepo(src, tmp) {
     }
     return base;
   }
-  rmSync(tmp, { recursive: true, force: true });
-  mkdirSync(tmp, { recursive: true });
-  const url = `https://github.com/${src.repo}.git`;
-  execFileSync(
-    "git",
-    [
-      "clone",
-      "--depth",
-      "1",
-      "--filter=blob:none",
-      "--sparse",
-      "--branch",
-      src.ref,
-      url,
-      tmp,
-    ],
-    { stdio: ["ignore", "ignore", "inherit"] },
-  );
-  const checkout = [src.path, src.publicDir].filter(Boolean);
-  execFileSync("git", ["-C", tmp, "sparse-checkout", "set", ...checkout], {
-    stdio: ["ignore", "ignore", "inherit"],
-  });
+  sparseClone(src, src.ref, [src.path, src.publicDir].filter(Boolean), tmp);
   if (!existsSync(join(tmp, src.path))) {
     throw new Error(
       `docs path "${src.path}" missing in ${src.repo}@${src.ref}`,
+    );
+  }
+  return tmp;
+}
+
+/** Does the sibling checkout have `ref`? Fetches the tag from origin once if not. */
+function localHasRef(base, ref) {
+  const has = () => {
+    try {
+      execFileSync(
+        "git",
+        ["-C", base, "rev-parse", "--verify", "--quiet", `${ref}^{commit}`],
+        { stdio: "ignore" },
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (has()) return true;
+  try {
+    execFileSync(
+      "git",
+      [
+        "-C",
+        base,
+        "fetch",
+        "--quiet",
+        "origin",
+        `refs/tags/${ref}:refs/tags/${ref}`,
+      ],
+      { stdio: "ignore" },
+    );
+  } catch {
+    return false;
+  }
+  return has();
+}
+
+/**
+ * An older version's repo root, as of its tag. Local mode reads the tag out of the
+ * sibling checkout with `git archive` (its working tree stays on whatever branch it is
+ * on); when the sibling is missing or does not know the tag it falls back to cloning,
+ * like the remote mode.
+ */
+function fetchVersion(src, version, tmp) {
+  const path = version.path ?? src.path;
+  const paths = [path, src.publicDir].filter(Boolean);
+  const base = join(ROOT, "..", src.repoDir);
+  if (USE_LOCAL && existsSync(base) && localHasRef(base, version.ref)) {
+    rmSync(tmp, { recursive: true, force: true });
+    mkdirSync(tmp, { recursive: true });
+    const tar = execFileSync(
+      "git",
+      ["-C", base, "archive", "--format=tar", version.ref, "--", ...paths],
+      { maxBuffer: 1024 * 1024 * 512 },
+    );
+    execFileSync("tar", ["-x", "-C", tmp], { input: tar });
+  } else {
+    sparseClone(src, version.ref, paths, tmp);
+  }
+  if (!existsSync(join(tmp, path))) {
+    throw new Error(
+      `docs path "${path}" missing in ${src.repo}@${version.ref}`,
     );
   }
   return tmp;
@@ -99,28 +173,39 @@ function fetchRepo(src, tmp) {
 const SITE_SLUGS = new Set(sources.map((s) => s.slug));
 
 // Only touch real link targets: markdown `](/docs...)` and `href="/docs..."`. Captures
-// the first path segment so it can be tested against SITE_SLUGS.
-const DOCS_LINK = /(\]\(|href=")\/docs(\/[A-Za-z0-9._-]+)?/g;
+// the first path segment (to test against SITE_SLUGS) and the rest of the path.
+const DOCS_LINK = /(\]\(|href=")\/docs(\/[A-Za-z0-9._-]+)?(\/[^)"\s#?]*)?/g;
 
 /**
- * Rewrite root-absolute /docs links so they nest under the library slug.
+ * Rewrite root-absolute /docs links so they nest under the library (and version)
+ * they belong to.
  *
- * A link that already names a library (`/docs/durable/...`, including a cross-library
- * one like `/docs/telescope`) is left alone; only a repo-local link gets the slug.
- * Prefixing unconditionally would turn a library's link to its sibling into a 404
- * under its own slug.
+ * `base` is where this copy of the docs is served: `/docs/<slug>` for the latest
+ * version, `/docs/<slug>/<id>` for an older one.
+ * - a repo-local link (`/docs/getting-started`) gets `base` prepended;
+ * - a link already naming this library (`/docs/telescope/...`) stays inside this
+ *   version, so an older version's pages never jump to the latest by accident;
+ * - a link to another library (`/docs/durable/...`) is left alone and so lands on
+ *   that library's latest docs — its major is unrelated to this one's. Prefixing it
+ *   would turn a link to a sibling library into a 404 under this one's slug.
  */
-function rewriteLinks(content, slug) {
-  return content.replaceAll(DOCS_LINK, (_m, open, first) => {
+function rewriteLinks(content, slug, base) {
+  return content.replace(DOCS_LINK, (match, open, first, rest) => {
     const seg = first?.slice(1);
-    if (seg && SITE_SLUGS.has(seg)) return `${open}/docs${first}`;
-    return `${open}/docs/${slug}${first ?? ""}`;
+    if (seg === slug) {
+      // Already under `base` (always true for the latest): leave it.
+      const target = `/docs/${slug}${rest ?? ""}`;
+      if (target === base || target.startsWith(`${base}/`)) return match;
+      return `${open}${base}${rest ?? ""}`;
+    }
+    if (seg && SITE_SLUGS.has(seg)) return match;
+    return `${open}${base}${first ?? ""}${rest ?? ""}`;
   });
 }
 
 /** Point root-absolute asset refs at the vendored per-library public dir. */
-function rewriteAssets(content, slug) {
-  return content.replaceAll('src="/', `src="/lib-assets/${slug}/`);
+function rewriteAssets(content, assetsBase) {
+  return content.replaceAll('src="/', `src="${assetsBase}/`);
 }
 
 /**
@@ -144,21 +229,66 @@ function normalizeIndexTitle(dir, src) {
   return true;
 }
 
-/** Promote the top-level meta.json to a sidebar root tab with name + icon. */
-function transformRootMeta(file, src) {
-  const meta = JSON.parse(readFileSync(file, "utf8"));
-  // Keep the source's page ordering etc., and make it a root tab carrying the
-  // library's own name + icon + description. The explicit `tabs` config in
-  // app/docs/layout.tsx adds a "Field guide" entry so the dropdown stays
-  // visible on the /docs hub too (consistent across every page).
-  const next = {
-    ...meta,
-    root: true,
-    title: src.name,
-    description: src.description ?? meta.description,
-    icon: src.icon,
-  };
-  writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`);
+function writeJson(file, value) {
+  writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+/**
+ * Make a version folder a `root: "version"` folder titled with its label. The
+ * library's own meta.json (page ordering etc.) lives here, untouched otherwise.
+ * Fumadocs scopes the sidebar to the innermost root folder on the current page's
+ * path, so each version shows only its own tree; components/version-select.tsx
+ * lists these folders as the version dropdown.
+ */
+function markVersionFolder(dir, label) {
+  const file = join(dir, "meta.json");
+  const meta = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+  writeJson(file, { ...meta, root: "version", title: label });
+}
+
+// Folder group holding the latest version: Fumadocs drops `(…)` segments from URLs,
+// so the latest docs keep their /docs/<slug>/... URLs while being a folder of their own.
+const LATEST_DIR = "(latest)";
+
+/**
+ * Copy one version of a library's docs into `dest`, rewriting links against `base`.
+ * Returns the number of doc files and of /docs links seen.
+ */
+function installDocs({ src, from, dest, base, assetsBase }) {
+  rmSync(dest, { recursive: true, force: true });
+  mkdirSync(dest, { recursive: true });
+  cpSync(from, dest, { recursive: true });
+
+  let files = 0;
+  let links = 0;
+  for (const file of walk(dest)) {
+    if (file.endsWith(".mdx") || file.endsWith(".md")) {
+      const before = readFileSync(file, "utf8");
+      let after = rewriteLinks(before, src.slug, base);
+      if (assetsBase) after = rewriteAssets(after, assetsBase);
+      links += (before.match(/\]\(\/docs|href="\/docs/g) || []).length;
+      if (after !== before) writeFileSync(file, after);
+      files += 1;
+    }
+  }
+  normalizeIndexTitle(dest, src);
+  return { files, links };
+}
+
+/**
+ * Vendor the library's public assets (screenshots, etc.) under a namespaced folder
+ * (public/lib-assets/<slug>[/<id>]) so libraries and versions can't collide on paths
+ * like /screenshots. Returns the file count.
+ */
+function installAssets(src, repo, segments) {
+  if (!src.publicDir) return 0;
+  const assetsFrom = join(repo, src.publicDir);
+  if (!existsSync(assetsFrom)) return 0;
+  const assetsDest = join(ROOT, "public", "lib-assets", ...segments);
+  rmSync(assetsDest, { recursive: true, force: true });
+  mkdirSync(assetsDest, { recursive: true });
+  cpSync(assetsFrom, assetsDest, { recursive: true });
+  return walk(assetsDest).length;
 }
 
 let totalFiles = 0;
@@ -167,49 +297,63 @@ let totalLinks = 0;
 for (const src of selected) {
   const dest = join(ROOT, "content", "docs", src.slug);
   const tmp = join(ROOT, ".docs-tmp", src.slug);
-
-  const repo = fetchRepo(src, tmp);
+  const versions = src.versions ?? [];
   rmSync(dest, { recursive: true, force: true });
   mkdirSync(dest, { recursive: true });
-  cpSync(join(repo, src.path), dest, { recursive: true });
 
-  // Vendor the library's public assets (screenshots, etc.) under a namespaced
-  // folder so libraries can't collide on paths like /screenshots.
-  let assets = 0;
-  if (src.publicDir) {
-    const assetsFrom = join(repo, src.publicDir);
-    if (existsSync(assetsFrom)) {
-      const assetsDest = join(ROOT, "public", "lib-assets", src.slug);
-      rmSync(assetsDest, { recursive: true, force: true });
-      mkdirSync(assetsDest, { recursive: true });
-      cpSync(assetsFrom, assetsDest, { recursive: true });
-      assets = walk(assetsDest).length;
-    }
-  }
+  // The library folder: a sidebar root tab carrying the library's name + icon +
+  // description. The explicit `tabs` config in app/docs/layout.tsx adds a "Field
+  // guide" entry so the dropdown stays visible on the /docs hub too. Its children are
+  // the version folders — the latest in a `(latest)` group, older majors under `<id>/`.
+  writeJson(join(dest, "meta.json"), {
+    root: true,
+    title: src.name,
+    description: src.description,
+    icon: src.icon,
+    pages: [LATEST_DIR, ...versions.map((v) => v.id)],
+  });
 
+  // Latest: the default branch, served at /docs/<slug>/...
+  const repo = fetchRepo(src, tmp);
+  const latest = installDocs({
+    src,
+    from: join(repo, src.path),
+    dest: join(dest, LATEST_DIR),
+    base: `/docs/${src.slug}`,
+    assetsBase: src.publicDir && `/lib-assets/${src.slug}`,
+  });
+  // The latest assets sit at the slug root; the older versions' go in <id>/ beside them.
+  const assets = installAssets(src, repo, [src.slug]);
+  markVersionFolder(join(dest, LATEST_DIR), src.latestLabel ?? "Latest");
   if (!USE_LOCAL) rmSync(tmp, { recursive: true, force: true });
 
-  let files = 0;
-  let links = 0;
-  for (const file of walk(dest)) {
-    if (file.endsWith(".mdx") || file.endsWith(".md")) {
-      const before = readFileSync(file, "utf8");
-      let after = rewriteLinks(before, src.slug);
-      if (src.publicDir) after = rewriteAssets(after, src.slug);
-      links += (before.match(/\]\(\/docs|href="\/docs/g) || []).length;
-      if (after !== before) writeFileSync(file, after);
-      files += 1;
-    }
-  }
+  let files = latest.files;
+  let links = latest.links;
+  const labels = [src.latestLabel ?? "latest"];
 
-  normalizeIndexTitle(dest, src);
-  const rootMeta = join(dest, "meta.json");
-  if (existsSync(rootMeta)) transformRootMeta(rootMeta, src);
+  // Older majors: each pinned to a tag, served at /docs/<slug>/<id>/...
+  for (const version of versions) {
+    const vtmp = join(ROOT, ".docs-tmp", `${src.slug}@${version.id}`);
+    const vrepo = fetchVersion(src, version, vtmp);
+    const result = installDocs({
+      src,
+      from: join(vrepo, version.path ?? src.path),
+      dest: join(dest, version.id),
+      base: `/docs/${src.slug}/${version.id}`,
+      assetsBase: src.publicDir && `/lib-assets/${src.slug}/${version.id}`,
+    });
+    installAssets(src, vrepo, [src.slug, version.id]);
+    markVersionFolder(join(dest, version.id), version.label);
+    rmSync(vtmp, { recursive: true, force: true });
+    files += result.files;
+    links += result.links;
+    labels.push(`${version.label} (${version.ref})`);
+  }
 
   totalFiles += files;
   totalLinks += links;
   console.log(
-    `✓ ${src.slug.padEnd(14)} ${files} docs, ${links} links${assets ? `, ${assets} assets` : ""}  (${USE_LOCAL ? "local" : `${src.repo}@${src.ref}`})`,
+    `✓ ${src.slug.padEnd(14)} ${files} docs, ${links} links${assets ? `, ${assets} assets` : ""}  (${USE_LOCAL ? "local" : `${src.repo}@${src.ref}`}; ${labels.join(", ")})`,
   );
 }
 

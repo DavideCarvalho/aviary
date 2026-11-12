@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { ImageResponse } from "next/og";
 import { getSpecimen } from "@/lib/birds";
-import { getPageImage, source } from "@/lib/source";
+import { getPageImage, getPageVersion, source } from "@/lib/source";
 
 export const revalidate = false;
 
@@ -25,8 +25,13 @@ export async function GET(
   const specimen = getSpecimen(libSlug);
   const title = page.data.title;
   const description = clamp(page.data.description ?? "", specimen ? 130 : 150);
+  const versioned = getPageVersion(page);
+  const older =
+    versioned && !versioned.version.latest
+      ? ` · ${versioned.version.label}`
+      : "";
   const kicker = specimen
-    ? `@dudousxd/nestjs-${libSlug}`
+    ? `@dudousxd/nestjs-${libSlug}${older}`
     : "@dudousxd · for NestJS";
 
   return new ImageResponse(
